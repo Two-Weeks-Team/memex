@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "memex",
+  "productName": "Memex",
   "version": "0.1.0",
   "identifier": "dev.sgwannabe.memex",
   "build": {
@@ -10,9 +10,15 @@
     "withGlobalTauri": true,
     "windows": [
       {
-        "title": "memex",
-        "width": 800,
-        "height": 600
+        "title": "Memex — Time Machine for AI session JSONL",
+        "width": 1280,
+        "height": 800,
+        "minWidth": 920,
+        "minHeight": 560,
+        "resizable": true,
+        "fullscreen": false,
+        "titleBarStyle": "Transparent",
+        "hiddenTitle": true
       }
     ],
     "security": {
@@ -22,12 +28,19 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "category": "DeveloperTool",
+    "copyright": "© 2026 Sangguen Chang. Apache 2.0.",
+    "shortDescription": "Time Machine for ~/.claude/projects — 5 Qdrant-unique features.",
+    "longDescription": "Memex indexes your Claude Code session JSONL files into Qdrant and lets you search them with a lens slider over 5 named vectors (content/tool/path/error/code), explore session topology via MST, mix-and-match with the Discovery API, replay any past session turn-by-turn, and get proactive recall when a current session hits a familiar error.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "macOS": {
+      "minimumSystemVersion": "11.0"
+    }
   }
 }

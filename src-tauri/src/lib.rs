@@ -5,7 +5,11 @@ pub mod parser;
 
 use std::sync::Arc;
 
-use tauri::Manager;
+use tauri::{
+    menu::{Menu, MenuItem},
+    tray::TrayIconBuilder,
+    Manager,
+};
 
 use crate::commands::{AppState, AppStateArc};
 
@@ -20,8 +24,6 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             // Initialize Qdrant client + embedder once, share via State.
-            // setup() runs on the main thread; we block briefly on the runtime
-            // to get the connection up before windows show.
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 match init_app_state().await {
@@ -34,6 +36,40 @@ pub fn run() {
                     }
                 }
             });
+
+            // Tray icon — minimal Open / Snapshot / Quit menu.
+            let open_item = MenuItem::with_id(app, "open", "Open Memex", true, None::<&str>)?;
+            let snap_item = MenuItem::with_id(app, "snapshot", "Export Snapshot…", true, None::<&str>)?;
+            let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+            let menu = Menu::with_items(app, &[&open_item, &snap_item, &quit_item])?;
+            let _tray = TrayIconBuilder::with_id("memex-tray")
+                .tooltip("Memex")
+                .icon(app.default_window_icon().cloned().expect("default icon"))
+                .menu(&menu)
+                .show_menu_on_left_click(true)
+                .on_menu_event(|app, event| match event.id().as_ref() {
+                    "open" => {
+                        if let Some(w) = app.get_webview_window("main") {
+                            let _ = w.show();
+                            let _ = w.set_focus();
+                        }
+                    }
+                    "snapshot" => {
+                        if let Some(w) = app.get_webview_window("main") {
+                            let _ = w.eval(
+                                "document.getElementById('btn-snapshot')?.click();",
+                            );
+                            let _ = w.show();
+                            let _ = w.set_focus();
+                        }
+                    }
+                    "quit" => {
+                        app.exit(0);
+                    }
+                    _ => {}
+                })
+                .build(app)?;
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
