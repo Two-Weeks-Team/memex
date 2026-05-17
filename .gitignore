@@ -20,6 +20,9 @@ qdrant_storage/
 snapshots/
 qdrant.log
 
+# fastembed ONNX model cache
+.fastembed_cache/
+
 # Local indexes / scratch
 .memex/
 *.snapshot
