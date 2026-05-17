@@ -727,16 +727,24 @@ pub async fn topology(
             .result
     };
 
-    let mut node_by_id: HashMap<String, TopoNode> = HashMap::new();
+    // node_by_pid: Qdrant point uuid → TopoNode (we still use point uuid as the
+    // graph node id internally because that's what `search_matrix_pairs`
+    // returns). We *also* build `pid_to_session` so the final edges can speak
+    // the same identifier domain the frontend uses for positioning (which is
+    // `TopoNode.session_id`, the payload field).
+    let mut node_by_pid: HashMap<String, TopoNode> = HashMap::new();
+    let mut pid_to_session: HashMap<String, String> = HashMap::new();
     for p in detail {
-        let id = match p.id.as_ref().and_then(point_id_string) {
+        let pid = match p.id.as_ref().and_then(point_id_string) {
             Some(s) => s,
             None => continue,
         };
-        node_by_id.insert(
-            id.clone(),
+        let sid = payload_str(&p.payload, "session_id").unwrap_or_default();
+        pid_to_session.insert(pid.clone(), sid.clone());
+        node_by_pid.insert(
+            pid,
             TopoNode {
-                session_id: payload_str(&p.payload, "session_id").unwrap_or_default(),
+                session_id: sid,
                 project_name: payload_str(&p.payload, "project_name").unwrap_or_default(),
                 ai_title: payload_str(&p.payload, "ai_title").unwrap_or_default(),
                 start_iso: payload_str(&p.payload, "start_iso").unwrap_or_default(),
@@ -772,20 +780,29 @@ pub async fn topology(
     }
     let mst = UnGraph::<String, f32>::from_elements(min_spanning_tree(&g));
 
+    // Translate MST endpoints from Qdrant point uuids → session_ids so the
+    // frontend can render edges against the same id namespace as `nodes[].session_id`.
     let mut edges = Vec::new();
     for e in mst.edge_indices() {
         let (na, nb) = mst.edge_endpoints(e).unwrap();
         let w = mst[e];
+        let a_pid = &mst[na];
+        let b_pid = &mst[nb];
+        let (Some(a_sid), Some(b_sid)) =
+            (pid_to_session.get(a_pid), pid_to_session.get(b_pid))
+        else {
+            continue;
+        };
         edges.push(TopoEdge {
-            a: mst[na].clone(),
-            b: mst[nb].clone(),
+            a: a_sid.clone(),
+            b: b_sid.clone(),
             distance: w,
         });
     }
 
     let mut nodes: Vec<TopoNode> = id_set
         .iter()
-        .filter_map(|id| node_by_id.remove(id))
+        .filter_map(|id| node_by_pid.remove(id))
         .collect();
     nodes.sort_by(|a, b| a.start_iso.cmp(&b.start_iso));
 
