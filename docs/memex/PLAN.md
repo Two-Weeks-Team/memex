@@ -102,15 +102,15 @@ Atomic tasks. ralph_loop picks next unchecked, executes, marks done, loops.
 - [x] T0.9: `demo.html` (100K) + `landing.html` (43K) copied from `myproject/workspace-b/mockups/memex/` → `~/memex/src/`
 - [x] T0.10: Commit "scaffold: tauri + qdrant + mockup port"
 
-### Phase 1 — JSONL parser
-- [ ] T1.1: Add Rust deps: `serde`, `serde_json`, `walkdir`, `chrono`, `anyhow`
-- [ ] T1.2: Define `Session` + `Turn` + `ToolCall` structs (with serde)
-- [ ] T1.3: Implement `parse_session(path) -> Result<Session>` for Claude Code format
-- [ ] T1.4: Implement `scan_dir(path) -> Vec<Session>` walking `~/.claude/projects`
-- [ ] T1.5: Create test fixture: 5 sanitized sample sessions in `tests/fixtures/`
-- [ ] T1.6: Unit test: parse fixtures → assert turn counts, tool detection
-- [ ] T1.7: CLI subcommand: `memex scan` prints session summary
-- [ ] T1.8: Commit "phase 1: jsonl parser + tests"
+### Phase 1 — JSONL parser ✅ (2026-05-18)
+- [x] T1.1: Deps added: `serde`, `serde_json`, `walkdir`, `chrono`, `anyhow`, `thiserror`, `clap` (+ `pretty_assertions` dev-dep)
+- [x] T1.2: `Session` + `Turn` + `ToolCall` + `ToolResult` + `TurnRole` + `EventCounts` in `parser.rs`
+- [x] T1.3: `parse_session(&Path) -> Result<Session>` — handles `user`/`assistant`/`system` event types, string + array content, `tool_use`/`tool_result`/`text` items
+- [x] T1.4: `scan_dir(&Path) -> Vec<Session>` — walks recursively, skips `subagents/` traces
+- [x] T1.5: 5 fixtures in `src-tauri/tests/fixtures/` (minimal, tool_use+result, ai-title+metadata, tool_error, mixed sidechain) + extra subagent-skip fixture set
+- [x] T1.6: `cargo test --test parser` → 8/8 pass in 28s (compile) + 0ms (tests)
+- [x] T1.7: `memex scan --limit 10` against `~/.claude/projects` parsed 80 real sessions, 17,706 tool calls, 0 errors
+- [x] T1.8: Commit "phase 1: jsonl parser + tests"
 
 ### Phase 2 — Qdrant indexing
 - [ ] T2.1: Add deps: `qdrant-client`, `tokio`

@@ -1,0 +1,4 @@
+{"type":"ai-title","sessionId":"f3","title":"Building Memex Day 1","timestamp":"2026-05-18T11:00:00Z"}
+{"type":"attachment","sessionId":"f3","uuid":"x1","timestamp":"2026-05-18T11:00:00.500Z","cwd":"/Users/u/memex","attachment":{}}
+{"type":"user","sessionId":"f3","uuid":"u1","timestamp":"2026-05-18T11:00:01Z","cwd":"/Users/u/memex","gitBranch":"main","version":"2.1.0","message":{"role":"user","content":"start"}}
+{"type":"assistant","sessionId":"f3","uuid":"a1","parentUuid":"u1","timestamp":"2026-05-18T11:00:02Z","cwd":"/Users/u/memex","gitBranch":"main","version":"2.1.0","message":{"role":"assistant","content":[{"type":"text","text":"ok"}]}}

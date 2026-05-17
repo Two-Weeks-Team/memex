@@ -1,0 +1,2 @@
+{"type":"user","sessionId":"sub1","uuid":"u1","timestamp":"2026-05-18T14:00:05Z","cwd":"/Users/u/parent","gitBranch":"main","version":"2.1.0","message":{"role":"user","content":"subagent spawned"}}
+{"type":"assistant","sessionId":"sub1","uuid":"a1","parentUuid":"u1","timestamp":"2026-05-18T14:00:06Z","cwd":"/Users/u/parent","gitBranch":"main","version":"2.1.0","message":{"role":"assistant","content":[{"type":"text","text":"done"}]}}
