@@ -18,7 +18,6 @@ use std::sync::Mutex;
 
 use anyhow::{Context, Result};
 use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
-use futures::future::try_join_all;
 use once_cell::sync::Lazy;
 use qdrant_client::{
     qdrant::{
@@ -788,19 +787,6 @@ impl Default for LensWeights {
     }
 }
 
-impl LensWeights {
-    fn iter(&self) -> [(&'static str, f32); 6] {
-        [
-            ("content", self.content),
-            ("tool", self.tool),
-            ("path", self.path),
-            ("error", self.error),
-            ("code", self.code),
-            ("content_late", self.content_late),
-        ]
-    }
-}
-
 pub async fn search_content(
     client: &Qdrant,
     embedder: &Embedder,
@@ -818,96 +804,46 @@ pub async fn search_content(
     lens_search(client, embedder, query, &weights, limit, 50).await
 }
 
-/// **Lens slider** (Plan §3 T3.1).
+/// **Lens slider** (Plan §3 T3.1) — **P2 wiring**: this function is now a
+/// thin shim over `crate::lens::lens_search_v2`, which executes a single
+/// server-side FormulaQuery (KA-01) with per-prefetch recency decay +
+/// has_errors boost. Public signature stays stable for backward compat;
+/// `per_vector_limit` is preserved but no longer used directly (the new
+/// path manages its own PREFETCH_LIMIT internally).
 ///
-/// Runs one cosine search per named vector whose weight > 0, then performs a
-/// weighted score combine in Rust (true weighted blend — not RRF rank fusion).
-/// Returns the top `limit` sessions with each session's per-vector contribution
-/// in `SearchHit.vector_scores` so the UI can render the lens inspector.
+/// Returns the top `limit` sessions; per-vector contributions remain in
+/// `SearchHit.vector_scores` so the inspector keeps rendering correctly.
 pub async fn lens_search(
     client: &Qdrant,
     embedder: &Embedder,
     query: &str,
     weights: &LensWeights,
     limit: u64,
-    per_vector_limit: u64,
+    _per_vector_limit: u64,
 ) -> Result<Vec<SearchHit>> {
-    let vecs = embedder.embed(vec![query.to_string()])?;
-    let qvec = vecs.into_iter().next().context("no embedding for query")?;
-
-    let mut combined: HashMap<String, CombinedHit> = HashMap::new();
-    let mut payloads: HashMap<String, HashMap<String, qdrant_client::qdrant::Value>> = HashMap::new();
-
-    let mut total_w = 0.0_f32;
-    for (_, w) in weights.iter() {
-        total_w += w;
-    }
-    if total_w <= 0.0 {
-        return Ok(Vec::new());
-    }
-
-    // P1: dispatch one query per non-zero-weight vector in parallel so the
-    // wall-clock latency is dominated by the slowest server-side search rather
-    // than the sum of all 5. Qdrant handles parallel single-vector queries
-    // natively without contention on shared HNSW state.
-    let active: Vec<(&'static str, f32)> =
-        weights.iter().into_iter().filter(|(_, w)| *w > 0.0).collect();
-    let queries = active.iter().map(|(vname, _)| {
-        let q: Query = qvec.clone().into();
-        let req = QueryPointsBuilder::new(crate::schema::COLLECTION_V3)
-            .query(q)
-            .using((*vname).to_string())
-            .limit(per_vector_limit)
-            .with_payload(true)
-            // KC-01b — every read carries rescore + 2.0× oversampling.
-            .params(crate::schema::search_params_with_quantization());
-        async move { client.query(req).await }
-    });
-    let responses = try_join_all(queries).await?;
-
-    for ((vname, w), res) in active.iter().zip(responses.into_iter()) {
-        for p in res.result {
-            let sid = match payload_str(&p.payload, "session_id") {
-                Some(s) => s,
-                None => continue,
-            };
-            let weighted = p.score * (w / total_w);
-            let entry = combined.entry(sid.clone()).or_default();
-            entry.combined_score += weighted;
-            entry.per_vec.insert((*vname).to_string(), p.score);
-            payloads.entry(sid).or_insert(p.payload);
-        }
-    }
-
-    let mut ranked: Vec<(String, CombinedHit)> = combined.into_iter().collect();
-    ranked.sort_by(|a, b| {
-        b.1.combined_score
-            .partial_cmp(&a.1.combined_score)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
-
-    let hits = ranked
-        .into_iter()
-        .take(limit as usize)
-        .map(|(sid, ch)| {
-            let p = payloads.get(&sid).cloned().unwrap_or_default();
-            SearchHit {
-                score: ch.combined_score,
-                session_id: sid.clone(),
-                project_name: payload_str(&p, "project_name").unwrap_or_default(),
-                ai_title: payload_str(&p, "ai_title").unwrap_or_default(),
-                start_iso: payload_str(&p, "start_iso").unwrap_or_default(),
-                vector_scores: ch.per_vec,
+    // Convert the legacy LensWeights → lens::LensWeights (the legacy struct
+    // has no `diversity`/`fusion` knobs; defaults are Formula + no MMR which
+    // matches the previous behavior in terms of result rank stability).
+    let lens_weights: crate::lens::LensWeights = weights.clone().into();
+    // Empty query / all-zero-weights — legacy code returned `Ok(empty)`. The
+    // new API returns Err; map back to empty for backward compat.
+    let res = match crate::lens::lens_search_v2(client, embedder, query, &lens_weights, limit)
+        .await
+    {
+        Ok(v) => v,
+        Err(e) => {
+            let msg = format!("{e}");
+            if msg == "no active lens" || msg == "empty query" {
+                return Ok(Vec::new());
             }
-        })
-        .collect();
-    Ok(hits)
-}
+            return Err(e);
+        }
+    };
 
-#[derive(Default, Debug)]
-struct CombinedHit {
-    combined_score: f32,
-    per_vec: HashMap<String, f32>,
+    Ok(res
+        .into_iter()
+        .map(crate::lens::lens_result_to_searchhit)
+        .collect())
 }
 
 /// **Mix & Match** (Plan §3 T3.2) — Discovery API.
