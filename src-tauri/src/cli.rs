@@ -251,6 +251,7 @@ fn cmd_lens(
         path,
         error,
         code,
+        content_late: 0.0,
     };
     let rt = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
     rt.block_on(async {

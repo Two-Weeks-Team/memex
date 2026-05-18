@@ -424,6 +424,11 @@ pub fn build_point_v3(session: &Session, vectors_by_name: Vec<(String, Vec<f32>)
 
 /// **Write path** — upserts only into the v3 collection (KG-03 dual-write rule:
 /// v2 is frozen as read-only fallback).
+///
+/// KB-01 — in addition to the 5 dense vectors, we now also write a
+/// `content_late` multivector built from sliding-window token-level chunks of
+/// the content text (BGE-small embed per chunk). This is the second-half of
+/// the late-interaction MaxSim path; queries are wired in `lens_search`.
 pub async fn index_session(
     client: &Qdrant,
     embedder: &Embedder,
@@ -432,18 +437,85 @@ pub async fn index_session(
     let extracts = session_extracts(session);
     let texts: Vec<String> = extracts.iter().map(|(_, t)| t.clone()).collect();
     let vectors = embedder.embed(texts)?;
-    let named: Vec<(String, Vec<f32>)> = extracts
-        .into_iter()
-        .map(|(k, _)| k)
+    let named_dense: Vec<(String, Vec<f32>)> = extracts
+        .iter()
+        .map(|(k, _)| k.clone())
         .zip(vectors.into_iter())
         .collect();
-    let point = build_point_v3(session, named);
+
+    // KB-01 — late-interaction chunks. We use the *content* text (first
+    // extract) as the basis because that's what the multivector slot is
+    // semantically tied to (`MULTIVECTOR_NAME = "content_late"`).
+    let content_text = extracts
+        .iter()
+        .find(|(k, _)| k == "content")
+        .map(|(_, t)| t.clone())
+        .unwrap_or_default();
+    let chunk_vectors: Vec<Vec<f32>> =
+        crate::embed_late::embed_token_level(embedder, &content_text)?;
+
+    let point = build_point_v3_with_multivec(session, named_dense, chunk_vectors);
     client
         .upsert_points(
             UpsertPointsBuilder::new(crate::schema::COLLECTION_V3, vec![point]).wait(true),
         )
         .await?;
     Ok(())
+}
+
+/// Build a v3 point with named dense vectors + optional `content_late`
+/// multivector. When `multivec_chunks` is empty the multivector slot is
+/// simply omitted (Qdrant 1.18 accepts a partial upsert against the named
+/// vector schema).
+pub fn build_point_v3_with_multivec(
+    session: &Session,
+    dense: Vec<(String, Vec<f32>)>,
+    multivec_chunks: Vec<Vec<f32>>,
+) -> PointStruct {
+    use qdrant_client::qdrant::{
+        vector, vectors::VectorsOptions, DenseVector, MultiDenseVector, NamedVectors,
+        Vector as ProtoVector, Vectors,
+    };
+
+    let id = point_id_proto(&session.session_id);
+    let payload = session_payload_v3(session);
+    let mut named: HashMap<String, ProtoVector> = HashMap::new();
+    for (k, v) in dense {
+        named.insert(
+            k,
+            ProtoVector {
+                vector: Some(vector::Vector::Dense(DenseVector { data: v })),
+                ..Default::default()
+            },
+        );
+    }
+    if !multivec_chunks.is_empty() {
+        let mv = MultiDenseVector::from(multivec_chunks);
+        named.insert(
+            crate::schema::MULTIVECTOR_NAME.to_string(),
+            ProtoVector {
+                vector: Some(vector::Vector::MultiDense(mv)),
+                ..Default::default()
+            },
+        );
+    }
+    PointStruct {
+        id: Some(id),
+        payload: payload.into(),
+        vectors: Some(Vectors {
+            vectors_options: Some(VectorsOptions::Vectors(NamedVectors { vectors: named })),
+        }),
+    }
+}
+
+/// Helper — returns a `PointId` from a session id using the same uuid_v5
+/// derivation as `point_id`.
+fn point_id_proto(session_id: &str) -> PointId {
+    PointId {
+        point_id_options: Some(qdrant_client::qdrant::point_id::PointIdOptions::Uuid(
+            point_id(session_id),
+        )),
+    }
 }
 
 /// Result of a bulk indexing pass — distinguishes "actually indexed" from
@@ -536,10 +608,18 @@ pub struct LensWeights {
     pub error: f32,
     #[serde(default = "default_weight")]
     pub code: f32,
+    /// KB-01 — late-interaction MaxSim weight. Defaults to 0.0 (off) so
+    /// existing callers that don't set it keep the dense-only behavior.
+    #[serde(default = "default_zero_weight")]
+    pub content_late: f32,
 }
 
 fn default_weight() -> f32 {
     1.0
+}
+
+fn default_zero_weight() -> f32 {
+    0.0
 }
 
 impl Default for LensWeights {
@@ -550,18 +630,20 @@ impl Default for LensWeights {
             path: 1.0,
             error: 1.0,
             code: 1.0,
+            content_late: 0.0,
         }
     }
 }
 
 impl LensWeights {
-    fn iter(&self) -> [(&'static str, f32); 5] {
+    fn iter(&self) -> [(&'static str, f32); 6] {
         [
             ("content", self.content),
             ("tool", self.tool),
             ("path", self.path),
             ("error", self.error),
             ("code", self.code),
+            ("content_late", self.content_late),
         ]
     }
 }
@@ -578,6 +660,7 @@ pub async fn search_content(
         path: 0.0,
         error: 0.0,
         code: 0.0,
+        content_late: 0.0,
     };
     lens_search(client, embedder, query, &weights, limit, 50).await
 }
@@ -1221,6 +1304,10 @@ pub async fn recall(
         )],
         ..Default::default()
     };
+    // KB-04 (ACORN): every filtered query takes the ACORN path —
+    // hnsw_ef=128 + exact=false on top of the v3 quantization knobs. The
+    // `is_tenant=true` payload index on project_name (P3, KC-03) is the
+    // structural half; this is the per-query tuning.
     let res = client
         .query(
             QueryPointsBuilder::new(crate::schema::COLLECTION_V3)
@@ -1229,7 +1316,7 @@ pub async fn recall(
                 .limit(limit)
                 .filter(filter)
                 .with_payload(true)
-                .params(crate::schema::search_params_with_quantization()),
+                .params(crate::retrieval::search_params_filtered_acorn(Some(128))),
         )
         .await?;
     Ok(res
@@ -1571,7 +1658,7 @@ fn point_id_string(p: &PointId) -> Option<String> {
 }
 
 
-fn payload_str(
+pub(crate) fn payload_str(
     p: &HashMap<String, qdrant_client::qdrant::Value>,
     key: &str,
 ) -> Option<String> {

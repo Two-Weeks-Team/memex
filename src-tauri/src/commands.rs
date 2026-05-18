@@ -540,3 +540,91 @@ pub async fn tail_recent_errors(
     }
     Ok(out)
 }
+
+// ===========================================================================
+// P4 advanced retrieval commands
+// ===========================================================================
+
+/// KB-03 — Mix & Match with explicit context pairs (Discovery API). The
+/// legacy `mix_match(positive, negative, limit)` command stays in place for
+/// backward compatibility; this new command exposes the pair-based shape.
+#[tauri::command]
+pub async fn mix_match_with_pairs(
+    state: State<'_, AppStateArc>,
+    target_session_id: String,
+    pairs: Vec<crate::retrieval::ContextPair>,
+    limit: Option<u64>,
+) -> Result<Vec<crate::indexer::SearchHit>, String> {
+    let qdrant = state.qdrant().await.map_err(stringify)?;
+    crate::retrieval::mix_match_with_pairs(
+        &qdrant,
+        &target_session_id,
+        &pairs,
+        limit.unwrap_or(20),
+    )
+    .await
+    .map_err(stringify)
+}
+
+/// KB-05 — Scroll v3 with order_by. Backward-compat: when `order_by` is
+/// `None`, defaults to `start_ts_dt desc` so existing UI flows that rely on
+/// "most recent first" semantics still work.
+#[tauri::command]
+pub async fn list_sessions_ordered(
+    state: State<'_, AppStateArc>,
+    order_by: Option<crate::retrieval::OrderBySpec>,
+    limit: Option<u32>,
+) -> Result<Vec<crate::retrieval::SessionMeta>, String> {
+    let qdrant = state.qdrant().await.map_err(stringify)?;
+    crate::retrieval::list_sessions_ordered(&qdrant, order_by, None, limit.unwrap_or(60))
+        .await
+        .map_err(stringify)
+}
+
+/// KA-03 — Lens search with optional group_by. When `group_by` is `None` the
+/// response carries only `flat` hits (backward-compat). When provided, the
+/// response also carries the `groups` projection.
+#[tauri::command]
+pub async fn lens_search_grouped(
+    state: State<'_, AppStateArc>,
+    query: String,
+    group_by: Option<crate::retrieval::GroupBy>,
+    limit: Option<u64>,
+) -> Result<crate::retrieval::LensSearchResponse, String> {
+    let qdrant = state.qdrant().await.map_err(stringify)?;
+    let embedder = state.embedder().await.map_err(stringify)?;
+    crate::retrieval::lens_search_grouped(
+        &qdrant,
+        &embedder,
+        &query,
+        group_by,
+        limit.unwrap_or(20),
+    )
+    .await
+    .map_err(stringify)
+}
+
+/// KA-04 — RelevanceFeedback re-ranking. Caller supplies the previous query
+/// text (re-embedded server-side so the IPC stays narrow) and the
+/// positive/negative session IDs for binary feedback.
+#[tauri::command]
+pub async fn relevance_feedback(
+    state: State<'_, AppStateArc>,
+    previous_query: String,
+    positive_ids: Vec<String>,
+    negative_ids: Vec<String>,
+    limit: Option<u64>,
+) -> Result<Vec<crate::indexer::SearchHit>, String> {
+    let qdrant = state.qdrant().await.map_err(stringify)?;
+    let embedder = state.embedder().await.map_err(stringify)?;
+    crate::retrieval::relevance_feedback(
+        &qdrant,
+        &embedder,
+        &positive_ids,
+        &negative_ids,
+        &previous_query,
+        limit.unwrap_or(20),
+    )
+    .await
+    .map_err(stringify)
+}
