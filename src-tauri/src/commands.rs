@@ -120,11 +120,20 @@ pub async fn topology(
     state: State<'_, AppStateArc>,
     sample: Option<u32>,
     per_point: Option<u32>,
+    path: Option<PathBuf>,
 ) -> Result<Topology, String> {
     let qdrant = state.qdrant().await.map_err(stringify)?;
-    indexer::topology(&qdrant, sample.unwrap_or(80), per_point.unwrap_or(5))
-        .await
-        .map_err(stringify)
+    // Default to ~/.claude/projects so the response carries project_insights
+    // + gap_insights (auto-labels + gap analysis).
+    let projects_root = Some(path.unwrap_or_else(default_projects_root));
+    indexer::topology(
+        &qdrant,
+        sample.unwrap_or(80),
+        per_point.unwrap_or(5),
+        projects_root,
+    )
+    .await
+    .map_err(stringify)
 }
 
 #[tauri::command]

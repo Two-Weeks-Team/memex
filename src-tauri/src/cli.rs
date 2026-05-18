@@ -258,11 +258,13 @@ fn cmd_topology(sample: u32, per_point: u32, out: Option<PathBuf>) -> Result<()>
     let rt = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
     rt.block_on(async move {
         let client = indexer::connect().await?;
-        let topo = indexer::topology(&client, sample, per_point).await?;
+        let topo = indexer::topology(&client, sample, per_point, Some(default_projects_root())).await?;
         eprintln!(
-            "topology: {} node(s), {} MST edge(s)",
+            "topology: {} node(s), {} MST edge(s), {} insight(s), {} gap(s)",
             topo.nodes.len(),
-            topo.edges.len()
+            topo.edges.len(),
+            topo.project_insights.len(),
+            topo.gap_insights.len(),
         );
         let json = serde_json::to_string_pretty(&topo)?;
         if let Some(p) = out {

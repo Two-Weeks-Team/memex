@@ -673,19 +673,58 @@ pub struct TopoEdge {
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
+pub struct ProjectInsight {
+    pub project_name: String,
+    pub session_count: usize,
+    /// Auto-generated one-line label, e.g. "code + shell · Edit×42 Bash×18".
+    pub label: String,
+    /// Theme keyword chosen from tool mix.
+    pub theme: String,
+    /// Top tools by usage in this project's sessions.
+    pub top_tools: Vec<(String, usize)>,
+    /// Top 3 directories touched (file_path stems).
+    pub top_paths: Vec<String>,
+    /// Number of sessions in this project that produced an error.
+    pub had_errors: usize,
+    /// Number of MST edges that connect this project to a *different* project.
+    pub bridges_out: usize,
+    /// Other project names this one is bridged to.
+    pub bridge_partners: Vec<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct GapInsight {
+    /// "isolated" | "near_miss"
+    pub kind: String,
+    pub project_a: String,
+    pub project_b: Option<String>,
+    /// 0..1 (cosine similarity)
+    pub similarity: f32,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct Topology {
     pub nodes: Vec<TopoNode>,
     pub edges: Vec<TopoEdge>,
+    pub project_insights: Vec<ProjectInsight>,
+    pub gap_insights: Vec<GapInsight>,
 }
 
 /// **Topology view** (Plan §3 T3.3) — Distance Matrix → MST.
 ///
 /// `sample` = how many sessions to consider; `nearest_per_point` = how many
 /// nearest neighbors per point to fetch for the pairwise matrix.
+///
+/// `projects_root` — optional path. When provided, also performs a fresh
+/// `scan_dir` so the response carries `project_insights` (auto-labels) and
+/// `gap_insights` (isolated clusters + near-miss bridges). Pass `None` to
+/// skip the extra scan when the caller doesn't need them.
 pub async fn topology(
     client: &Qdrant,
     sample: u32,
     nearest_per_point: u32,
+    projects_root: Option<std::path::PathBuf>,
 ) -> Result<Topology> {
     // 1. Get pairwise distances from Qdrant's distance matrix endpoint.
     let resp = client
@@ -806,7 +845,264 @@ pub async fn topology(
         .collect();
     nodes.sort_by(|a, b| a.start_iso.cmp(&b.start_iso));
 
-    Ok(Topology { nodes, edges })
+    // ---- Insights (A: auto-labels, C: gap analysis) ---------------------
+    // Bridge counting requires per-node project lookups — build once.
+    let mut node_project: HashMap<String, String> = HashMap::new();
+    for n in &nodes {
+        node_project.insert(n.session_id.clone(), n.project_name.clone());
+    }
+
+    let (project_insights, gap_insights) = if let Some(root) = projects_root {
+        match crate::parser::scan_dir(&root) {
+            Ok(sessions) => compute_insights(&sessions, &nodes, &edges, &matrix2.pairs, &node_project, &pid_to_session),
+            Err(_) => (Vec::new(), Vec::new()),
+        }
+    } else {
+        (Vec::new(), Vec::new())
+    };
+
+    Ok(Topology {
+        nodes,
+        edges,
+        project_insights,
+        gap_insights,
+    })
+}
+
+// ----------------------------------------------------------------------------
+// Cluster auto-labels (A) + gap analysis (C)
+// ----------------------------------------------------------------------------
+
+fn compute_insights(
+    sessions: &[crate::parser::Session],
+    nodes: &[TopoNode],
+    mst_edges: &[TopoEdge],
+    matrix_pairs: &[qdrant_client::qdrant::SearchMatrixPair],
+    _node_project: &HashMap<String, String>,
+    pid_to_session: &HashMap<String, String>,
+) -> (Vec<ProjectInsight>, Vec<GapInsight>) {
+    use std::collections::BTreeMap;
+
+    let active_projects: HashSet<String> = nodes.iter().map(|n| n.project_name.clone()).collect();
+
+    // Aggregate per-project from raw parsed sessions: tools + paths + error count.
+    #[derive(Default)]
+    struct Agg {
+        session_count: usize,
+        had_errors: usize,
+        tool_freq: HashMap<String, usize>,
+        path_freq: HashMap<String, usize>,
+    }
+    let mut agg: HashMap<String, Agg> = HashMap::new();
+    for s in sessions {
+        let project = s.project_name.clone().unwrap_or_default();
+        if project.is_empty() || !active_projects.contains(&project) {
+            continue;
+        }
+        let entry = agg.entry(project).or_default();
+        entry.session_count += 1;
+        let mut had_err = false;
+        for turn in &s.turns {
+            for tc in &turn.tool_calls {
+                *entry.tool_freq.entry(tc.name.clone()).or_insert(0) += 1;
+                // file_path top-2 dirs
+                if let Some(p) = tc.input.get("file_path").and_then(|v| v.as_str()) {
+                    if let Some(dir) = std::path::Path::new(p)
+                        .parent()
+                        .and_then(|d| d.to_str())
+                    {
+                        // Bucket by 2 levels deep to avoid every unique full path.
+                        let bucket = bucket_path(dir);
+                        *entry.path_freq.entry(bucket).or_insert(0) += 1;
+                    }
+                }
+            }
+            if turn.tool_results.iter().any(|r| r.is_error) {
+                had_err = true;
+            }
+        }
+        if had_err {
+            entry.had_errors += 1;
+        }
+    }
+
+    // Per-project MST bridges (cross-project edges in the MST tree).
+    let mut bridges: HashMap<String, BTreeMap<String, usize>> = HashMap::new();
+    let session_project: HashMap<String, String> = nodes
+        .iter()
+        .map(|n| (n.session_id.clone(), n.project_name.clone()))
+        .collect();
+    for e in mst_edges {
+        let pa = session_project.get(&e.a).cloned().unwrap_or_default();
+        let pb = session_project.get(&e.b).cloned().unwrap_or_default();
+        if pa.is_empty() || pb.is_empty() || pa == pb {
+            continue;
+        }
+        bridges
+            .entry(pa.clone())
+            .or_default()
+            .entry(pb.clone())
+            .and_modify(|n| *n += 1)
+            .or_insert(1);
+        bridges
+            .entry(pb)
+            .or_default()
+            .entry(pa)
+            .and_modify(|n| *n += 1)
+            .or_insert(1);
+    }
+
+    // Build project insights, sorted by session_count desc.
+    let mut project_insights: Vec<ProjectInsight> = agg
+        .into_iter()
+        .map(|(project_name, a)| {
+            let mut tools: Vec<(String, usize)> = a.tool_freq.into_iter().collect();
+            tools.sort_by(|x, y| y.1.cmp(&x.1));
+            tools.truncate(4);
+
+            let mut paths: Vec<(String, usize)> = a.path_freq.into_iter().collect();
+            paths.sort_by(|x, y| y.1.cmp(&x.1));
+            let top_paths: Vec<String> = paths.into_iter().take(3).map(|(p, _)| p).collect();
+
+            let theme = theme_from_tools(&tools).to_string();
+            let tools_breakdown = tools
+                .iter()
+                .take(3)
+                .map(|(n, c)| format!("{n}×{c}"))
+                .collect::<Vec<_>>()
+                .join(" ");
+            let label = if tools_breakdown.is_empty() {
+                theme.clone()
+            } else {
+                format!("{theme} · {tools_breakdown}")
+            };
+
+            let project_bridges = bridges.get(&project_name).cloned().unwrap_or_default();
+            let bridges_out = project_bridges.values().sum();
+            let bridge_partners = project_bridges.keys().cloned().collect();
+
+            ProjectInsight {
+                project_name,
+                session_count: a.session_count,
+                label,
+                theme,
+                top_tools: tools,
+                top_paths,
+                had_errors: a.had_errors,
+                bridges_out,
+                bridge_partners,
+            }
+        })
+        .collect();
+    project_insights.sort_by(|a, b| b.session_count.cmp(&a.session_count));
+
+    // ---- Gaps -----------------------------------------------------------
+    // Aggregate similarity across cross-project matrix pairs (not just MST).
+    // We use these to find near-miss connections — pairs that ARE close
+    // semantically but didn't make it into the MST (a tree only keeps
+    // n-1 edges so many close cross-project pairs get pruned).
+    let mut cross_pair_scores: HashMap<(String, String), Vec<f32>> = HashMap::new();
+    for pair in matrix_pairs {
+        let Some(a) = pair.a.as_ref().and_then(point_id_string) else { continue };
+        let Some(b) = pair.b.as_ref().and_then(point_id_string) else { continue };
+        let Some(sa) = pid_to_session.get(&a) else { continue };
+        let Some(sb) = pid_to_session.get(&b) else { continue };
+        let pa = session_project.get(sa).cloned().unwrap_or_default();
+        let pb = session_project.get(sb).cloned().unwrap_or_default();
+        if pa.is_empty() || pb.is_empty() || pa == pb {
+            continue;
+        }
+        let key = if pa < pb { (pa, pb) } else { (pb, pa) };
+        cross_pair_scores.entry(key).or_default().push(pair.score);
+    }
+
+    let mut mst_project_pairs: HashSet<(String, String)> = HashSet::new();
+    for e in mst_edges {
+        let pa = session_project.get(&e.a).cloned().unwrap_or_default();
+        let pb = session_project.get(&e.b).cloned().unwrap_or_default();
+        if pa.is_empty() || pb.is_empty() || pa == pb {
+            continue;
+        }
+        let key = if pa < pb { (pa, pb) } else { (pb, pa) };
+        mst_project_pairs.insert(key);
+    }
+
+    let mut gap_insights: Vec<GapInsight> = Vec::new();
+
+    // Isolated clusters — projects with multiple sessions but zero MST bridges.
+    for p in &project_insights {
+        if p.session_count >= 2 && p.bridges_out == 0 {
+            gap_insights.push(GapInsight {
+                kind: "isolated".to_string(),
+                project_a: p.project_name.clone(),
+                project_b: None,
+                similarity: 0.0,
+                message: format!(
+                    "‘{}’ ({} sessions) sits alone — its sessions don't share enough vocabulary with anything else for a bridge to form.",
+                    p.project_name, p.session_count
+                ),
+            });
+        }
+    }
+
+    // Near-miss bridges — high cross-project avg similarity but no MST edge.
+    let mut near_miss_pairs: Vec<((String, String), f32)> = Vec::new();
+    for (pair, scores) in cross_pair_scores {
+        if mst_project_pairs.contains(&pair) {
+            continue;
+        }
+        if scores.is_empty() {
+            continue;
+        }
+        let avg = scores.iter().sum::<f32>() / scores.len() as f32;
+        if avg >= 0.50 {
+            near_miss_pairs.push((pair, avg));
+        }
+    }
+    near_miss_pairs.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    for ((pa, pb), sim) in near_miss_pairs.into_iter().take(5) {
+        gap_insights.push(GapInsight {
+            kind: "near_miss".to_string(),
+            project_a: pa.clone(),
+            project_b: Some(pb.clone()),
+            similarity: sim,
+            message: format!(
+                "‘{}’ and ‘{}’ have semantically similar sessions (avg sim {:.2}) but no bridge in the MST — a potential unmade connection.",
+                pa, pb, sim
+            ),
+        });
+    }
+
+    (project_insights, gap_insights)
+}
+
+fn bucket_path(dir: &str) -> String {
+    // Keep first 3 path segments to avoid every unique deep file.
+    let parts: Vec<&str> = dir.split('/').filter(|s| !s.is_empty()).collect();
+    if parts.len() <= 3 {
+        dir.to_string()
+    } else {
+        format!("/{}/{}/{}/…", parts[0], parts[1], parts[2])
+    }
+}
+
+fn theme_from_tools(top_tools: &[(String, usize)]) -> &'static str {
+    let names: HashSet<&str> = top_tools.iter().map(|(n, _)| n.as_str()).collect();
+    if names.contains("Bash") && (names.contains("Edit") || names.contains("MultiEdit")) {
+        "code + shell"
+    } else if names.contains("WebFetch") || names.contains("WebSearch") {
+        "research"
+    } else if names.contains("Task") || names.contains("Agent") {
+        "agent orchestration"
+    } else if names.contains("Edit") || names.contains("MultiEdit") || names.contains("Write") {
+        "editing"
+    } else if names.contains("Bash") {
+        "shell work"
+    } else if names.contains("Read") || names.contains("Grep") || names.contains("Glob") {
+        "exploration"
+    } else {
+        "general"
+    }
 }
 
 /// **Proactive recall** (Plan §3 T3.6) — find past sessions that solved an

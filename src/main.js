@@ -546,7 +546,7 @@ function renderTopology3D(topo, mount) {
   }
 
   // ---- Aggregate project metadata for legend + cluster force --------------
-  const projects = new Map(); // project → { color, count, earliest, latest, sessionIds }
+  const projects = new Map();
   for (const n of nodes) {
     const key = n.project_name || "?";
     let p = projects.get(key);
@@ -565,6 +565,13 @@ function renderTopology3D(topo, mount) {
     p.sessionIds.add(n.session_id);
     if (n.start_iso && (!p.earliest || n.start_iso < p.earliest)) p.earliest = n.start_iso;
     if (n.start_iso && (!p.latest || n.start_iso > p.latest)) p.latest = n.start_iso;
+  }
+  // Backend-provided auto-labels (A) keyed by project name.
+  const insightByName = new Map();
+  for (const ins of topo.project_insights || []) {
+    insightByName.set(ins.project_name, ins);
+    const p = projects.get(ins.project_name);
+    if (p) p.insight = ins;
   }
   const projectList = Array.from(projects.values()).sort((a, b) => b.count - a.count);
 
@@ -672,17 +679,87 @@ function renderTopology3D(topo, mount) {
       const earliest = p.earliest.slice(0, 10);
       const latest = p.latest.slice(0, 10);
       const range = earliest === latest ? earliest : `${earliest} → ${latest}`;
+      const ins = p.insight;
+      const themeChip = ins
+        ? `<span class="theme-chip">${escapeHtml(ins.theme)}</span>`
+        : "";
+      const toolsBreakdown = ins?.top_tools?.length
+        ? ins.top_tools
+            .slice(0, 3)
+            .map(
+              ([name, count]) =>
+                `<span class="tool-chip">${escapeHtml(name)}<span class="tool-count">×${count}</span></span>`,
+            )
+            .join("")
+        : "";
+      const bridgeIcon = ins?.bridges_out
+        ? `<span class="bridge-pill" title="${ins.bridges_out} cross-project bridges">↔ ${ins.bridges_out}</span>`
+        : `<span class="bridge-pill isolated" title="No bridges to other projects">isolated</span>`;
+      const errPill = ins?.had_errors
+        ? `<span class="err-pill" title="${ins.had_errors} session(s) had tool errors">errors ${ins.had_errors}</span>`
+        : "";
       row.innerHTML = `
-        <span class="legend-dot" style="background:${p.color}"></span>
-        <span class="legend-text">
+        <div class="legend-row-head">
+          <span class="legend-dot" style="background:${p.color}"></span>
           <span class="legend-name">${escapeHtml(p.name)}</span>
-          <span class="legend-meta">${p.count} session${p.count > 1 ? "s" : ""} · ${range}</span>
-        </span>
+          <span class="legend-count">${p.count}</span>
+        </div>
+        ${themeChip ? `<div class="legend-row-theme">${themeChip}${bridgeIcon}${errPill}</div>` : ""}
+        ${toolsBreakdown ? `<div class="legend-row-tools">${toolsBreakdown}</div>` : ""}
+        <div class="legend-row-foot">${range}</div>
       `;
       row.addEventListener("mouseenter", () => setHighlight(p.name));
       row.addEventListener("mouseleave", () => setHighlight(null));
       row.addEventListener("click", () => focusCluster(p.name));
       legendEl.appendChild(row);
+    }
+
+    // Gap analysis (C) — "what's missing" panel
+    const gaps = topo.gap_insights || [];
+    if (gaps.length) {
+      const gapHeading = document.createElement("div");
+      gapHeading.className = "legend-heading gap-heading";
+      gapHeading.innerHTML = `⚡ Gaps <span class="muted">(${gaps.length})</span>`;
+      legendEl.appendChild(gapHeading);
+
+      for (const g of gaps) {
+        const card = document.createElement("div");
+        card.className = `gap-card gap-${g.kind}`;
+        const kindLabel = g.kind === "isolated" ? "isolated" : "near miss";
+        const simBadge = g.similarity
+          ? `<span class="sim-badge">sim ${g.similarity.toFixed(2)}</span>`
+          : "";
+        const dotA = `<span class="legend-dot xs" style="background:${projectColor(g.project_a)}"></span>`;
+        const dotB = g.project_b
+          ? `<span class="legend-dot xs" style="background:${projectColor(g.project_b)}"></span>`
+          : "";
+        const projHead = g.project_b
+          ? `${dotA}<strong>${escapeHtml(g.project_a)}</strong> &harr; ${dotB}<strong>${escapeHtml(g.project_b)}</strong>`
+          : `${dotA}<strong>${escapeHtml(g.project_a)}</strong>`;
+        card.innerHTML = `
+          <div class="gap-head">
+            <span class="gap-kind ${g.kind}">${kindLabel}</span>
+            ${simBadge}
+          </div>
+          <div class="gap-proj">${projHead}</div>
+          <div class="gap-msg">${escapeHtml(g.message)}</div>
+          ${
+            g.project_b
+              ? `<button type="button" class="btn ghost xs gap-explore" data-a="${escapeHtml(g.project_a)}" data-b="${escapeHtml(g.project_b)}">Explore both</button>`
+              : `<button type="button" class="btn ghost xs gap-explore" data-a="${escapeHtml(g.project_a)}">Focus cluster</button>`
+          }
+        `;
+        const btn = card.querySelector(".gap-explore");
+        btn.addEventListener("click", () => {
+          if (g.project_b) {
+            // Highlight both projects simultaneously, zoom to their union.
+            focusClusters([g.project_a, g.project_b]);
+          } else {
+            focusCluster(g.project_a);
+          }
+        });
+        legendEl.appendChild(card);
+      }
     }
 
     const explainer = document.createElement("div");
@@ -696,7 +773,7 @@ function renderTopology3D(topo, mount) {
         <span class="legend-line cross-project"></span>
         cross-project bridge
       </div>
-      <p>Hover a row to highlight. Click to focus the cluster.</p>
+      <p>Hover a project row to highlight its cluster. Click to zoom.</p>
     `;
     legendEl.appendChild(explainer);
   }
@@ -728,6 +805,23 @@ function focusCluster(project) {
       .map((n) => n.id),
   );
   topologyGraph.zoomToFit(900, 60, (n) => ids.has(n.id));
+}
+
+function focusClusters(projectNames) {
+  if (!topologyGraph) return;
+  const set = new Set(projectNames);
+  const ids = new Set(
+    topologyGraph
+      .graphData()
+      .nodes.filter((n) => set.has(n.project))
+      .map((n) => n.id),
+  );
+  topologyGraph.zoomToFit(900, 60, (n) => ids.has(n.id));
+  // Dim everything outside the focused pair.
+  highlightedProject = null;
+  topologyGraph.nodeColor((n) =>
+    set.has(n.project) ? n.color : dim(n.color),
+  );
 }
 
 function dim(hex) {
