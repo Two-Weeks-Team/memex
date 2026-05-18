@@ -1,0 +1,8 @@
+{"timestamp":"2026-05-18T08:00:00.000Z","type":"session_meta","payload":{"id":"019e39e6-aaaa-bbbb-cccc-000000000002","timestamp":"2026-05-18T08:00:00.000Z","cwd":"/Users/test/projects/demo","originator":"Codex CLI","cli_version":"0.131.0-alpha.9"}}
+{"timestamp":"2026-05-18T08:00:01.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"List files and read src/lib.rs"}]}}
+{"timestamp":"2026-05-18T08:00:02.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"On it."}]}}
+{"timestamp":"2026-05-18T08:00:03.000Z","type":"response_item","payload":{"type":"function_call","name":"exec_command","arguments":"{\"cmd\":\"ls\",\"workdir\":\"/Users/test/projects/demo\"}","call_id":"call_aaa1"}}
+{"timestamp":"2026-05-18T08:00:04.000Z","type":"response_item","payload":{"type":"function_call_output","call_id":"call_aaa1","output":"Cargo.toml\nsrc\nProcess exited with code 0"}}
+{"timestamp":"2026-05-18T08:00:05.000Z","type":"response_item","payload":{"type":"function_call","name":"read_file","arguments":"{\"file_path\":\"src/lib.rs\"}","call_id":"call_aaa2"}}
+{"timestamp":"2026-05-18T08:00:06.000Z","type":"response_item","payload":{"type":"function_call_output","call_id":"call_aaa2","output":"pub fn hello() {}\nProcess exited with code 0"}}
+{"timestamp":"2026-05-18T08:00:07.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Done."}]}}

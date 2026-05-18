@@ -45,6 +45,16 @@ const EMBED_BATCH: usize = 32;
 static CODE_FENCE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"```[\w+-]*\n([\s\S]*?)```").unwrap());
 
+// P5 KG-01 — Topology insights memo cache. One process-wide instance so
+// repeated `topology` calls within a session benefit from the warm cache.
+static INSIGHTS_CACHE: Lazy<crate::insights_cache::InsightsCache> =
+    Lazy::new(crate::insights_cache::InsightsCache::new);
+
+// P5 KG-02 — Predict pivot-parse LRU. Same process-wide singleton pattern;
+// memoizes `parser::parse_session` per (path, mtime).
+static PREDICT_PARSE_CACHE: Lazy<crate::parse_cache::ParseLruCache> =
+    Lazy::new(crate::parse_cache::ParseLruCache::new);
+
 /// Wraps a fastembed `TextEmbedding` (BGE-small-en-v1.5). The model needs
 /// `&mut self` to embed (internal ONNX session state), so we serialize access
 /// via a `Mutex` and let callers use `&Embedder`.
@@ -388,7 +398,7 @@ fn session_payload_v3(s: &Session) -> Payload {
     let source_path = s.source_path.to_string_lossy().into_owned();
     let start_iso = s.start_time.map(|t| t.to_rfc3339()).unwrap_or_default();
     let end_iso = s.end_time.map(|t| t.to_rfc3339()).unwrap_or_default();
-    let v3 = crate::schema::V3Payload::from_session_fields(
+    let mut v3 = crate::schema::V3Payload::from_session_fields(
         s.session_id.clone(),
         source_path,
         s.project_name.clone().unwrap_or_default(),
@@ -403,6 +413,15 @@ fn session_payload_v3(s: &Session) -> Payload {
         tool_count,
         has_errors,
     );
+    // P5 — populate the 5 enrich-stage fields heuristically (LLM-free).
+    // `enrich` is pure and deterministic; safe to call once per session here
+    // so the upsert carries the labels without a separate update round-trip.
+    let out = crate::enrich::enrich(s, &s.turns);
+    v3.intent = Some(out.intent);
+    v3.entities = out.entities;
+    v3.outcome = Some(out.outcome);
+    v3.arc = Some(out.arc);
+    v3.topic = Some(out.topic);
     v3.to_qdrant_payload()
 }
 
@@ -533,6 +552,24 @@ pub async fn bulk_index(
     embedder: &Embedder,
     sessions: &[Session],
 ) -> Result<BulkIndexReport> {
+    // Keep the legacy `&Embedder` signature compatible by delegating to the
+    // Arc-based path. Callers that already have `Arc<Embedder>` (every
+    // commands.rs entry point does) should prefer `bulk_index_arc` to skip
+    // the extra Arc allocation. For CLI test paths that hold an owned
+    // `Embedder` we still need a way to get an Arc — `Arc::new` on the value
+    // requires ownership, which the borrow doesn't carry. We can't fix that
+    // without breaking the legacy API, so we synthesize a per-call Arc via
+    // a no-clone proxy: just call the legacy per-session loop.
+    bulk_index_legacy(client, embedder, sessions).await
+}
+
+/// New (P5 KC-05) Arc-based entry point. Performs cross-session batched
+/// embedding with `embed_pool` + `Semaphore` cap.
+pub async fn bulk_index_arc(
+    client: &Qdrant,
+    embedder: std::sync::Arc<Embedder>,
+    sessions: &[Session],
+) -> Result<BulkIndexReport> {
     use indicatif::{ProgressBar, ProgressStyle};
     let pb = ProgressBar::new(sessions.len() as u64);
     pb.set_style(
@@ -541,11 +578,6 @@ pub async fn bulk_index(
             .progress_chars("=> "),
     );
 
-    // B2: two jsonl files can carry the same `sessionId` (we've seen this in
-    // real ~/.claude/projects data). UUID v5(session_id) makes those collide
-    // on the Qdrant point id, so the second upsert *silently overwrites*
-    // the first. Detect + log + keep the first occurrence so the count
-    // we report matches what Qdrant actually stores.
     let mut seen_ids: HashSet<String> = HashSet::new();
     let mut report = BulkIndexReport {
         indexed: 0,
@@ -553,13 +585,15 @@ pub async fn bulk_index(
         errors: 0,
     };
 
+    let pool = crate::embed_pool::EmbedPool::new(embedder.clone());
+    let mut window: Vec<&Session> = Vec::with_capacity(crate::embed_pool::CROSS_SESSION_BATCH);
+
     for s in sessions {
         let label = s
             .project_name
             .clone()
             .unwrap_or_else(|| s.session_id.clone());
         pb.set_message(label);
-
         if !seen_ids.insert(s.session_id.clone()) {
             pb.println(format!(
                 "  ⊘ duplicate sessionId={} ({}) — kept first occurrence",
@@ -570,7 +604,56 @@ pub async fn bulk_index(
             pb.inc(1);
             continue;
         }
+        window.push(s);
+        pb.inc(1);
+        if window.len() >= crate::embed_pool::CROSS_SESSION_BATCH {
+            flush_batch(client, &pool, &embedder, &mut window, &mut report, &pb).await;
+        }
+    }
+    if !window.is_empty() {
+        flush_batch(client, &pool, &embedder, &mut window, &mut report, &pb).await;
+    }
+    pb.finish_with_message("done");
+    Ok(report)
+}
 
+/// Legacy (per-session) bulk index — retained so callers that hold a plain
+/// `&Embedder` still compile. Internally delegates to `index_session` one at
+/// a time.
+async fn bulk_index_legacy(
+    client: &Qdrant,
+    embedder: &Embedder,
+    sessions: &[Session],
+) -> Result<BulkIndexReport> {
+    use indicatif::{ProgressBar, ProgressStyle};
+    let pb = ProgressBar::new(sessions.len() as u64);
+    pb.set_style(
+        ProgressStyle::with_template("{wide_bar} {pos}/{len} ({eta}) {msg}")
+            .unwrap()
+            .progress_chars("=> "),
+    );
+    let mut seen_ids: HashSet<String> = HashSet::new();
+    let mut report = BulkIndexReport {
+        indexed: 0,
+        duplicates_skipped: 0,
+        errors: 0,
+    };
+    for s in sessions {
+        let label = s
+            .project_name
+            .clone()
+            .unwrap_or_else(|| s.session_id.clone());
+        pb.set_message(label);
+        if !seen_ids.insert(s.session_id.clone()) {
+            pb.println(format!(
+                "  ⊘ duplicate sessionId={} ({}) — kept first occurrence",
+                &s.session_id[..8.min(s.session_id.len())],
+                s.source_path.display()
+            ));
+            report.duplicates_skipped += 1;
+            pb.inc(1);
+            continue;
+        }
         match index_session(client, embedder, s).await {
             Ok(()) => report.indexed += 1,
             Err(e) => {
@@ -582,6 +665,76 @@ pub async fn bulk_index(
     }
     pb.finish_with_message("done");
     Ok(report)
+}
+
+/// Flush one batch — collect 5 extracts per session, embed them in ONE pool
+/// call, then per-session pack + upsert with multivector.
+async fn flush_batch(
+    client: &Qdrant,
+    pool: &crate::embed_pool::EmbedPool,
+    embedder: &Embedder,
+    window: &mut Vec<&Session>,
+    report: &mut BulkIndexReport,
+    pb: &indicatif::ProgressBar,
+) {
+    let local: Vec<&Session> = std::mem::take(window);
+    if local.is_empty() {
+        return;
+    }
+    let mut all_texts: Vec<String> = Vec::with_capacity(local.len() * 5);
+    let mut extracts_per_session: Vec<[(String, String); 5]> = Vec::with_capacity(local.len());
+    for s in &local {
+        let ex = session_extracts(s);
+        for (_, t) in &ex {
+            all_texts.push(t.clone());
+        }
+        extracts_per_session.push(ex);
+    }
+    let vectors = match pool.embed_batch(all_texts).await {
+        Ok(v) => v,
+        Err(e) => {
+            pb.println(format!("  ⚠ batch embed: {:#}", e));
+            // Conservative: charge every session in the window as an error so
+            // the report adds up.
+            report.errors = report.errors.saturating_add(local.len());
+            return;
+        }
+    };
+    for (i, s) in local.iter().enumerate() {
+        let extracts = &extracts_per_session[i];
+        let base = i * 5;
+        let named_dense: Vec<(String, Vec<f32>)> = extracts
+            .iter()
+            .enumerate()
+            .map(|(j, (k, _))| (k.clone(), vectors[base + j].clone()))
+            .collect();
+        let content_text = extracts
+            .iter()
+            .find(|(k, _)| k == "content")
+            .map(|(_, t)| t.clone())
+            .unwrap_or_default();
+        let chunk_vectors = match crate::embed_late::embed_token_level(embedder, &content_text) {
+            Ok(v) => v,
+            Err(e) => {
+                pb.println(format!("  ⚠ {}: late embed: {:#}", s.session_id, e));
+                report.errors += 1;
+                continue;
+            }
+        };
+        let point = build_point_v3_with_multivec(s, named_dense, chunk_vectors);
+        match client
+            .upsert_points(
+                UpsertPointsBuilder::new(crate::schema::COLLECTION_V3, vec![point]).wait(true),
+            )
+            .await
+        {
+            Ok(_) => report.indexed += 1,
+            Err(e) => {
+                pb.println(format!("  ⚠ {}: {:#}", s.session_id, e));
+                report.errors += 1;
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -1032,8 +1185,36 @@ pub async fn topology(
     }
 
     let (project_insights, gap_insights) = if let Some(root) = projects_root {
-        match crate::parser::scan_dir(&root) {
-            Ok(sessions) => compute_insights(&sessions, &nodes, &edges, &matrix2.pairs, &node_project, &pid_to_session),
+        // P5 KG-01 — memoize the heavy compute on (root, max_mtime). Cache
+        // misses fall through to the full scan+compute below; hits return the
+        // cached `Arc<CachedInsights>` so we just clone the inner Vecs out.
+        let max_mt = crate::insights_cache::InsightsCache::fingerprint(&root);
+        let root_for_compute = root.clone();
+        let nodes_ref = nodes.clone();
+        let edges_ref = edges.clone();
+        let matrix_pairs: Vec<qdrant_client::qdrant::SearchMatrixPair> =
+            matrix2.pairs.clone();
+        let node_project_ref = node_project.clone();
+        let pid_to_session_ref = pid_to_session.clone();
+        match INSIGHTS_CACHE.get_or_compute(root, max_mt, move || {
+            let sessions = crate::parser::scan_dir(&root_for_compute)?;
+            let (pi, gi) = compute_insights(
+                &sessions,
+                &nodes_ref,
+                &edges_ref,
+                &matrix_pairs,
+                &node_project_ref,
+                &pid_to_session_ref,
+            );
+            Ok(crate::insights_cache::CachedInsights {
+                project_insights: pi,
+                gap_insights: gi,
+            })
+        }) {
+            Ok(cached) => (
+                cached.project_insights.clone(),
+                cached.gap_insights.clone(),
+            ),
             Err(_) => (Vec::new(), Vec::new()),
         }
     } else {
@@ -1489,7 +1670,18 @@ pub async fn predict_next_actions(
         // SAFETY: neighbor source_path came from Qdrant payload — validate
         // it lives inside an allowed sandbox root before parsing the JSONL.
         let Ok(validated) = crate::sec::validate_session_path(StdPath::new(source)) else { continue };
-        let Ok(nb) = crate::parser::parse_session(&validated) else { continue };
+        // P5 KG-02 — LRU memo keyed by (path, mtime). Cache hits avoid the
+        // re-parse on repeat predict calls touching the same neighbours.
+        let mtime = std::fs::metadata(&validated)
+            .and_then(|m| m.modified())
+            .unwrap_or(std::time::UNIX_EPOCH);
+        let nb_arc = match PREDICT_PARSE_CACHE.get_or_parse(validated.clone(), mtime, |p| {
+            crate::parser::parse_session(p)
+        }) {
+            Ok(s) => s,
+            Err(_) => continue,
+        };
+        let nb = &*nb_arc;
         if nb.turns.is_empty() {
             continue;
         }
