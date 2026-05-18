@@ -54,16 +54,27 @@ pub struct Embedder {
 
 impl Embedder {
     pub fn new() -> Result<Self> {
+        let cache_dir = default_fastembed_cache_dir();
+        // Best-effort — fastembed will surface a clearer error if creation fails.
+        std::fs::create_dir_all(&cache_dir).ok();
         let model = TextEmbedding::try_new(
-            InitOptions::new(EmbeddingModel::BGESmallENV15).with_show_download_progress(true),
+            InitOptions::new(EmbeddingModel::BGESmallENV15)
+                .with_show_download_progress(true)
+                .with_cache_dir(cache_dir.clone()),
         )
-        .context("loading BGE-small-en-v1.5 fastembed model")?;
+        .with_context(|| {
+            format!(
+                "loading BGE-small-en-v1.5 fastembed model (cache_dir={})",
+                cache_dir.display()
+            )
+        })?;
         Ok(Self {
             inner: Mutex::new(model),
         })
     }
 
     pub fn embed(&self, texts: Vec<String>) -> Result<Vec<Vec<f32>>> {
+        // (impl below)
         if texts.is_empty() {
             return Ok(Vec::new());
         }
@@ -80,6 +91,34 @@ impl Embedder {
             out.extend(batch);
         }
         Ok(out)
+    }
+}
+
+/// Resolve a writable cache dir for the fastembed ONNX model. The .app
+/// bundle on macOS launches with CWD=`/` (read-only), so the default
+/// `.fastembed_cache/` placement next to CWD fails with EROFS. We pick
+/// the platform-canonical cache dir and create it if missing.
+fn default_fastembed_cache_dir() -> std::path::PathBuf {
+    use std::path::PathBuf;
+    // Honor explicit override first (useful for tests + sandboxes).
+    if let Ok(p) = std::env::var("MEMEX_FASTEMBED_CACHE_DIR") {
+        return PathBuf::from(p);
+    }
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+    #[cfg(target_os = "macos")]
+    {
+        return PathBuf::from(home)
+            .join("Library")
+            .join("Caches")
+            .join("dev.sgwannabe.memex")
+            .join("fastembed");
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        if let Ok(xdg) = std::env::var("XDG_CACHE_HOME") {
+            return PathBuf::from(xdg).join("memex").join("fastembed");
+        }
+        PathBuf::from(home).join(".cache").join("memex").join("fastembed")
     }
 }
 
