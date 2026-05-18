@@ -407,13 +407,19 @@ textarea:focus {
 
 .modal {
   width: min(960px, 90vw);
-  max-height: 80vh;
+  max-height: 86vh;
   border: 1px solid var(--border-strong);
   border-radius: 12px;
   padding: 0;
   background: var(--bg-surface);
   color: var(--text-primary);
   box-shadow: 0 24px 80px rgba(0, 0, 0, 0.55);
+}
+
+/* The topology modal goes wider — 3D space needs room to breathe. */
+#topology-modal {
+  width: min(1280px, 94vw);
+  max-height: 92vh;
 }
 
 .modal::backdrop {
@@ -437,8 +443,39 @@ textarea:focus {
 
 .topology {
   width: 100%;
-  height: 60vh;
-  min-height: 480px;
+  height: 72vh;
+  min-height: 540px;
+  background: #16161a;
+  position: relative;
+  overflow: hidden;
+  border-bottom-left-radius: 12px;
+  border-bottom-right-radius: 12px;
+}
+
+/* 3d-force-graph injects a <canvas> + tooltip; make sure they fill the box. */
+.topology canvas {
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
+}
+
+/* Subtle "drag to rotate · scroll to zoom" hint overlay. */
+.topology::after {
+  content: "drag to rotate  ·  scroll to zoom  ·  click a node to inspect";
+  position: absolute;
+  bottom: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 6px 14px;
+  font-family: var(--sans);
+  font-size: 11px;
+  color: var(--text-secondary);
+  background: rgba(28, 28, 30, 0.78);
+  border: 1px solid var(--border-strong);
+  border-radius: 18px;
+  backdrop-filter: blur(10px);
+  pointer-events: none;
+  z-index: 100;
 }
 
 .mix-body {

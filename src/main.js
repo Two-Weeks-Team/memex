@@ -281,6 +281,12 @@ function attachEvents() {
       e.target.closest("dialog").close();
     });
   }
+
+  // Tear down the WebGL scene when the topology modal closes so we don't
+  // leak Three.js renderers across re-opens.
+  document.getElementById("topology-modal").addEventListener("close", () => {
+    disposeTopology();
+  });
 }
 
 async function onSearchInput(e) {
@@ -501,82 +507,106 @@ async function onTopology() {
   const canvas = document.getElementById("topology-canvas");
   canvas.innerHTML = `<div class="empty">Computing MST…</div>`;
   try {
-    const topo = await invoke("topology", { sample: 80, perPoint: 4 });
-    renderTopologySvg(topo, canvas);
+    const topo = await invoke("topology", { sample: 80, perPoint: 6 });
+    renderTopology3D(topo, canvas);
   } catch (err) {
     canvas.innerHTML = `<div class="empty">Topology failed: ${escapeHtml(String(err))}</div>`;
   }
 }
 
-function renderTopologySvg(topo, mount) {
-  const W = mount.clientWidth || 900;
-  const H = mount.clientHeight || 540;
+// 3d-force-graph instance kept around so we can dispose it cleanly between
+// modal openings (WebGL contexts are expensive to leak).
+let topologyGraph = null;
+
+function disposeTopology() {
+  if (topologyGraph && typeof topologyGraph._destructor === "function") {
+    try {
+      topologyGraph._destructor();
+    } catch {}
+  }
+  topologyGraph = null;
+}
+
+function renderTopology3D(topo, mount) {
+  disposeTopology();
+  mount.innerHTML = "";
   const { nodes, edges } = topo;
   if (!nodes.length) {
     mount.innerHTML = `<div class="empty">No nodes yet — re-index first.</div>`;
     return;
   }
-  const positions = new Map();
-  const cx = W / 2,
-    cy = H / 2;
-  const r = Math.min(W, H) * 0.42;
-  nodes.forEach((n, i) => {
-    const t = (i / nodes.length) * 2 * Math.PI;
-    positions.set(n.session_id, [cx + r * Math.cos(t), cy + r * Math.sin(t)]);
-  });
-
-  const svgNS = "http://www.w3.org/2000/svg";
-  const svg = document.createElementNS(svgNS, "svg");
-  svg.setAttribute("width", "100%");
-  svg.setAttribute("height", "100%");
-  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
-
-  for (const e of edges) {
-    const a = positions.get(e.a);
-    const b = positions.get(e.b);
-    if (!a || !b) continue;
-    const line = document.createElementNS(svgNS, "line");
-    line.setAttribute("x1", a[0]);
-    line.setAttribute("y1", a[1]);
-    line.setAttribute("x2", b[0]);
-    line.setAttribute("y2", b[1]);
-    // After B1 the Rust side returns true distance (low = similar). For the
-    // SVG we render *similarity* — closer pairs = thicker, more opaque edges.
-    const sim = Math.max(0, Math.min(1, 1 - e.distance));
-    const opacity = Math.max(0.12, Math.min(0.85, sim));
-    line.setAttribute("stroke", `rgba(10, 132, 255, ${opacity})`);
-    line.setAttribute("stroke-width", String(0.5 + sim * 2));
-    svg.appendChild(line);
+  if (typeof window.ForceGraph3D !== "function") {
+    mount.innerHTML = `<div class="empty">3D engine failed to load (vendor/3d-force-graph.min.js).</div>`;
+    return;
   }
 
-  for (const n of nodes) {
-    const p = positions.get(n.session_id);
-    if (!p) continue;
-    const g = document.createElementNS(svgNS, "g");
-    g.setAttribute("transform", `translate(${p[0]}, ${p[1]})`);
-    g.style.cursor = "pointer";
-    g.addEventListener("click", () => {
+  // Transform backend data into the shape 3d-force-graph expects.
+  const graphData = {
+    nodes: nodes.map((n) => ({
+      id: n.session_id,
+      project: n.project_name || "?",
+      title: n.ai_title || "(untitled)",
+      start_iso: n.start_iso || "",
+      user_turns: n.user_turns || 0,
+      tool_count: n.tool_count || 0,
+      color: projectColor(n.project_name),
+      // Node size scales with conversation volume.
+      val: Math.max(1, Math.sqrt((n.user_turns || 0) + 1)),
+    })),
+    links: edges.map((e) => ({
+      source: e.a,
+      target: e.b,
+      // similarity ∈ [0, 1] — higher = stronger link
+      similarity: Math.max(0, Math.min(1, 1 - e.distance)),
+    })),
+  };
+
+  const G = window.ForceGraph3D({
+    controlType: "orbit",
+    backgroundColor: "#16161a",
+  })(mount)
+    .graphData(graphData)
+    .nodeRelSize(5)
+    .nodeVal((n) => n.val)
+    .nodeColor((n) => n.color)
+    .nodeOpacity(0.95)
+    .nodeResolution(16)
+    .nodeLabel((n) => {
+      const ts = (n.start_iso || "").slice(0, 16).replace("T", " ");
+      return `
+        <div style="font-family:-apple-system,sans-serif;font-size:12px;
+                    background:rgba(20,20,22,0.92);color:#fff;
+                    padding:8px 11px;border-radius:8px;
+                    border:1px solid rgba(255,255,255,0.18);
+                    box-shadow:0 8px 28px rgba(0,0,0,0.55);
+                    max-width:280px;line-height:1.4">
+          <strong style="color:${n.color}">${escapeHtml(n.project)}</strong><br/>
+          <span style="color:rgba(255,255,255,0.7)">${escapeHtml(n.title)}</span><br/>
+          <span style="font-family:ui-monospace,monospace;font-size:10.5px;
+                       color:rgba(255,255,255,0.5)">
+            ${ts} · ${n.user_turns} user · ${n.tool_count} tools
+          </span>
+        </div>`;
+    })
+    .linkColor(() => "rgba(10, 132, 255, 0.85)")
+    .linkOpacity(0.55)
+    .linkWidth((l) => 0.4 + l.similarity * 2.4)
+    .linkDirectionalParticles(0)
+    .onNodeClick((node) => {
       document.getElementById("topology-modal").close();
-      selectSession(n.session_id);
+      selectSession(node.id);
+    })
+    .onNodeHover((node) => {
+      mount.style.cursor = node ? "pointer" : "default";
     });
-    const circle = document.createElementNS(svgNS, "circle");
-    circle.setAttribute("r", Math.max(4, Math.min(12, Math.sqrt((n.user_turns || 0) + 1))));
-    circle.setAttribute("fill", projectColor(n.project_name));
-    circle.setAttribute("stroke", "#fff");
-    circle.setAttribute("stroke-opacity", "0.4");
-    const label = document.createElementNS(svgNS, "text");
-    label.setAttribute("x", "10");
-    label.setAttribute("y", "4");
-    label.setAttribute("fill", "rgba(255,255,255,0.7)");
-    label.setAttribute("font-size", "10");
-    label.textContent = (n.project_name || "?").slice(0, 18);
-    g.appendChild(circle);
-    g.appendChild(label);
-    svg.appendChild(g);
-  }
 
-  mount.innerHTML = "";
-  mount.appendChild(svg);
+  // Tighter clustering: shorten target link distance for similar pairs.
+  G.d3Force("link").distance((l) => 60 + (1 - l.similarity) * 220);
+  G.d3Force("charge").strength(-80);
+  // Auto-fit camera to graph after physics settles.
+  setTimeout(() => G.zoomToFit(900, 80), 1200);
+
+  topologyGraph = G;
 }
 
 const COLOR_PALETTE = [
