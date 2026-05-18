@@ -1,7 +1,9 @@
 pub mod cli;
 pub mod commands;
+pub mod crud;
 pub mod indexer;
 pub mod parser;
+pub mod schema;
 pub mod sec;
 pub mod snapshot;
 

@@ -24,7 +24,7 @@ use qdrant_client::{
     qdrant::{
         point_id::PointIdOptions, vectors_config, ContextInputBuilder, ContextInputPair,
         CreateCollectionBuilder, CreateFieldIndexCollectionBuilder, Distance, FieldType,
-        Filter, GetPointsBuilder, PointId, PointStruct, Query,
+        Filter, PointId, PointStruct, Query,
         QueryPointsBuilder, SearchMatrixPointsBuilder, UpsertPointsBuilder, VectorInput,
         VectorParamsBuilder, VectorParamsMap, VectorsConfig,
     },
@@ -367,6 +367,45 @@ fn session_payload(s: &Session) -> Payload {
     Payload::try_from(payload).expect("payload conversion")
 }
 
+/// V3-shaped payload for a parsed Session. Adds:
+/// - `schema_version: 3`
+/// - `start_ts_dt` / `end_ts_dt` (RFC 3339 strings — used by the datetime index)
+/// - `source_agent` (KH-01)
+/// - reserved enrich fields (`intent`, `entities`, `outcome`, `arc`, `topic` —
+///   all null/empty until P5 enrich.rs fills them)
+///
+/// The v2-shaped numeric `start_ts` / `end_ts` are dropped on v3 — the datetime
+/// index does the heavy lifting. Other fields mirror v2.
+fn session_payload_v3(s: &Session) -> Payload {
+    let mut tool_count = 0i64;
+    let mut has_errors = false;
+    for turn in &s.turns {
+        tool_count += turn.tool_calls.len() as i64;
+        if turn.tool_results.iter().any(|r| r.is_error) {
+            has_errors = true;
+        }
+    }
+    let source_path = s.source_path.to_string_lossy().into_owned();
+    let start_iso = s.start_time.map(|t| t.to_rfc3339()).unwrap_or_default();
+    let end_iso = s.end_time.map(|t| t.to_rfc3339()).unwrap_or_default();
+    let v3 = crate::schema::V3Payload::from_session_fields(
+        s.session_id.clone(),
+        source_path,
+        s.project_name.clone().unwrap_or_default(),
+        s.project_path.clone().unwrap_or_default(),
+        s.git_branch.clone().unwrap_or_default(),
+        s.ai_title.clone().unwrap_or_default(),
+        s.claude_version.clone().unwrap_or_default(),
+        start_iso,
+        end_iso,
+        s.event_counts.user as i64,
+        s.event_counts.assistant as i64,
+        tool_count,
+        has_errors,
+    );
+    v3.to_qdrant_payload()
+}
+
 pub fn build_point(session: &Session, vectors_by_name: Vec<(String, Vec<f32>)>) -> PointStruct {
     let id = point_id(&session.session_id);
     let payload = session_payload(session);
@@ -374,6 +413,17 @@ pub fn build_point(session: &Session, vectors_by_name: Vec<(String, Vec<f32>)>) 
     PointStruct::new(id, vec_map, payload)
 }
 
+/// Build a v3 point with the new payload shape. Vector data is identical to v2
+/// (we don't re-embed) — only the payload differs.
+pub fn build_point_v3(session: &Session, vectors_by_name: Vec<(String, Vec<f32>)>) -> PointStruct {
+    let id = point_id(&session.session_id);
+    let payload = session_payload_v3(session);
+    let vec_map: HashMap<String, Vec<f32>> = vectors_by_name.into_iter().collect();
+    PointStruct::new(id, vec_map, payload)
+}
+
+/// **Write path** — upserts only into the v3 collection (KG-03 dual-write rule:
+/// v2 is frozen as read-only fallback).
 pub async fn index_session(
     client: &Qdrant,
     embedder: &Embedder,
@@ -387,9 +437,11 @@ pub async fn index_session(
         .map(|(k, _)| k)
         .zip(vectors.into_iter())
         .collect();
-    let point = build_point(session, named);
+    let point = build_point_v3(session, named);
     client
-        .upsert_points(UpsertPointsBuilder::new(COLLECTION, vec![point]).wait(true))
+        .upsert_points(
+            UpsertPointsBuilder::new(crate::schema::COLLECTION_V3, vec![point]).wait(true),
+        )
         .await?;
     Ok(())
 }
@@ -566,11 +618,13 @@ pub async fn lens_search(
         weights.iter().into_iter().filter(|(_, w)| *w > 0.0).collect();
     let queries = active.iter().map(|(vname, _)| {
         let q: Query = qvec.clone().into();
-        let req = QueryPointsBuilder::new(COLLECTION)
+        let req = QueryPointsBuilder::new(crate::schema::COLLECTION_V3)
             .query(q)
             .using((*vname).to_string())
             .limit(per_vector_limit)
-            .with_payload(true);
+            .with_payload(true)
+            // KC-01b — every read carries rescore + 2.0× oversampling.
+            .params(crate::schema::search_params_with_quantization());
         async move { client.query(req).await }
     });
     let responses = try_join_all(queries).await?;
@@ -672,11 +726,12 @@ pub async fn mix_match(
 
     let resp = client
         .query(
-            QueryPointsBuilder::new(COLLECTION)
+            QueryPointsBuilder::new(crate::schema::COLLECTION_V3)
                 .query(discover_input)
                 .using("content".to_string())
                 .limit(limit)
-                .with_payload(true),
+                .with_payload(true)
+                .params(crate::schema::search_params_with_quantization()),
         )
         .await?;
     Ok(resp
@@ -766,9 +821,14 @@ pub async fn topology(
     projects_root: Option<std::path::PathBuf>,
 ) -> Result<Topology> {
     // 1. Get pairwise distances from Qdrant's distance matrix endpoint.
+    //
+    // SPEC NOTE (P3, KC-01b): SearchMatrixPointsBuilder does not currently
+    // expose a `.params(SearchParams)` setter in qdrant-client 1.18 (the
+    // pairs endpoint runs server-side with its own internal config). The
+    // rescore + oversampling knobs only apply to query-by-vector calls.
     let resp = client
         .search_matrix_pairs(
-            SearchMatrixPointsBuilder::new(COLLECTION)
+            SearchMatrixPointsBuilder::new(crate::schema::COLLECTION_V3)
                 .using("content".to_string())
                 .sample(sample as u64)
                 .limit(nearest_per_point as u64),
@@ -797,12 +857,9 @@ pub async fn topology(
     let detail = if point_ids.is_empty() {
         Vec::new()
     } else {
-        client
-            .get_points(
-                GetPointsBuilder::new(COLLECTION, point_ids).with_payload(true),
-            )
-            .await?
-            .result
+        // KG-03 dual-read — v3 first, v2 fallback so topology still has labels
+        // for any point that hasn't been migrated yet.
+        crate::crud::dual_get_points(client, point_ids).await?
     };
 
     // node_by_pid: Qdrant point uuid → TopoNode (we still use point uuid as the
@@ -1166,12 +1223,13 @@ pub async fn recall(
     };
     let res = client
         .query(
-            QueryPointsBuilder::new(COLLECTION)
+            QueryPointsBuilder::new(crate::schema::COLLECTION_V3)
                 .query(q)
                 .using("error")
                 .limit(limit)
                 .filter(filter)
-                .with_payload(true),
+                .with_payload(true)
+                .params(crate::schema::search_params_with_quantization()),
         )
         .await?;
     Ok(res
@@ -1303,11 +1361,12 @@ pub async fn predict_next_actions(
     let q: Query = qvec.into();
     let res = client
         .query(
-            QueryPointsBuilder::new(COLLECTION)
+            QueryPointsBuilder::new(crate::schema::COLLECTION_V3)
                 .query(q)
                 .using("content")
                 .limit(neighbors + 1) // +1 because we filter out the active session itself
-                .with_payload(true),
+                .with_payload(true)
+                .params(crate::schema::search_params_with_quantization()),
         )
         .await?;
 
@@ -1484,17 +1543,14 @@ fn summarize_tool_input(tool_name: &str, input: &serde_json::Value) -> String {
 }
 
 /// Fetch a single session's payload (for the inspector pane in the UI).
+///
+/// KG-03 dual-read: v3 first, fall back to v2 — so points that haven't been
+/// migrated yet still resolve.
 pub async fn get_session_payload(
     client: &Qdrant,
     session_id: &str,
 ) -> Result<Option<HashMap<String, qdrant_client::qdrant::Value>>> {
-    let pid = PointId {
-        point_id_options: Some(PointIdOptions::Uuid(point_id(session_id))),
-    };
-    let res = client
-        .get_points(GetPointsBuilder::new(COLLECTION, vec![pid]).with_payload(true))
-        .await?;
-    Ok(res.result.into_iter().next().map(|p| p.payload))
+    crate::crud::dual_get_session_payload(client, session_id).await
 }
 
 fn payload_i64(

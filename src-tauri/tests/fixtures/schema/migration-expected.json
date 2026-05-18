@@ -1,0 +1,19 @@
+{
+  "_description": "Expected v2 -> v3 lift. The v2 sample (v2-sample.json) has 16 payload keys (no schema_version, no source_agent, no dt fields, no enrich slots). After migrate_v2_to_v3, the v3 record should equal v3-sample.json: schema_version=3, source_agent='claude_code', start_ts_dt/end_ts_dt copied from start_iso/end_iso, intent/outcome/arc/topic null, entities empty. The 5 dense vectors carry over unchanged; sparse + multivec stay empty (P4 will fill them).",
+  "lift_rules": {
+    "schema_version": 3,
+    "source_agent_from_path_with_dot_claude_projects": "claude_code",
+    "source_agent_from_path_with_dot_codex_sessions": "codex",
+    "start_ts_dt_eq_start_iso": true,
+    "end_ts_dt_eq_end_iso": true,
+    "intent_default": null,
+    "outcome_default": null,
+    "arc_default": null,
+    "topic_default": null,
+    "entities_default_empty_array": true
+  },
+  "invariants": {
+    "point_id_unchanged": "uuid_v5(NAMESPACE_DNS, session_id) — same in v2 and v3, so re-upserts are idempotent.",
+    "v2_collection_untouched": "Reads dual-fall-back to v2 but writes never go there during the migration."
+  }
+}
