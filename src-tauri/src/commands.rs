@@ -58,6 +58,10 @@ impl AppState {
         indexer::ensure_collection(&client)
             .await
             .context("connected to Qdrant but failed to ensure the collection schema")?;
+        // P3 KG-03 — v3 collection lives alongside v2. Idempotent.
+        crate::crud::ensure_collection_v3(&client)
+            .await
+            .context("failed to ensure v3 collection schema")?;
         *guard = Some(client.clone());
         Ok(client)
     }
