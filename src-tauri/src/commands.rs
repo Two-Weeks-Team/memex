@@ -192,8 +192,9 @@ pub async fn get_session_turns(
             _ => None,
         })
         .ok_or_else(|| "session payload missing source_path".to_string())?;
-    let session = parser::parse_session(std::path::Path::new(&source))
+    let validated = crate::sec::validate_session_path(std::path::Path::new(&source))
         .map_err(stringify)?;
+    let session = parser::parse_session(&validated).map_err(stringify)?;
     serde_json::to_value(&session).map_err(stringify)
 }
 
@@ -245,12 +246,46 @@ pub async fn predict_next_actions(
 
 #[tauri::command]
 pub async fn snapshot_export(path: PathBuf) -> Result<String, String> {
-    indexer::snapshot_export(&path).await.map_err(stringify)
+    let sb = crate::snapshot::SnapshotSandbox::from_env().map_err(stringify)?;
+    let canonical = sb
+        .validate_path(&path, crate::snapshot::SnapshotOp::Export)
+        .map_err(stringify)?;
+    let name = indexer::snapshot_export(&canonical).await.map_err(stringify)?;
+    crate::snapshot::SignedEnvelope::sign(&canonical).map_err(stringify)?;
+    Ok(name)
 }
 
+/// Imports a snapshot from the sandboxed snapshot directory after envelope
+/// verification. Returns an empty string on clean import (envelope `Ok`) and a
+/// human-readable warning on the three non-fatal outcomes (legacy / schema
+/// drift / Qdrant minor drift). Tampered or major-version-incompatible
+/// snapshots are rejected with `Err`. Audit MED-1.
 #[tauri::command]
-pub async fn snapshot_import(path: PathBuf) -> Result<(), String> {
-    indexer::snapshot_import(&path).await.map_err(stringify)
+pub async fn snapshot_import(path: PathBuf) -> Result<String, String> {
+    let sb = crate::snapshot::SnapshotSandbox::from_env().map_err(stringify)?;
+    let canonical = sb
+        .validate_path(&path, crate::snapshot::SnapshotOp::Import)
+        .map_err(stringify)?;
+    let warning = match crate::snapshot::SignedEnvelope::verify(&canonical).map_err(stringify)? {
+        crate::snapshot::VerifyOutcome::Ok => String::new(),
+        crate::snapshot::VerifyOutcome::LegacyNoSignature => {
+            let msg = "snapshot has no signature — legacy import allowed".to_string();
+            eprintln!("[memex] {msg}");
+            msg
+        }
+        crate::snapshot::VerifyOutcome::WarnSchemaMismatch { expected, found } => {
+            let msg = format!("snapshot schema {found} differs from current {expected} — proceeding");
+            eprintln!("[memex] {msg}");
+            msg
+        }
+        crate::snapshot::VerifyOutcome::WarnQdrantMinor { expected, found } => {
+            let msg = format!("snapshot qdrant {found} differs from current {expected} — proceeding");
+            eprintln!("[memex] {msg}");
+            msg
+        }
+    };
+    indexer::snapshot_import(&canonical).await.map_err(stringify)?;
+    Ok(warning)
 }
 
 /// Returns a quick collection-level health summary for the splash screen.
