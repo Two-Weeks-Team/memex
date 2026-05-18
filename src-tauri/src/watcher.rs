@@ -76,7 +76,10 @@ pub fn start_watcher(
     let predict_debounce: Arc<AsyncMutex<HashMap<(String, String), SystemTime>>> =
         Arc::new(AsyncMutex::new(HashMap::new()));
 
-    tokio::spawn(async move {
+    // Use Tauri's async runtime so the watcher works when spawned from
+    // `setup()` — at that point tokio's reactor isn't yet installed on the
+    // current thread, but Tauri's runtime (also tokio under the hood) is.
+    tauri::async_runtime::spawn(async move {
         eprintln!(
             "[memex] watcher started · root={} · period={}s",
             root.display(),
