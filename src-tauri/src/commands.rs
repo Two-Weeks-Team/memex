@@ -312,20 +312,29 @@ pub async fn collection_info(
     }))
 }
 
-/// Lightweight scan/refresh — re-reads `~/.claude/projects`, indexes anything
-/// new. Returns how many sessions are now in the collection.
+/// Lightweight scan/refresh — re-reads BOTH `~/.claude/projects` and
+/// `~/.codex/sessions` (P5 KH-01 multi-agent), indexes anything new. Returns
+/// how many sessions are now in the collection.
+///
+/// If `path` is provided, only that single root is scanned (overrides the
+/// dual-root default). Useful for tests and CLI tools.
 #[tauri::command]
 pub async fn refresh_index(
     state: State<'_, AppStateArc>,
     path: Option<PathBuf>,
 ) -> Result<serde_json::Value, String> {
-    let root = path.unwrap_or_else(default_projects_root);
-    let sessions = parser::scan_dir(&root).map_err(stringify)?;
+    let sessions = if let Some(root) = path {
+        // Single-root override path — try Claude parser first; if the root
+        // doesn't look like a Codex sessions dir, default to Claude.
+        scan_root_routed(&root).map_err(stringify)?
+    } else {
+        scan_all_roots().map_err(stringify)?
+    };
     let total = sessions.len();
     let qdrant = state.qdrant().await.map_err(stringify)?;
     let embedder = state.embedder().await.map_err(stringify)?;
     indexer::ensure_collection(&qdrant).await.map_err(stringify)?;
-    let report = indexer::bulk_index(&qdrant, &embedder, &sessions)
+    let report = indexer::bulk_index_arc(&qdrant, embedder, &sessions)
         .await
         .map_err(stringify)?;
     Ok(serde_json::json!({
@@ -334,6 +343,58 @@ pub async fn refresh_index(
         "errors": report.errors,
         "total_scanned": total,
     }))
+}
+
+/// Scan both `~/.claude/projects` AND `~/.codex/sessions` and return a unified
+/// `Vec<Session>`. Missing roots are tolerated — if only one agent is
+/// installed, we still get a usable corpus.
+fn scan_all_roots() -> anyhow::Result<Vec<parser::Session>> {
+    let mut all: Vec<parser::Session> = Vec::new();
+    let claude_root = default_projects_root();
+    if claude_root.exists() {
+        match parser::scan_dir(&claude_root) {
+            Ok(mut s) => all.append(&mut s),
+            Err(e) => eprintln!("[memex] claude root scan: {e:#}"),
+        }
+    }
+    let codex_root = default_codex_root();
+    if codex_root.exists() {
+        match crate::codex_parser::scan_codex_dir(&codex_root) {
+            Ok(mut s) => all.append(&mut s),
+            Err(e) => eprintln!("[memex] codex root scan: {e:#}"),
+        }
+    }
+    if all.is_empty() {
+        anyhow::bail!(
+            "no sessions found — neither {} nor {} contained parseable rollouts",
+            claude_root.display(),
+            codex_root.display()
+        );
+    }
+    Ok(all)
+}
+
+/// Route a single explicit root: prefer the Codex parser when the path
+/// contains `/.codex/sessions` (case-insensitive substring match — matches
+/// the same heuristic `schema::infer_source_agent` uses on the source path).
+fn scan_root_routed(root: &std::path::Path) -> anyhow::Result<Vec<parser::Session>> {
+    let s = root.to_string_lossy();
+    if s.contains("/.codex/sessions") {
+        crate::codex_parser::scan_codex_dir(root)
+    } else {
+        parser::scan_dir(root)
+    }
+}
+
+fn default_codex_root() -> PathBuf {
+    if let Ok(home) = std::env::var("HOME") {
+        let mut p = PathBuf::from(home);
+        p.push(".codex");
+        p.push("sessions");
+        p
+    } else {
+        PathBuf::from(".codex/sessions")
+    }
 }
 
 fn default_projects_root() -> PathBuf {
@@ -395,16 +456,21 @@ impl From<parser::Session> for SessionSummary {
     }
 }
 
-/// List sessions in `~/.claude/projects` sorted most-recent first.
-/// Pure parser walk — independent of Qdrant. Powers the Time Machine
-/// stack on app boot.
+/// List sessions in BOTH `~/.claude/projects` and `~/.codex/sessions`
+/// (P5 KH-01) sorted most-recent first. Pure parser walk — independent of
+/// Qdrant. Powers the Time Machine stack on app boot.
+///
+/// If `path` is provided, only that root is scanned.
 #[tauri::command]
 pub async fn list_sessions(
     path: Option<PathBuf>,
     limit: Option<usize>,
 ) -> Result<Vec<SessionSummary>, String> {
-    let root = path.unwrap_or_else(default_projects_root);
-    let mut sessions = parser::scan_dir(&root).map_err(stringify)?;
+    let mut sessions = if let Some(root) = path {
+        scan_root_routed(&root).map_err(stringify)?
+    } else {
+        scan_all_roots().map_err(stringify)?
+    };
     sessions.sort_by(|a, b| b.start_time.cmp(&a.start_time));
     let limit = limit.unwrap_or(60).min(sessions.len());
     Ok(sessions

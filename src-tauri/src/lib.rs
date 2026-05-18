@@ -1,9 +1,14 @@
 pub mod cli;
+pub mod codex_parser;
 pub mod commands;
 pub mod crud;
 pub mod embed_late;
+pub mod embed_pool;
+pub mod enrich;
 pub mod eval_ndcg;
 pub mod indexer;
+pub mod insights_cache;
+pub mod parse_cache;
 pub mod parser;
 pub mod retrieval;
 pub mod schema;

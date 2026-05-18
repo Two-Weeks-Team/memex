@@ -54,8 +54,37 @@ const HNSW_M: u64 = 16;
 const HNSW_EF_CONSTRUCT: u64 = 100;
 const HNSW_PAYLOAD_M: u64 = 16;
 
+// Per-vector HNSW overrides (P5 KC-02).
+//
+// SPEC NOTE (P5, KC-02): the original P3 config used a single global HNSW
+// block. P5 keeps that global block as the FALLBACK and additionally pins
+// vector-specific overrides where the cost/benefit is worth the build-time
+// memory hit. The cheat sheet:
+//
+// - `content` is the highest-dimensional semantic surface (full transcript) →
+//   denser graph (m=24, ef_construct=200) for better recall.
+// - `code` is similar but smaller corpus (per-session code blocks) → mid
+//   density (m=20, ef_construct=150).
+// - `error` is a small, high-signal surface → moderate density (m=16/100).
+// - `tool` and `path` are short, repetitive token surfaces where the graph
+//   doesn't need to be dense — m=12/64 is enough for cosine accuracy at half
+//   the build cost.
+// - `content_late` (multivector) keeps m=0 (no HNSW links) so it stays
+//   rerank-only per the P3/P4 design.
+const HNSW_CONTENT_M: u64 = 24;
+const HNSW_CONTENT_EF_CONSTRUCT: u64 = 200;
+const HNSW_TOOL_PATH_M: u64 = 12;
+const HNSW_TOOL_PATH_EF_CONSTRUCT: u64 = 64;
+const HNSW_ERROR_M: u64 = 16;
+const HNSW_ERROR_EF_CONSTRUCT: u64 = 100;
+const HNSW_CODE_M: u64 = 20;
+const HNSW_CODE_EF_CONSTRUCT: u64 = 150;
+
 // Strict mode (per spec §1.1)
 const STRICT_MAX_RESIDENT_MEMORY_PERCENT: u32 = 85;
+// P5 KC-06 — cap server-accepted limit to 100 so a runaway client can't
+// request 100k points and OOM the embedded Qdrant.
+const STRICT_MAX_QUERY_LIMIT: u32 = 100;
 
 // WAL (per spec §1.1)
 const WAL_CAPACITY_MB: u64 = 32;
@@ -73,11 +102,33 @@ const QUANTIZATION_OVERSAMPLING: f64 = 2.0;
 /// function just describes the target shape.
 pub fn build_v3_create_collection() -> CreateCollectionBuilder {
     // 5 dense named vectors (cosine, 384-d) — same names/dims as v2.
+    //
+    // SPEC NOTE (P5 KC-02): each vector now carries an HNSW override matched
+    // to its semantic role (see HNSW_* constants above). The qdrant-client
+    // 1.18 builder accepts the override via `.hnsw_config(HnswConfigDiff {..})`
+    // on each `VectorParamsBuilder`. The global `hnsw_config` on
+    // `CreateCollectionBuilder` (below) is still set as the fallback for any
+    // future vector that doesn't carry its own override.
     let mut params_map: HashMap<String, VectorParams> = HashMap::new();
     for name in DENSE_VECTORS {
+        let (m, ef) = match *name {
+            "content" => (HNSW_CONTENT_M, HNSW_CONTENT_EF_CONSTRUCT),
+            "tool" | "path" => (HNSW_TOOL_PATH_M, HNSW_TOOL_PATH_EF_CONSTRUCT),
+            "error" => (HNSW_ERROR_M, HNSW_ERROR_EF_CONSTRUCT),
+            "code" => (HNSW_CODE_M, HNSW_CODE_EF_CONSTRUCT),
+            // Defensive default — should never hit because DENSE_VECTORS is
+            // exhaustive and matches the cases above.
+            _ => (HNSW_M, HNSW_EF_CONSTRUCT),
+        };
         params_map.insert(
             (*name).to_string(),
-            VectorParamsBuilder::new(EMBED_DIM_V3, Distance::Cosine).build(),
+            VectorParamsBuilder::new(EMBED_DIM_V3, Distance::Cosine)
+                .hnsw_config(HnswConfigDiff {
+                    m: Some(m),
+                    ef_construct: Some(ef),
+                    ..Default::default()
+                })
+                .build(),
         );
     }
     // Multivector — frozen at m:0 (no HNSW links) so it doesn't compete with
@@ -136,11 +187,14 @@ pub fn build_v3_create_collection() -> CreateCollectionBuilder {
         .always_ram(true)
         .build();
 
-    // Strict mode — only the resident-memory cap is set; other limits stay
-    // server defaults so we don't accidentally lock ourselves out of large
-    // batch ops during the demo.
+    // Strict mode — KC-06 (P5) adds `max_query_limit` on top of P3's
+    // `max_resident_memory_percent`. Both are conservative: 85% memory cap
+    // is what Qdrant docs call the "embedded-friendly" ceiling, and a query
+    // limit of 100 is well above the highest `per_vector_limit` we ever use
+    // (60 in `lens_search`) but blocks ridiculous client requests.
     let strict_mode = StrictModeConfigBuilder::default()
         .max_resident_memory_percent(STRICT_MAX_RESIDENT_MEMORY_PERCENT)
+        .max_query_limit(STRICT_MAX_QUERY_LIMIT)
         .build();
 
     // WAL — small capacity is fine for a single-machine indexer.
@@ -447,6 +501,37 @@ mod tests {
     }
 
     #[test]
+    fn t_collection_config_per_vector_hnsw_overrides() {
+        // P5 KC-02 — each dense vector carries its own (m, ef_construct).
+        let map = vectors_param_map_v3();
+        let cases: &[(&str, u64, u64)] = &[
+            ("content", HNSW_CONTENT_M, HNSW_CONTENT_EF_CONSTRUCT),
+            ("tool", HNSW_TOOL_PATH_M, HNSW_TOOL_PATH_EF_CONSTRUCT),
+            ("path", HNSW_TOOL_PATH_M, HNSW_TOOL_PATH_EF_CONSTRUCT),
+            ("error", HNSW_ERROR_M, HNSW_ERROR_EF_CONSTRUCT),
+            ("code", HNSW_CODE_M, HNSW_CODE_EF_CONSTRUCT),
+        ];
+        for (name, want_m, want_ef) in cases {
+            let vp = map.get(*name).unwrap();
+            let hnsw = vp
+                .hnsw_config
+                .as_ref()
+                .unwrap_or_else(|| panic!("vector {name} missing per-vector hnsw_config"));
+            assert_eq!(
+                hnsw.m,
+                Some(*want_m),
+                "vector {name} m mismatch (got {:?})",
+                hnsw.m
+            );
+            assert_eq!(
+                hnsw.ef_construct,
+                Some(*want_ef),
+                "vector {name} ef_construct mismatch"
+            );
+        }
+    }
+
+    #[test]
     fn t_collection_config_has_multivec() {
         // AC-3.1.1 — content_late: MaxSim, m=0.
         let map = vectors_param_map_v3();
@@ -502,12 +587,18 @@ mod tests {
 
     #[test]
     fn t_collection_config_strict_mode() {
-        // P5 cooperation — strict_mode_config.max_resident_memory_percent == 85.
+        // P3 — strict_mode_config.max_resident_memory_percent == 85.
+        // P5 KC-06 — strict_mode_config.max_query_limit == 100 (new).
         let req = build_v3_create_collection().build();
         let strict = req.strict_mode_config.expect("strict_mode set on v3");
         assert_eq!(
             strict.max_resident_memory_percent,
             Some(STRICT_MAX_RESIDENT_MEMORY_PERCENT)
+        );
+        assert_eq!(
+            strict.max_query_limit,
+            Some(STRICT_MAX_QUERY_LIMIT),
+            "KC-06 — strict_mode must cap max_query_limit"
         );
     }
 
