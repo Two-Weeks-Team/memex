@@ -40,6 +40,9 @@ petgraph = "0.6"
 notify = "6"
 notify-debouncer-full = "0.3"
 sha2 = "0.10"
+# P5 — KC-05 (Semaphore-cap pool sizing) + KG-02 (LRU cache for predict pivot parses).
+num_cpus = "1"
+lru = "0.12"
 
 [dev-dependencies]
 pretty_assertions = "1"
