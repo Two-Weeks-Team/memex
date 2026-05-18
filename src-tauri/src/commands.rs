@@ -694,3 +694,24 @@ pub async fn relevance_feedback(
     .await
     .map_err(stringify)
 }
+
+/// P2 KA-01/02/05 + KB-02 — FormulaQuery-backed lens with per-vector score
+/// breakdown. The richer `LensResult` shape replaces `SearchHit` for callers
+/// (e.g. WOW-3 inspector) that want contribution bars, recency factor, and
+/// has_errors boost. The legacy `lens_search` command still works and now
+/// internally routes through the same FormulaQuery path.
+#[tauri::command]
+pub async fn lens_search_v2(
+    state: State<'_, AppStateArc>,
+    query: String,
+    weights: Option<crate::lens::LensWeights>,
+    limit: Option<u64>,
+) -> Result<Vec<crate::lens::LensResult>, String> {
+    let weights = weights.unwrap_or_default();
+    let limit = limit.unwrap_or(20);
+    let qdrant = state.qdrant().await.map_err(stringify)?;
+    let embedder = state.embedder().await.map_err(stringify)?;
+    crate::lens::lens_search_v2(&qdrant, &embedder, &query, &weights, limit)
+        .await
+        .map_err(stringify)
+}
