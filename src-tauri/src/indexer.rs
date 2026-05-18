@@ -1265,7 +1265,8 @@ pub async fn predict_next_actions(
             _ => None,
         })
         .context("active session payload is missing source_path")?;
-    let active = crate::parser::parse_session(StdPath::new(&source_path))?;
+    let validated = crate::sec::validate_session_path(StdPath::new(&source_path))?;
+    let active = crate::parser::parse_session(&validated)?;
     if active.turns.is_empty() {
         return Ok(PredictionContext {
             source_session_id: session_id.to_string(),
@@ -1339,7 +1340,10 @@ pub async fn predict_next_actions(
         .collect();
 
     for (nb_sid, sim_score, source, nb_project) in &neighbor_meta {
-        let Ok(nb) = crate::parser::parse_session(StdPath::new(source)) else { continue };
+        // SAFETY: neighbor source_path came from Qdrant payload — validate
+        // it lives inside an allowed sandbox root before parsing the JSONL.
+        let Ok(validated) = crate::sec::validate_session_path(StdPath::new(source)) else { continue };
+        let Ok(nb) = crate::parser::parse_session(&validated) else { continue };
         if nb.turns.is_empty() {
             continue;
         }
