@@ -2,9 +2,9 @@
 
 # Memex
 
-### Time Machine for your Claude Code session history.
+### Your AI session history as a navigable spatial memory.
 
-*Search, replay, and learn from every AI coding session you've ever run — all on your laptop, powered by Qdrant.*
+*Vannevar Bush imagined the original [Memex](https://en.wikipedia.org/wiki/Memex) in 1945 — a personal knowledge machine built on **associative trails**, not search boxes. Eighty years later this is its desktop reincarnation: five Qdrant primitives wired into one **non-chatbot** UI for moving through, replaying, and learning from every Claude Code session you've ever run.*
 
 <p>
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache_2.0-blue.svg?style=flat-square"></a>
@@ -15,12 +15,13 @@
   <br>
   <img alt="100% local" src="https://img.shields.io/badge/privacy-100%25_local-30d158?style=flat-square">
   <img alt="No telemetry" src="https://img.shields.io/badge/telemetry-none-30d158?style=flat-square">
-  <img alt="Hackathon MVP" src="https://img.shields.io/badge/status-Qdrant_VSD_2026_MVP-yellow?style=flat-square">
+  <img alt="No LLM at runtime" src="https://img.shields.io/badge/LLM_at_runtime-none-30d158?style=flat-square">
+  <img alt="Hackathon" src="https://img.shields.io/badge/Qdrant_VSD_2026-Think%20Outside%20the%20Bot-bf5af2?style=flat-square">
 </p>
 
 <p>
-<a href="#-what-you-can-ask-memex"><b>Use cases</b></a> ·
-<a href="#-five-qdrant-unique-features"><b>Features</b></a> ·
+<a href="#-five-qdrant-primitives"><b>Five Qdrant primitives</b></a> ·
+<a href="#-what-you-can-do-with-memex"><b>Use cases</b></a> ·
 <a href="#-quick-start"><b>Quick start</b></a> ·
 <a href="#-cli-reference"><b>CLI</b></a> ·
 <a href="#-architecture"><b>Architecture</b></a> ·
@@ -31,7 +32,30 @@
 
 ---
 
-## 🧠 Why Memex?
+## 🛑 Why Memex isn't a chatbot
+
+Qdrant Vector Space Day 2026's prompt is unusually direct:
+
+> **"Think Outside the Bot."** *"Forget the classical RAG chatbot."*
+> Reimagine vector search beyond conversational interfaces — multi-modal apps, intelligent recommendations, advanced vector search.
+
+Memex takes that literally. There is **no chat window**, **no LLM call at runtime**, **no "ask a question" affordance**. Instead it treats your `~/.claude/projects/**/*.jsonl` corpus the way Bush imagined his Memex would treat a researcher's library: as a **spatial memory** you can step into, point at, and traverse by *similarity* rather than by keyword.
+
+Concretely:
+
+| The "obvious" RAG chatbot version of this | What Memex does instead |
+|---|---|
+| A text box asking "what session am I looking for?" | A **3D card stack** (Time Machine) showing every past session, navigated by ↑↓ / wheel. |
+| Embed-and-retrieve a session's text, summarize it with an LLM. | **Replay** the session turn-by-turn in the *original* webview surface — Bash terminals, Edit diffs, Read snippets, exactly as you saw them live. |
+| Answer "have I seen this error before?" via RAG → LLM → text. | **Banner slides in** with the past session whose `error` named-vector neighborhood matches — zero LLM calls. |
+| "What other sessions are like this one?" → LLM compares summaries. | **Mix & Match** drops session points into Qdrant's Discovery API and returns ranked neighbors. |
+| "What's the structure of my work?" → LLM writes a paragraph. | **3D force-directed topology** of `search_matrix_pairs` data, with auto-labeled clusters, cross-project bridge edges, and gap insights ("‘project-redesign’ ↔ ‘project-yc’ have semantically similar sessions but no bridge — possible unmade connection."). |
+
+Five different Qdrant primitives, five different visual surfaces, zero generative AI in the loop.
+
+---
+
+## 🧠 The corpus
 
 Every Claude Code session you've ever run is sitting on your laptop right now:
 
@@ -39,17 +63,17 @@ Every Claude Code session you've ever run is sitting on your laptop right now:
 ~/.claude/projects/<encoded-cwd>/<session-uuid>.jsonl
 ```
 
-Inside each `.jsonl` is your *entire* conversation — every prompt, every tool call, every diff, every output, every error. **Months of personal engineering memory, perfectly preserved, but practically unreachable.**
+Inside each `.jsonl` is your *entire* conversation — every prompt, every tool call, every diff, every output, every error. **Months of personal engineering memory, perfectly preserved, but practically unreachable** without a tool like this.
 
 | Without Memex | With Memex |
 |---|---|
-| 🔍 You vaguely remember "I fixed that Qdrant connection thing back in March" — you can't find it. | ⌘K → `Qdrant connection` → top hit takes you straight to the session. |
-| 🔁 You hit the same `WAL Kind(WouldBlock)` error you already debugged last month. | A banner slides in: *"I've seen this — open the past session that solved it."* |
-| 📁 `project-marketing-v2`, `-v3`, `-v4` — were they actually different work, or did you redo the same thing? | Topology view shows them as one tight cluster, with cluster auto-labels. |
-| ⏯ You want to *re-watch* yourself fix a tricky bug, turn by turn. | Replay any session at 1× / 2× / 4× / 8× with Bash terminals, Edit diffs, and tool visualizations rendered inline. |
-| 🌐 You stitch results from cloud-hosted, telemetry-bearing services. | Everything — parsing, embedding, similarity search, replay — happens **on your machine**. Nothing leaves. |
+| 📁 You have N "social-seeding-v2/v3/v4" projects — were they actually different work, or did you redo it? | Topology cluster auto-labels: *"project-marketing (10 sess) — code + shell · Bash×1350 Edit×1032"*. Three v#'s collapse into one bubble. |
+| 🔁 You hit the same `WAL Kind(WouldBlock)` you already debugged last month. | A banner slides in: *"I've seen this — open the session that solved it."* (No LLM, no chat — just a named-vector neighbor.) |
+| ⏯ You want to *re-watch* yourself fix a tricky bug. | Open the session in Replay. Step through 600 turns at 4×, see every Bash output and Edit diff exactly as it happened. |
+| 🌌 "What did I work on last month?" | A 3D galaxy of every session, color-coded by project, with yellow cross-project bridges where ideas jumped — and gap cards flagging missed connections. |
+| 🌐 You stitch results from cloud-hosted, telemetry-bearing services. | Parsing, embedding, similarity search, replay — **all on your machine**. Zero network calls after `cargo build`. |
 
-> Memex turns your `.jsonl` pile into a **queryable, replayable, time-machine UI** powered by local Qdrant + FastEmbed.
+> Memex turns your `.jsonl` pile into a **spatial, replayable memory machine** powered entirely by local Qdrant + FastEmbed.
 
 ---
 
@@ -66,83 +90,102 @@ Inside each `.jsonl` is your *entire* conversation — every prompt, every tool 
 
 ---
 
-## ✨ Five Qdrant-unique features
+## ✨ Five Qdrant primitives
 
-Most session-search tools index everything into one vector and call it a day. Memex puts **five different lenses** on the same session point and exposes each via a Qdrant primitive that would be hard to replicate elsewhere:
+Each surface in Memex maps to a different Qdrant primitive — together they cover *named vectors → matrix sampling → discovery → payload filtering → snapshots*. None of these are the "embed text, retrieve top-K, feed to LLM" loop of classical RAG.
 
-| # | Feature | Qdrant primitive | What you do with it |
+Ordered as you encounter them in the app (visual first, search last):
+
+| # | Surface | Qdrant primitive | What you actually do |
 |---|---|---|---|
-| 1 | 🔍 **Lens slider** | Multiple **named vectors per point** + parallel `query()` + weighted Rust combine | 5 sliders (`content`, `tool`, `path`, `error`, `code`) — bias a search toward exactly the signal you want. Each result card shows per-vector contribution chips. |
-| 2 | 🧪 **Mix & Match** | **Discovery API** (`DiscoverInput` + context pairs) | Drop sessions as **positives** and **negatives** — Qdrant returns sessions semantically near the positives, far from the negatives. |
-| 3 | 🌌 **Topology galaxy** | **Distance Matrix API** (`search_matrix_pairs`) → 3D force-directed graph + auto-clustered project labels + gap analysis | A real WebGL scene of your session corpus. Yellow bridges = cross-project "ideas that jumped"; **Gap cards** flag pairs of projects that *should* connect but don't. |
-| 4 | ⏯ **Replay engine** | Lightweight payload (`source_path`) → on-demand JSONL re-parse | Turn-by-turn animation of any past session with **Bash terminals**, **Edit `-`/`+` diffs**, **Read snippets**, **Task/Agent spawns**. Click to scrub, ⏮ ⏯ ⏭ controls, 1× / 2× / 4× / 8×. |
-| 5 | 🔔 **Proactive recall** | `query()` on the `error` named vector with `has_errors=true` filter, polled every 12 s over `~/.claude/projects` | Working in another Claude Code session and hit a fresh error? A banner slides in: *"I've seen this error before — open the session that solved it."* |
+| 1 | 🪟 **Time Machine layered stack** | `scroll` over the indexed collection (payload-only, no vectors) | When the app boots, every past session appears as a 3D layered card deck. ↑↓ / mouse-wheel time-travels through them. **No search box involved.** |
+| 2 | 🌌 **Topology galaxy** | **Distance Matrix API** (`search_matrix_pairs`) → 3D force-directed graph + auto-clustered project labels + gap insights | A WebGL scene of your session corpus. Cluster auto-labels (*"code + shell · Bash×1350 Edit×1032"*), yellow cross-project bridge edges, and **Gap cards** flagging pairs of projects that *should* connect but don't (*"‘project-redesign’ ↔ ‘project-yc’ — semantically similar (sim 0.97) but never bridged."*). |
+| 3 | 🧪 **Mix & Match** | **Discovery API** (`DiscoverInput` + context pairs) | Drop sessions as **positives** and **negatives** — Qdrant returns sessions semantically near the positives, far from the negatives. Recommendation, not retrieval. |
+| 4 | 🔔 **Proactive recall** | `query()` on the dedicated `error` named vector with `has_errors=true` payload filter, polled every 12 s over `~/.claude/projects` | Working in another Claude Code session and hit a fresh `tool_result.is_error`? A banner slides in: *"I've seen this error before — open the session that solved it."* No LLM, no chat, just a vector neighbor with the right filter. |
+| 5 | ⏯ **Replay engine** | Lightweight payload (`source_path`) → on-demand JSONL re-parse | Turn-by-turn animation of any past session with **Bash terminals**, **Edit `-`/`+` diffs**, **Read snippets**, **Task/Agent spawns**. Click to scrub, ⏮ ⏯ ⏭ controls, 1× / 2× / 4× / 8×. (No vector primitive here — but it's the surface Memex's vector primitives *point to*.) |
+| 6 | 🔍 **Lens slider** | Multiple **named vectors per point** + parallel `query()` + weighted Rust combine | The "advanced vector search" axis, intentionally last. Five named vectors per session (`content`, `tool`, `path`, `error`, `code`); slide each weight to bias the rank — per-vector contribution chips on each result card so you can *see* which lens earned the hit. |
 
-Plus: **Snapshot** export/import via Qdrant's HTTP snapshot API, **portable** in one `.snapshot` file.
+Plus: **Snapshot** export/import via Qdrant's HTTP snapshot API — your entire indexed memory in one portable file.
 
 ColBERT v2 inline citations are on the roadmap; [`fastembed-rs`](https://github.com/Anush008/fastembed-rs) 5.x doesn't yet ship the model.
 
 ---
 
-## 💬 What you can ask Memex
+## 💡 What you can *do* with Memex
 
-Concrete examples of questions Memex answers from real session history:
+Not "what you can ask" — there's no question-answering interface. These are spatial, temporal, and recommendation moves you make on your own corpus:
 
 <table>
-<tr><td><b>Search</b></td><td>
+<tr><td><b>Browse your work, no query needed</b></td><td>
+
+Launch the app. The Time Machine stack populates with every past session sorted most-recent first. **No search box involved.**
 
 ```
-⌘K → "Tauri build failed missing icons"
+↑ / ↓     time-travel through 80 past sessions
+⏎         open the focused session in the inspector
+mouse-wheel  smooth scrolling through history
 ```
-
-→ The exact past session that fixed it, with the Edit diff in Replay.
 
 </td></tr>
-<tr><td><b>Lens</b></td><td>
+<tr><td><b>See the shape of your work</b></td><td>
+
+Open the Topology galaxy. Same-project sessions form clusters; yellow lines are cross-project "bridges" (= shared ideas).
 
 ```
-memex lens "myproject memex Qdrant" --content 2 --tool 1 --path 0.5
+→ "project-marketing (10 sess) — code + shell · Bash×1350 Edit×1032"
+→ Gap card: "project-redesign ↔ project-yc — semantically similar
+            (sim 0.97) but never bridged"
 ```
 
-→ Sessions weighted toward conversation prose, with file paths as a tiebreaker.
+The Gap insights are an *intelligent recommendation*, not a search result: they tell you about connections you've *never* made between your own projects.
 
 </td></tr>
-<tr><td><b>Discovery</b></td><td>
+<tr><td><b>Recommend, don't retrieve</b></td><td>
+
+Mix & Match drops session points into Qdrant's Discovery API. Two clicks → ranked recommendations.
 
 ```
-Click + pos on workspace-a session, − neg on project-meeting session
++ pos:  workspace-a session
+− neg:  project-meeting session
+→ Discover: workspace-b, workspace-c, project-redesign …
+   "Sessions like the panel-flavored work, unlike chatty meetings."
 ```
-
-→ "Other myproject-flavored sessions, but unlike chatty meeting work."
 
 </td></tr>
-<tr><td><b>Topology</b></td><td>
+<tr><td><b>Get reminded automatically</b></td><td>
 
-```
-Open Topology → see auto-labeled project clusters
-```
-
-→ *"`project-marketing` (10 sessions) — code + shell · Bash×1350 Edit×1032"*<br>
-→ Gap card: *"`project-redesign` ↔ `project-yc` — semantically similar (sim 0.97) but never bridged."*
-
-</td></tr>
-<tr><td><b>Recall</b></td><td>
-
-Working on a fresh project, hit an error. 12 seconds later:
+A background poller watches `~/.claude/projects` for `tool_result.is_error`. When a fresh one appears, a banner slides in within 12 s:
 
 ```
 ⚡ I've seen this error before:
-   myproject/workspace-b — 2026-05-15 [Open replay]
+   project-redesign — 2026-05-15 (sim 0.93)
+   [Open replay]   [Dismiss]
+```
+
+(No LLM call. No chat surface. Just a Qdrant `query()` against the `error` named vector with `has_errors=true` filter.)
+
+</td></tr>
+<tr><td><b>Re-experience a past session</b></td><td>
+
+Click Replay on any card. The Replay engine animates the session turn-by-turn at 1× / 2× / 4× / 8× — Bash terminals, Edit `-`/`+` diffs, Read snippets, Task/Agent spawns, every tool exactly as the user saw it live.
+
+```
+600 turns at 4×  ≈ 5 min replay
 ```
 
 </td></tr>
-<tr><td><b>Replay</b></td><td>
+<tr><td><b>Search, if you still want to</b></td><td>
+
+⌘K opens the Lens. Slide each named vector weight to bias the rank toward `content`, `tool`, `path`, `error`, or `code` — per-vector contribution chips on each card so you can see which lens earned the hit.
 
 ```
-Click Replay on any card → step through 600 turns at 4× speed
+memex lens "Tauri build failed missing icons" --error 2 --tool 1
 ```
 
-→ Watch your past self debug, browse, and ship — every Bash command and Edit diff rendered.
+The Lens slider is intentionally the *last* surface, not the first.
+
+</td></tr>
+</table>
 
 </td></tr>
 </table>
@@ -342,13 +385,23 @@ Deeper reading:
 
 ## 📊 Status & roadmap
 
-This is a **hackathon MVP** built for [Qdrant Vector Space Day 2026](https://qdrant.tech) (deadline 2026-06-01). Functional path verified end-to-end on the author's `~/.claude/projects` (**79 sessions indexed, 17,938 tool calls covered**), with all five Qdrant features exercisable from both CLI and GUI.
+This is a **hackathon MVP** built for [Qdrant Vector Space Day 2026](https://qdrant.tech) (deadline 2026-06-01). Verified end-to-end on the author's `~/.claude/projects` (**79 sessions indexed, 17,938 tool calls covered**), with all five primitives exercisable from both CLI and GUI.
+
+**Hackathon alignment** — *"Think Outside the Bot"*:
+
+- ✅ No chat surface · no LLM in the runtime loop · no "ask a question" affordance
+- ✅ **5 distinct Qdrant primitives** (named vectors / Distance Matrix / Discovery / payload filter / Snapshot), each wrapped in a visual UI rather than a text retrieval pipeline
+- ✅ Two of the surfaces (Proactive Recall, Mix & Match) are *recommendation* features — explicitly called out as an encouraged direction in the VSD prompt
+- ✅ Single-machine, zero-telemetry, zero-network architecture
 
 **What ships in this MVP**
 
-- ✅ 5 Qdrant-unique features (lens / mix / topology / replay / recall)
-- ✅ Time Machine layered 3D card stack on boot
-- ✅ 3D force-directed topology galaxy with project cluster auto-labels + gap analysis
+- ✅ 🪟 Time Machine layered 3D card stack on boot (browse, no query needed)
+- ✅ 🌌 3D force-directed topology galaxy with project cluster auto-labels + gap insights
+- ✅ 🧪 Mix & Match recommendation via Qdrant Discovery API
+- ✅ 🔔 Proactive recall banner (12 s poll over `~/.claude/projects`)
+- ✅ ⏯ Replay engine with Bash / Edit-diff / Read / Task tool visualizations at 1×–8×
+- ✅ 🔍 Lens slider (multi-named-vector weighted search) — the "advanced vector search" axis
 - ✅ Snapshot export/import via Qdrant HTTP API
 - ✅ Lazy AppState init — self-heals if Qdrant is started after Memex
 - ✅ Honest duplicate-sessionId detection in indexer reporting
