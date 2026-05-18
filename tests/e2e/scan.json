@@ -1,0 +1,10 @@
+scanning /Users/kimsejun/.claude/projects + /Users/kimsejun/.codex/sessions (all agents)
+start               project                  user  asst  tools     branch      title
+------------------------------------------------------------------------------------------------------------------------
+2026-05-18 13:05    memex                    u=423 a=679 tools=383 branch=feature/sota-v3.2-plan-and-mockups (untitled)
+2026-05-18 07:04    memex                    u=5   a=20  tools=62  branch=-          # AGENTS.md instructions for /Users/kimsejun/Documents/GitHu
+2026-05-18 05:16    memex                    u=183 a=261 tools=150 branch=main       (untitled)
+2026-05-17 07:24    he-was-socrates          u=47  a=76  tools=39  branch=main       (untitled)
+2026-05-17 07:19    vibeDeploy               u=64  a=85  tools=59  branch=main       (untitled)
+
+parsed 111 session(s) (shown: 5), 37057 total tool calls

@@ -31,6 +31,14 @@ use crate::commands::{AppState, AppStateArc};
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        // P8 — `memex://` URL scheme with 5 surface routes:
+        //   memex://timemachine   memex://topology   memex://lens
+        //   memex://predict       memex://mix-match
+        // The plugin emits a `deep-link://new-url` event the frontend listens
+        // to in `src/main.js` (`__TAURI__.event.listen('deep-link://new-url')`)
+        // and dispatches to the matching tab. macOS uses `Info.plist`
+        // `CFBundleURLTypes` (configured via tauri.conf.json `plugins`).
+        .plugin(tauri_plugin_deep_link::init())
         .setup(|app| {
             // AppState is managed eagerly with EMPTY lazy slots. Qdrant and
             // fastembed init lazily on the first command that needs them, so
