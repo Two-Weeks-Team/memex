@@ -35,12 +35,14 @@ pub fn run() {
             // 60 s, re-indexes any session whose mtime advanced. Emits
             // `index-updated` so the frontend can flash a chip.
             let watch_root = default_projects_root();
-            let watch_period = Duration::from_secs(
-                std::env::var("MEMEX_WATCHER_PERIOD_SECS")
-                    .ok()
-                    .and_then(|s| s.parse::<u64>().ok())
-                    .unwrap_or(60),
-            );
+            // Floor at 1 s so a misconfigured env var (e.g. =0) can't turn
+            // the watcher into a CPU-pegging busy loop.
+            const MIN_WATCH_PERIOD_SECS: u64 = 1;
+            let raw_period = std::env::var("MEMEX_WATCHER_PERIOD_SECS")
+                .ok()
+                .and_then(|s| s.parse::<u64>().ok())
+                .unwrap_or(60);
+            let watch_period = Duration::from_secs(raw_period.max(MIN_WATCH_PERIOD_SECS));
             watcher::start_watcher(
                 app_state.clone(),
                 app.handle().clone(),

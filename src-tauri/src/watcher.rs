@@ -295,14 +295,18 @@ async fn maybe_fire_recall(
     let prefix: String = error_text.chars().take(120).collect();
     let key = (session.session_id.clone(), prefix.clone());
     {
-        let mut g = debounce.lock().await;
+        let g = debounce.lock().await;
         let now = SystemTime::now();
         if let Some(prev) = g.get(&key) {
             if now.duration_since(*prev).map(|d| d < RECALL_DEBOUNCE).unwrap_or(false) {
                 return Ok(false);
             }
         }
-        g.insert(key, now);
+        // Don't insert yet — only mark as "recently notified" once an
+        // alert actually fires. If we set the key here and recall has 0
+        // cross-session hits, a *future* match (e.g. user solves the same
+        // error in another session and that session gets indexed) would
+        // be silenced for the next hour for no reason.
     }
 
     let hits = indexer::recall(qdrant, embedder, &error_text, 5).await?;
@@ -313,6 +317,12 @@ async fn maybe_fire_recall(
         .collect();
     if cross.is_empty() {
         return Ok(false);
+    }
+
+    // Reserve the debounce slot only now that we know we're about to fire.
+    {
+        let mut g = debounce.lock().await;
+        g.insert(key, SystemTime::now());
     }
 
     let top = &cross[0];
@@ -396,17 +406,19 @@ async fn maybe_fire_predict(
         return Ok(false);
     }
 
-    // Debounce: 30 min per (session_id, tool_name).
-    let key = (session.session_id.clone(), top.tool_name.clone());
+    // Debounce: 30 min per (session_id, lowercased tool_name) — match the
+    // case-insensitive `already_called` check above so the two filters
+    // agree on what "the same tool" means.
+    let key = (session.session_id.clone(), top.tool_name.to_ascii_lowercase());
     {
-        let mut g = debounce.lock().await;
+        let g = debounce.lock().await;
         let now = SystemTime::now();
         if let Some(prev) = g.get(&key) {
             if now.duration_since(*prev).map(|d| d < PREDICT_DEBOUNCE).unwrap_or(false) {
                 return Ok(false);
             }
         }
-        g.insert(key, now);
+        // Reserve below, only after we commit to actually firing.
     }
 
     let pct = (top.frequency * 100.0).round() as i32;
@@ -419,6 +431,10 @@ async fn maybe_fire_predict(
         pct
     );
     notify_system(app, title, &body);
+    {
+        let mut g = debounce.lock().await;
+        g.insert(key, SystemTime::now());
+    }
 
     let _ = app.emit(
         "open-replay-from-notification",
