@@ -21,6 +21,7 @@ use crate::commands::{AppState, AppStateArc};
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             // AppState is managed eagerly with EMPTY lazy slots. Qdrant and
             // fastembed init lazily on the first command that needs them, so

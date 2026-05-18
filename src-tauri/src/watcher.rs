@@ -1,9 +1,16 @@
-//! Background auto-index daemon.
+//! Background auto-index daemon + proactive recall.
 //!
 //! Polls `~/.claude/projects` every `period` seconds. For every top-level
 //! `*.jsonl` whose `mtime` advanced since we last looked, re-parse + upsert
 //! into Qdrant. Emits a Tauri event `index-updated` with per-tick stats so
 //! the frontend can light up a fade-in chip.
+//!
+//! Then, for each freshly-modified session, looks for the latest
+//! `tool_result.is_error` turn. If `indexer::recall(error_text)` returns a
+//! cross-session hit with score ≥ 0.65, fires a macOS notification and emits
+//! `open-replay-from-notification` so the frontend can deep-link into the
+//! past session's resolution. Debounced 1 h per (current_session_id,
+//! error_text_prefix) pair so the same error doesn't pop a banner every tick.
 //!
 //! We poll instead of using `notify`/FSEvents to stay portable, avoid macOS
 //! permission prompts, and dodge the duplicate-event firehose that comes
@@ -16,13 +23,15 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use serde::Serialize;
+use serde_json::json;
 use tauri::{AppHandle, Emitter};
+use tauri_plugin_notification::{NotificationExt, PermissionState};
 use tokio::sync::Mutex as AsyncMutex;
 use walkdir::WalkDir;
 
 use crate::commands::AppStateArc;
-use crate::indexer;
-use crate::parser;
+use crate::indexer::{self, SearchHit};
+use crate::parser::{self, Session};
 
 /// Per-tick stats payload emitted on the `index-updated` Tauri event.
 #[derive(Debug, Clone, Default, Serialize)]
@@ -31,8 +40,19 @@ pub struct TickStats {
     pub reindexed: usize,
     pub new: usize,
     pub errors: usize,
+    pub notifications_fired: usize,
     pub elapsed_ms: u128,
 }
+
+/// Recall hit score threshold — only fire notifications when the top
+/// cross-session match is genuinely close.
+const RECALL_SCORE_THRESHOLD: f32 = 0.65;
+/// Debounce window per (session_id, error_prefix). Keeps the same error from
+/// re-firing every tick.
+const RECALL_DEBOUNCE: Duration = Duration::from_secs(60 * 60);
+/// Only consider notifications for files modified within this window of "now".
+/// On a cold start, this prevents a flood of recall pops for old errors.
+const FRESH_ERROR_WINDOW: Duration = Duration::from_secs(60 * 5);
 
 /// Spawn the background watcher. Returns immediately; the task runs until the
 /// process exits.
@@ -44,6 +64,8 @@ pub fn start_watcher(
 ) {
     let mtimes: Arc<AsyncMutex<HashMap<PathBuf, SystemTime>>> =
         Arc::new(AsyncMutex::new(HashMap::new()));
+    let debounce: Arc<AsyncMutex<HashMap<(String, String), SystemTime>>> =
+        Arc::new(AsyncMutex::new(HashMap::new()));
 
     tokio::spawn(async move {
         eprintln!(
@@ -51,6 +73,10 @@ pub fn start_watcher(
             root.display(),
             period.as_secs()
         );
+
+        // Ask for notification permission once on startup. macOS shows the
+        // prompt the first time; subsequent launches reuse the cached state.
+        ensure_notification_permission(&app);
 
         // First tick: short delay so the UI window gets to paint before we
         // potentially load fastembed (~130 MB on first launch).
@@ -60,12 +86,11 @@ pub fn start_watcher(
             delay = period;
 
             if !root.exists() {
-                // Don't churn — wait the full period.
                 continue;
             }
 
             let start = std::time::Instant::now();
-            let stats = match tick(&state, &app, &root, &mtimes).await {
+            let stats = match tick(&state, &app, &root, &mtimes, &debounce).await {
                 Ok(s) => s,
                 Err(e) => {
                     eprintln!("[memex] watcher tick failed: {e:#}");
@@ -73,13 +98,14 @@ pub fn start_watcher(
                 }
             };
 
-            if stats.reindexed > 0 || stats.new > 0 {
+            if stats.reindexed > 0 || stats.new > 0 || stats.notifications_fired > 0 {
                 eprintln!(
-                    "[memex] watcher tick · checked={} new={} reindexed={} errors={} ({} ms)",
+                    "[memex] watcher tick · checked={} new={} reindexed={} errors={} notifications={} ({} ms)",
                     stats.checked,
                     stats.new,
                     stats.reindexed,
                     stats.errors,
+                    stats.notifications_fired,
                     start.elapsed().as_millis()
                 );
                 let _ = app.emit("index-updated", &stats);
@@ -88,18 +114,43 @@ pub fn start_watcher(
     });
 }
 
+fn ensure_notification_permission(app: &AppHandle) {
+    let n = app.notification();
+    let state = match n.permission_state() {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("[memex] notification permission_state failed: {e:#}");
+            return;
+        }
+    };
+    match state {
+        PermissionState::Granted => {
+            eprintln!("[memex] notification permission: granted");
+        }
+        PermissionState::Denied => {
+            eprintln!(
+                "[memex] notification permission denied — enable in System Settings → Notifications → Memex to receive recall alerts"
+            );
+        }
+        // Prompt | PromptWithRationale — ask now.
+        _ => match n.request_permission() {
+            Ok(s) => eprintln!("[memex] notification permission requested → {s:?}"),
+            Err(e) => eprintln!("[memex] notification request_permission failed: {e:#}"),
+        },
+    }
+}
+
 async fn tick(
     state: &AppStateArc,
-    _app: &AppHandle,
+    app: &AppHandle,
     root: &Path,
     mtimes: &Arc<AsyncMutex<HashMap<PathBuf, SystemTime>>>,
+    debounce: &Arc<AsyncMutex<HashMap<(String, String), SystemTime>>>,
 ) -> anyhow::Result<TickStats> {
     let mut stats = TickStats::default();
     let started = std::time::Instant::now();
 
     // 1. Cheap walk — collect every (path, mtime) that *might* need work.
-    //    We do this before touching Qdrant/Embedder so the slow path only
-    //    fires when the corpus actually changed.
     let mut candidates: Vec<(PathBuf, SystemTime)> = Vec::new();
     for entry in WalkDir::new(root)
         .into_iter()
@@ -125,9 +176,7 @@ async fn tick(
         let mtimes_guard = mtimes.lock().await;
         for (path, modified) in &candidates {
             match mtimes_guard.get(path) {
-                Some(prev) if *prev >= *modified => {
-                    // Up to date — skip.
-                }
+                Some(prev) if *prev >= *modified => {}
                 Some(_) => to_index.push((path.clone(), *modified, false)),
                 None => to_index.push((path.clone(), *modified, true)),
             }
@@ -144,6 +193,11 @@ async fn tick(
     let embedder = state.embedder().await?;
 
     let mut to_remember: Vec<(PathBuf, SystemTime)> = Vec::with_capacity(to_index.len());
+    // Sessions we just (re)indexed AND whose mtime is "fresh" — candidates
+    // for recall notifications.
+    let mut hot: Vec<Session> = Vec::new();
+
+    let now = SystemTime::now();
     for (path, modified, is_new) in to_index {
         let session = match parser::parse_session(&path) {
             Ok(s) => s,
@@ -160,7 +214,16 @@ async fn tick(
                 } else {
                     stats.reindexed += 1;
                 }
-                to_remember.push((path, modified));
+                to_remember.push((path.clone(), modified));
+                // Only fire recall for sessions whose mtime is genuinely
+                // recent — avoids flooding on first launch.
+                if now
+                    .duration_since(modified)
+                    .map(|d| d <= FRESH_ERROR_WINDOW)
+                    .unwrap_or(false)
+                {
+                    hot.push(session);
+                }
             }
             Err(e) => {
                 eprintln!("[memex] watcher index_session failed for {}: {:#}", path.display(), e);
@@ -177,6 +240,125 @@ async fn tick(
         }
     }
 
+    // 5. Proactive recall — for each hot session, check the latest error.
+    for session in hot {
+        match maybe_fire_recall(&qdrant, &embedder, app, debounce, &session).await {
+            Ok(true) => stats.notifications_fired += 1,
+            Ok(false) => {}
+            Err(e) => eprintln!(
+                "[memex] watcher recall failed for {}: {:#}",
+                session.session_id, e
+            ),
+        }
+    }
+
     stats.elapsed_ms = started.elapsed().as_millis();
     Ok(stats)
+}
+
+/// Returns `Ok(true)` if a notification was fired.
+async fn maybe_fire_recall(
+    qdrant: &qdrant_client::Qdrant,
+    embedder: &indexer::Embedder,
+    app: &AppHandle,
+    debounce: &Arc<AsyncMutex<HashMap<(String, String), SystemTime>>>,
+    session: &Session,
+) -> anyhow::Result<bool> {
+    let Some((turn_index, error_text)) = latest_error(session) else {
+        return Ok(false);
+    };
+
+    // Debounce key — first 120 chars are enough to disambiguate near-duplicates
+    // without thrashing the HashMap on noisy stack traces.
+    let prefix: String = error_text.chars().take(120).collect();
+    let key = (session.session_id.clone(), prefix.clone());
+    {
+        let mut g = debounce.lock().await;
+        let now = SystemTime::now();
+        if let Some(prev) = g.get(&key) {
+            if now.duration_since(*prev).map(|d| d < RECALL_DEBOUNCE).unwrap_or(false) {
+                return Ok(false);
+            }
+        }
+        g.insert(key, now);
+    }
+
+    let hits = indexer::recall(qdrant, embedder, &error_text, 5).await?;
+    // Drop self-matches + threshold.
+    let cross: Vec<SearchHit> = hits
+        .into_iter()
+        .filter(|h| h.session_id != session.session_id && h.score >= RECALL_SCORE_THRESHOLD)
+        .collect();
+    if cross.is_empty() {
+        return Ok(false);
+    }
+
+    let top = &cross[0];
+    let project = session.project_name.as_deref().unwrap_or("?");
+    let title = "Memex · I've seen this error before";
+    let body = format!(
+        "{} · turn #{}  ·  match {:.0}% in {}",
+        project,
+        turn_index,
+        top.score * 100.0,
+        if top.ai_title.is_empty() { top.project_name.as_str() } else { top.ai_title.as_str() }
+    );
+
+    if let Err(e) = app
+        .notification()
+        .builder()
+        .title(title)
+        .body(&body)
+        .show()
+    {
+        eprintln!("[memex] notification show failed: {e:#}");
+    }
+
+    // Emit deep-link event so the frontend can auto-open the replay of the
+    // matched past session whenever the main window comes into focus.
+    // turn_index defaults to 0 (start of past session) — the user scrubs
+    // forward via the existing Time Machine controls.
+    let _ = app.emit(
+        "open-replay-from-notification",
+        json!({
+            "from_session_id": session.session_id,
+            "from_turn_index": turn_index,
+            "from_project": project,
+            "error_text": error_text,
+            "session_id": top.session_id,
+            "turn_index": 0,
+            "match_score": top.score,
+            "match_project": top.project_name,
+            "match_title": top.ai_title,
+            "cross_hits": cross.iter().map(|h| json!({
+                "session_id": h.session_id,
+                "project_name": h.project_name,
+                "ai_title": h.ai_title,
+                "score": h.score,
+            })).collect::<Vec<_>>()
+        }),
+    );
+
+    Ok(true)
+}
+
+/// Walk the session's last few turns and return the most recent error
+/// (turn_index, error_text). Mirrors `commands::tail_recent_errors` logic so
+/// the watcher and the in-app banner agree on what counts as an "error".
+fn latest_error(session: &Session) -> Option<(usize, String)> {
+    let n = session.turns.len();
+    for (rev_i, turn) in session.turns.iter().rev().take(6).enumerate() {
+        let idx = n - 1 - rev_i;
+        if let Some(err) = turn.tool_results.iter().rev().find(|r| r.is_error) {
+            let head: String = err.content.chars().take(800).collect();
+            return Some((idx, head));
+        }
+        for line in turn.text.lines().rev() {
+            let lower = line.to_ascii_lowercase();
+            if lower.contains("error:") || lower.contains("traceback") || lower.contains("panic") {
+                return Some((idx, line.trim().to_string()));
+            }
+        }
+    }
+    None
 }

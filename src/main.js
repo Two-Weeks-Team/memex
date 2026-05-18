@@ -53,6 +53,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   // immediately.
   loadInitialStack();
   attachWatcherListener();
+  attachRecallNotificationListener();
   await pollUntilReady();
   startRecallPolling();
 });
@@ -80,6 +81,40 @@ async function attachWatcherListener() {
     showWatcherChip(label);
     // Refresh the stack so the just-touched session jumps to the top.
     loadInitialStack();
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Recall notification deep-link — Rust watcher fires
+//   `open-replay-from-notification` with { session_id, turn_index, ... }
+// when it spots a fresh error with a ≥0.65 cross-session match. We auto-open
+// the matched past session's replay so the user can scrub through how they
+// solved it last time.
+// ---------------------------------------------------------------------------
+
+async function attachRecallNotificationListener() {
+  if (!tauriEvent || typeof tauriEvent.listen !== "function") return;
+  await tauriEvent.listen("open-replay-from-notification", async (event) => {
+    const p = event.payload || {};
+    if (!p.session_id) return;
+    showWatcherChip(`Recall · opening past session for ${p.from_project || "this error"}`);
+    try {
+      await openReplay(p.session_id, {
+        project_name: p.match_project || p.match_title || "",
+      });
+    } catch (err) {
+      console.warn("recall openReplay failed:", err);
+      return;
+    }
+    setTimeout(() => {
+      if (state.replay.sessionId !== p.session_id) return;
+      const target = Math.min(
+        Math.max(parseInt(p.turn_index || 0, 10) || 0, 0),
+        state.replay.turns.length - 1,
+      );
+      state.replay.cursor = target;
+      renderReplayTurn(target);
+    }, 600);
   });
 }
 
