@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 
-use crate::{codex_parser, indexer, parser};
+use crate::{codex_parser, crud, indexer, parser};
 
 #[derive(Debug, Parser)]
 #[command(name = "memex", version, about = "Time Machine for AI session JSONL")]
@@ -194,6 +194,12 @@ fn cmd_scan(
             .context("building tokio runtime")?;
         rt.block_on(async {
             let client = indexer::connect().await?;
+            // P3 KG-03 dual-write: write path is v3, so v3 must exist.
+            // The legacy v2 (`memex_sessions`) ensure stays for read-fallback
+            // (KC-01b dual-read in retrieval.rs).
+            crud::ensure_collection_v3(&client)
+                .await
+                .context("ensuring v3 collection before bulk index")?;
             indexer::ensure_collection(&client).await?;
             let embedder = std::sync::Arc::new(indexer::Embedder::new()?);
             // P5 — Arc-based bulk index uses embed_pool batching.
@@ -202,7 +208,7 @@ fn cmd_scan(
                 "\nindexed {}/{} session(s) into '{}' ({} duplicate sessionId(s) skipped, {} error(s))",
                 report.indexed,
                 total,
-                indexer::COLLECTION,
+                crate::schema::COLLECTION_V3,
                 report.duplicates_skipped,
                 report.errors,
             );
