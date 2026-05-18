@@ -8,6 +8,7 @@ pub mod enrich;
 pub mod eval_ndcg;
 pub mod indexer;
 pub mod insights_cache;
+pub mod lens;
 pub mod parse_cache;
 pub mod parser;
 pub mod retrieval;
@@ -91,6 +92,8 @@ pub fn run() {
             commands::list_sessions_ordered,
             commands::lens_search_grouped,
             commands::relevance_feedback,
+            // P2 KA-01/02/05 — FormulaQuery-backed lens with score breakdown
+            commands::lens_search_v2,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
