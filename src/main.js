@@ -4,14 +4,49 @@
 
 const { invoke } = window.__TAURI__.core;
 
-const LENSES = ["content", "tool", "path", "error", "code"];
+// Six dense lens vectors: original 5 + content_late (multivector, P2 KA-01).
+const LENSES = ["content", "tool", "path", "error", "code", "content_late"];
+// Lens defaults: content_late starts at 0 (off) to preserve legacy behavior.
+const LENS_DEFAULT = {
+  content: 1.0,
+  tool: 1.0,
+  path: 1.0,
+  error: 1.0,
+  code: 1.0,
+  content_late: 0.0,
+};
+
+// WOW-3: vectors we render as bar segments. Includes sparse counterparts that
+// `lens_search_v2` populates in `score_breakdown.per_vector`.
+const BAR_VECTORS = [
+  "content",
+  "tool",
+  "path",
+  "error",
+  "code",
+  "content_late",
+  "path_sparse",
+  "tool_sparse",
+];
+
+// WOW: motion / a11y kill switch — disable trail SVG, hyperplane rotation,
+// and bar transitions when the user prefers reduced motion.
+const REDUCED_MOTION = window.matchMedia
+  ? window.matchMedia("(prefers-reduced-motion: reduce)")
+  : { matches: false };
 
 const state = {
   query: "",
-  weights: Object.fromEntries(LENSES.map((k) => [k, 1.0])),
+  weights: { ...LENS_DEFAULT },
+  // WOW-3: fusion mode ("formula" | "rrf") and optional MMR diversity (0..1)
+  // forwarded to lens_search_v2.
+  fusion: "formula",
+  diversity: null,
   hits: [],
   selected: null,
-  mix: { positive: [], negative: [] },
+  // WOW-5: mix state evolves from {pos, neg} arrays to a richer model that
+  // also carries pair context for `mix_match_with_pairs` (P4 KB-03).
+  mix: { positive: [], negative: [], pairs: [], target: null, lastQuery: null },
   collectionPoints: 0,
   // B3: monotonically-increasing query id; renderResults drops responses
   // whose generation is older than the latest dispatched query.
@@ -21,6 +56,17 @@ const state = {
   stack: [],
   stackFocus: 0,
   mode: "stack", // "stack" | "search"
+  // WOW-1: heat-trail neighbor cache keyed by session_id so repeated hovers
+  // over the same card don't re-issue a lens_search_v2 round trip.
+  heatTrail: { cache: new Map(), hoveredId: null, raf: null },
+  // WOW-2: source_agent lookup so the topology agent filter can toggle
+  // sessions in/out without backend roundtrips.
+  agentByNode: new Map(),
+  agentFilter: "both", // "claude_code" | "codex" | "both"
+  // WOW-4: predictive neighbor grid cache for the Predict cinematic panel.
+  predictGrid: { sessionId: null, items: [] },
+  // WOW-5: hyperplane render loop handle so we can cancel it on close.
+  hyperplane: { raf: null, lastFrameMs: 0 },
   replay: {
     sessionId: null,
     turns: [],
@@ -47,6 +93,10 @@ document.addEventListener("DOMContentLoaded", async () => {
   attachStackEvents();
   attachReplayEvents();
   attachRecallBannerEvents();
+  // WOW: register controls + hover handlers for the 5 visual integrations.
+  attachWow3Controls();
+  attachHeatTrailHandlers();
+  attachAgentFilterHandlers();
   // Kick off both pollers; the stack uses pure jsonl parsing so it succeeds
   // even before Qdrant comes up, giving the user something to look at
   // immediately.
@@ -204,6 +254,9 @@ function renderStack() {
 
 function enterSearchMode() {
   state.mode = "search";
+  // WOW-1: drop any active heat-trail when leaving the stack surface so the
+  // SVG doesn't render stale curves over the new search cards.
+  clearHeatTrail();
   document
     .getElementById("results")
     .querySelectorAll(".stack-card, .stack-counter")
@@ -308,14 +361,34 @@ async function runLensSearch() {
   const gen = ++state.queryGen;
   const t0 = performance.now();
   setStatus(`Searching "${state.query}"…`);
+  // WOW-3: prefer lens_search_v2 for score_breakdown; fall back to legacy
+  // lens_search when v2 isn't compiled into the binary (graceful degrade).
+  const weights = lensWeightsForV2();
+  state.mix.lastQuery = state.query;
   try {
-    const hits = await invoke("lens_search", {
-      query: state.query,
-      weights: state.weights,
-      limit: 20,
-    });
-    // B3: if a newer query has already been dispatched, drop this stale
-    // response so we don't overwrite a fresher result list.
+    let hits;
+    try {
+      hits = await invoke("lens_search_v2", {
+        query: state.query,
+        weights,
+        limit: 20,
+      });
+      // Normalize v2 → unified shape (carries score_breakdown).
+      hits = (hits || []).map(normalizeLensResult);
+    } catch (v2Err) {
+      // Fallback to legacy `lens_search`. Strip content_late from the
+      // weights map so the legacy command doesn't trip on an unknown key.
+      const legacyWeights = { ...weights };
+      delete legacyWeights.content_late;
+      delete legacyWeights.diversity;
+      delete legacyWeights.fusion;
+      const raw = await invoke("lens_search", {
+        query: state.query,
+        weights: legacyWeights,
+        limit: 20,
+      });
+      hits = (raw || []).map(legacyHitToLensResult);
+    }
     if (gen !== state.queryGen) return;
     state.hits = hits;
     renderResults(hits);
@@ -327,18 +400,85 @@ async function runLensSearch() {
   }
 }
 
+// WOW-3: serialize the lens state into the LensWeights shape that
+// `lens_search_v2` expects (Rust `crate::lens::LensWeights`).
+function lensWeightsForV2() {
+  const w = { ...state.weights };
+  w.fusion = state.fusion === "rrf" ? "rrf" : "formula";
+  // `diversity: null` → omit so serde default kicks in. Sent as a number
+  // (0..1) when set explicitly.
+  if (state.diversity != null && Number.isFinite(state.diversity)) {
+    w.diversity = state.diversity;
+  }
+  return w;
+}
+
+// WOW-3: massage a lens_search_v2 LensResult into the shape the rest of the
+// UI works with. Carries score_breakdown for the contribution bars.
+function normalizeLensResult(r) {
+  if (!r) return r;
+  // Backend already returns the right shape; we just compute a derived
+  // `vector_scores` so legacy renderers (vec-breakdown chips) keep working.
+  const breakdown = r.score_breakdown || {};
+  const per = breakdown.per_vector || {};
+  return {
+    session_id: r.session_id,
+    score: r.score,
+    project_name: r.project_name,
+    ai_title: r.ai_title,
+    start_iso: r.start_iso,
+    score_breakdown: breakdown,
+    payload_json: r.payload_json || null,
+    // Legacy compatibility shim.
+    vector_scores: per,
+  };
+}
+
+// WOW-3: when v2 isn't available, project a legacy SearchHit into the
+// shared LensResult shape so the same renderer works without branches.
+function legacyHitToLensResult(h) {
+  if (!h) return h;
+  return {
+    session_id: h.session_id,
+    score: h.score,
+    project_name: h.project_name,
+    ai_title: h.ai_title,
+    start_iso: h.start_iso,
+    score_breakdown: {
+      per_vector: h.vector_scores || {},
+      recency_factor: 0,
+      has_errors_boost: 0,
+      final_score: h.score,
+    },
+    payload_json: null,
+    vector_scores: h.vector_scores || {},
+  };
+}
+
 function buildLensSliders() {
   const root = document.getElementById("lens-sliders");
   root.innerHTML = "";
   for (const name of LENSES) {
+    const defaultValue = LENS_DEFAULT[name] ?? 1.0;
+    // content_late ranges to 2.0 like the others; the multivector lens is
+    // typically run at 0 (off) or low values to avoid drowning the bar.
     const wrap = document.createElement("div");
     wrap.className = "slider";
+    wrap.dataset.lens = name;
     wrap.innerHTML = `
       <div class="slider-label">
         <span>${name}</span>
-        <span class="slider-value" data-for="${name}">1.00</span>
+        <span class="slider-value" data-for="${name}">${defaultValue.toFixed(2)}</span>
       </div>
-      <input type="range" min="0" max="2" step="0.05" value="1.0" data-name="${name}" />
+      <input
+        type="range"
+        min="0"
+        max="2"
+        step="0.05"
+        value="${defaultValue}"
+        data-name="${name}"
+        aria-label="${name} lens weight"
+      />
     `;
     const input = wrap.querySelector("input");
     const value = wrap.querySelector(".slider-value");
@@ -358,14 +498,70 @@ function buildLensSliders() {
 }
 
 function resetLens() {
-  for (const name of LENSES) state.weights[name] = 1.0;
+  for (const name of LENSES) state.weights[name] = LENS_DEFAULT[name] ?? 1.0;
   document
     .querySelectorAll("#lens-sliders input")
-    .forEach((i) => (i.value = "1.0"));
+    .forEach((i) => {
+      const name = i.dataset.name;
+      i.value = String(LENS_DEFAULT[name] ?? 1.0);
+    });
   document
-    .querySelectorAll(".slider-value")
-    .forEach((s) => (s.textContent = "1.00"));
+    .querySelectorAll("#lens-sliders .slider-value")
+    .forEach((s) => {
+      const name = s.dataset.for;
+      s.textContent = (LENS_DEFAULT[name] ?? 1.0).toFixed(2);
+    });
+  // WOW-3: also reset fusion + diversity controls.
+  state.fusion = "formula";
+  state.diversity = null;
+  for (const pill of document.querySelectorAll(".fusion-pill")) {
+    const isActive = pill.dataset.fusion === "formula";
+    pill.classList.toggle("active", isActive);
+    pill.setAttribute("aria-checked", isActive ? "true" : "false");
+  }
+  const ds = document.getElementById("diversity-slider");
+  if (ds) ds.value = "0";
+  const dv = document.getElementById("diversity-value");
+  if (dv) dv.textContent = "off";
   if (state.query) runLensSearch();
+}
+
+// WOW-3: wire fusion toggle (Formula / RRF) and the MMR diversity slider.
+// A 0 value on the slider is treated as `null` — that's "MMR off" so the
+// content prefetch stays a plain NearestQuery.
+function attachWow3Controls() {
+  for (const pill of document.querySelectorAll(".fusion-pill")) {
+    pill.addEventListener("click", () => {
+      const mode = pill.dataset.fusion;
+      if (state.fusion === mode) return;
+      state.fusion = mode;
+      for (const p of document.querySelectorAll(".fusion-pill")) {
+        const isActive = p === pill;
+        p.classList.toggle("active", isActive);
+        p.setAttribute("aria-checked", isActive ? "true" : "false");
+      }
+      if (state.query) runLensSearch();
+    });
+  }
+  const slider = document.getElementById("diversity-slider");
+  const value = document.getElementById("diversity-value");
+  if (!slider || !value) return;
+  slider.addEventListener("input", (e) => {
+    const raw = parseFloat(e.target.value);
+    if (!raw || raw <= 0.001) {
+      state.diversity = null;
+      value.textContent = "off";
+    } else {
+      state.diversity = raw;
+      value.textContent = raw.toFixed(2);
+    }
+  });
+  slider.addEventListener(
+    "change",
+    debounce(() => {
+      if (state.query) runLensSearch();
+    }, 180),
+  );
 }
 
 function renderResults(hits) {
@@ -378,10 +574,10 @@ function renderResults(hits) {
     card.dataset.sessionId = h.session_id;
     const ts = (h.start_iso || "").slice(0, 16).replace("T", " ");
     const title = h.ai_title || "(untitled)";
-    const vecBreak = Object.entries(h.vector_scores || {})
-      .sort((a, b) => b[1] - a[1])
-      .map(([k, v]) => `<span class="vec-chip">${k} ${v.toFixed(2)}</span>`)
-      .join("");
+    // WOW-3: render the stacked contribution bar from score_breakdown.per_vector
+    // if available; otherwise show a flat bar (legacy lens_search fallback).
+    const barHtml = renderContributionBar(h.score_breakdown);
+    const recencyChip = renderScoreChips(h.score_breakdown);
     card.innerHTML = `
       <header>
         <span class="score">${(h.score ?? 0).toFixed(3)}</span>
@@ -389,7 +585,8 @@ function renderResults(hits) {
         <span class="ts">${ts}</span>
       </header>
       <h3 class="title">${escapeHtml(title)}</h3>
-      <div class="vec-breakdown">${vecBreak}</div>
+      ${barHtml}
+      ${recencyChip}
       <footer>
         <code class="sid">${h.session_id}</code>
         <button class="btn ghost xs" data-action="replay">Replay</button>
@@ -414,6 +611,318 @@ function renderResults(hits) {
       );
     root.appendChild(card);
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// WOW-1: Time Machine Heat Trail
+// ─────────────────────────────────────────────────────────────────────────────
+// On hover of a stack card, fetch up to 5 nearest neighbors and draw SVG
+// bezier curves to whichever ones happen to be visible in the stack window.
+// Colors are bucketed by similarity score (purple > cyan > yellow).
+
+const HEAT_TOP_K = 5;
+const HEAT_FETCH_DELAY_MS = 140;
+const HEAT_COLOR_HIGH = "oklch(70% 0.18 290)"; // > 0.7
+const HEAT_COLOR_MID = "oklch(75% 0.13 220)"; //  0.5 < s ≤ 0.7
+const HEAT_COLOR_LOW = "oklch(80% 0.15 90)"; // ≤ 0.5
+let heatHoverTimer = null;
+
+function attachHeatTrailHandlers() {
+  const root = document.getElementById("results");
+  if (!root) return;
+  // Pointer-leave on the section itself clears the trail when the cursor
+  // exits the stack region entirely.
+  root.addEventListener("mouseleave", clearHeatTrail);
+  // Listen on the document for capture-phase hover so we don't have to
+  // rebind handlers every renderStack() pass.
+  root.addEventListener("mouseover", (e) => {
+    const card = e.target.closest(".stack-card");
+    if (!card) return;
+    const sid = card.dataset.sessionId;
+    if (!sid || state.heatTrail.hoveredId === sid) return;
+    state.heatTrail.hoveredId = sid;
+    if (heatHoverTimer) clearTimeout(heatHoverTimer);
+    heatHoverTimer = setTimeout(() => loadHeatNeighbors(sid, card), HEAT_FETCH_DELAY_MS);
+  });
+  root.addEventListener("mouseout", (e) => {
+    const next = e.relatedTarget;
+    if (next && next.closest && next.closest(".stack-card")) return;
+    // Moving between cards is handled by mouseover; only clear when leaving
+    // a card without entering another one in the same tick.
+    setTimeout(() => {
+      const stillHover = root.querySelector(".stack-card:hover");
+      if (!stillHover) clearHeatTrail();
+    }, 30);
+  });
+}
+
+async function loadHeatNeighbors(sessionId, cardEl) {
+  if (REDUCED_MOTION.matches) return; // a11y: skip motion entirely.
+  if (state.mode !== "stack") return;
+  // Cache hit → draw immediately.
+  const cached = state.heatTrail.cache.get(sessionId);
+  if (cached) {
+    drawHeatTrail(cardEl, cached);
+    return;
+  }
+  const seed = state.stack.find((s) => s.session_id === sessionId);
+  const query = (seed?.ai_title || seed?.project_name || "").trim();
+  if (!query) return;
+  try {
+    let neighbors;
+    try {
+      const raw = await invoke("lens_search_v2", {
+        query,
+        weights: lensWeightsForV2(),
+        limit: HEAT_TOP_K + 4,
+      });
+      neighbors = (raw || []).map(normalizeLensResult);
+    } catch {
+      const legacy = await invoke("lens_search", {
+        query,
+        weights: { content: 1, tool: 1, path: 1, error: 1, code: 1 },
+        limit: HEAT_TOP_K + 4,
+      });
+      neighbors = (legacy || []).map(legacyHitToLensResult);
+    }
+    // Drop self + cap to K.
+    const filtered = (neighbors || [])
+      .filter((n) => n.session_id !== sessionId)
+      .slice(0, HEAT_TOP_K);
+    state.heatTrail.cache.set(sessionId, filtered);
+    // Only draw if the user is still hovering the same card.
+    if (state.heatTrail.hoveredId !== sessionId) return;
+    drawHeatTrail(cardEl, filtered);
+  } catch (err) {
+    // Quiet: hover is a courtesy, failure shouldn't surface to the user.
+    console.warn("heat-trail fetch failed:", err);
+  }
+}
+
+function drawHeatTrail(cardEl, neighbors) {
+  const svg = document.getElementById("heat-trail");
+  const chip = document.getElementById("heat-chip");
+  if (!svg || !cardEl) return;
+  const root = document.getElementById("results");
+  const rect = root.getBoundingClientRect();
+  svg.setAttribute("viewBox", `0 0 ${rect.width} ${rect.height}`);
+  svg.innerHTML = "";
+
+  const start = centerInside(cardEl, root);
+  let drewAny = 0;
+  for (const n of neighbors) {
+    const targetCard = root.querySelector(
+      `.stack-card[data-session-id="${cssEscape(n.session_id)}"]`,
+    );
+    if (!targetCard) continue;
+    const end = centerInside(targetCard, root);
+    const color = heatColor(n.score);
+    // Curved bezier — control point pulled toward the vertical midline so
+    // trails arc gracefully even when start/end are near-collinear.
+    const cx = (start.x + end.x) / 2;
+    const cy = Math.min(start.y, end.y) - 60;
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute(
+      "d",
+      `M ${start.x} ${start.y} Q ${cx} ${cy} ${end.x} ${end.y}`,
+    );
+    path.setAttribute("stroke", color);
+    path.setAttribute("stroke-width", String(1.6 + Math.max(0, n.score) * 2.4));
+    path.setAttribute("fill", "none");
+    path.setAttribute("opacity", String(0.45 + n.score * 0.45));
+    path.setAttribute("stroke-linecap", "round");
+    svg.appendChild(path);
+    // End-cap dot.
+    const dot = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+    dot.setAttribute("cx", String(end.x));
+    dot.setAttribute("cy", String(end.y));
+    dot.setAttribute("r", "5");
+    dot.setAttribute("fill", color);
+    dot.setAttribute("opacity", "0.85");
+    svg.appendChild(dot);
+    drewAny++;
+  }
+  if (!drewAny) {
+    svg.innerHTML = "";
+  }
+
+  // WOW-1: enrich chip — render up to 4 of 5 enrich fields. Pulled from the
+  // focused card's payload so the user can see context without clicking.
+  renderHeatChip(cardEl);
+}
+
+function heatColor(s) {
+  if (typeof s !== "number") return HEAT_COLOR_LOW;
+  if (s > 0.7) return HEAT_COLOR_HIGH;
+  if (s > 0.5) return HEAT_COLOR_MID;
+  return HEAT_COLOR_LOW;
+}
+
+function centerInside(el, parent) {
+  const er = el.getBoundingClientRect();
+  const pr = parent.getBoundingClientRect();
+  return {
+    x: er.left - pr.left + er.width / 2,
+    y: er.top - pr.top + er.height / 2,
+  };
+}
+
+function cssEscape(s) {
+  if (window.CSS && window.CSS.escape) return window.CSS.escape(s);
+  return String(s).replace(/["\\]/g, "\\$&");
+}
+
+function clearHeatTrail() {
+  if (heatHoverTimer) {
+    clearTimeout(heatHoverTimer);
+    heatHoverTimer = null;
+  }
+  state.heatTrail.hoveredId = null;
+  const svg = document.getElementById("heat-trail");
+  if (svg) svg.innerHTML = "";
+  const chip = document.getElementById("heat-chip");
+  if (chip) chip.classList.add("hidden");
+}
+
+async function renderHeatChip(cardEl) {
+  const chip = document.getElementById("heat-chip");
+  if (!chip) return;
+  const sid = cardEl.dataset.sessionId;
+  let payload = null;
+  try {
+    payload = await invoke("get_session", { sessionId: sid });
+  } catch {
+    /* ignore */
+  }
+  if (!payload) {
+    chip.classList.add("hidden");
+    return;
+  }
+  // Enrich fields surfaced by P5 enrich.rs.
+  const intent = enrichField(payload, "intent");
+  const outcome = enrichField(payload, "outcome");
+  const arc = enrichField(payload, "arc");
+  const topic = enrichField(payload, "topic");
+  // Pick 4 informative bits, fall back to title.
+  const bits = [];
+  if (arc) bits.push(`<span class="bit bit-arc">${escapeHtml(arc)}</span>`);
+  if (outcome)
+    bits.push(
+      `<span class="bit bit-out bit-out-${outcomeClass(outcome)}">${escapeHtml(outcome)}</span>`,
+    );
+  if (intent) bits.push(`<span class="bit bit-intent">${escapeHtml(intent)}</span>`);
+  if (topic) bits.push(`<span class="bit bit-topic">${escapeHtml(topic)}</span>`);
+  if (!bits.length) {
+    chip.classList.add("hidden");
+    return;
+  }
+  chip.innerHTML = bits.join("");
+  // Position next to the card top-right.
+  const root = document.getElementById("results");
+  const er = cardEl.getBoundingClientRect();
+  const pr = root.getBoundingClientRect();
+  chip.style.left = `${er.right - pr.left - 20}px`;
+  chip.style.top = `${er.top - pr.top + 8}px`;
+  chip.classList.remove("hidden");
+}
+
+function enrichField(payload, key) {
+  if (!payload) return "";
+  const v = payload[key];
+  if (v == null) return "";
+  if (typeof v === "string") return v;
+  if (Array.isArray(v)) return v.slice(0, 2).join(", ");
+  return String(v);
+}
+
+function outcomeClass(s) {
+  const low = String(s).toLowerCase();
+  if (low.includes("resolve") || low.includes("ok") || low.includes("success"))
+    return "ok";
+  if (low.includes("partial") || low.includes("wip")) return "partial";
+  if (low.includes("unresolved") || low.includes("fail") || low.includes("error"))
+    return "bad";
+  return "neutral";
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// WOW-3: Lens contribution bars
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Per-vector colors used by the stacked bar AND the heat-trail chips.
+// Chosen for accessible-on-dark luminance + framework agnosticism.
+const VEC_COLOR = {
+  content: "oklch(72% 0.14 245)",
+  tool: "oklch(75% 0.16 165)",
+  path: "oklch(70% 0.14 295)",
+  error: "oklch(70% 0.20 25)",
+  code: "oklch(78% 0.14 95)",
+  content_late: "oklch(70% 0.18 320)",
+  path_sparse: "oklch(65% 0.10 285)",
+  tool_sparse: "oklch(70% 0.12 175)",
+};
+
+function renderContributionBar(breakdown) {
+  if (!breakdown) return "";
+  const per = breakdown.per_vector || {};
+  // Sum positive contributions only. Negative scores happen with cosine
+  // and we visually treat them as zero (already a no-op below).
+  let total = 0;
+  const segs = [];
+  for (const name of BAR_VECTORS) {
+    const v = per[name];
+    if (typeof v !== "number" || !Number.isFinite(v) || v <= 0) continue;
+    segs.push([name, v]);
+    total += v;
+  }
+  // Legacy/empty path: render a flat indeterminate bar so the card still has
+  // visual weight.
+  if (!segs.length || total <= 0) {
+    return `
+      <div class="contrib-bar flat" aria-hidden="true">
+        <span class="contrib-seg flat" style="flex-basis:100%"></span>
+      </div>`;
+  }
+  const segsHtml = segs
+    .map(([name, v]) => {
+      const pct = (v / total) * 100;
+      const color = VEC_COLOR[name] || "oklch(70% 0.10 220)";
+      return `<span
+        class="contrib-seg"
+        style="flex-basis:${pct.toFixed(2)}%; background:${color}"
+        title="${name}  ${v.toFixed(3)}"
+        data-vec="${name}"
+      ></span>`;
+    })
+    .join("");
+  const legend = segs
+    .map(
+      ([name, v]) => `
+        <span class="contrib-key">
+          <span class="contrib-dot" style="background:${VEC_COLOR[name] || "#fff"}"></span>
+          ${name}<span class="contrib-num"> ${v.toFixed(2)}</span>
+        </span>`,
+    )
+    .join("");
+  return `
+    <div class="contrib-bar" role="img" aria-label="Per-vector contributions: ${
+      segs.map(([k, v]) => `${k} ${v.toFixed(2)}`).join(", ")
+    }">${segsHtml}</div>
+    <div class="contrib-legend">${legend}</div>`;
+}
+
+function renderScoreChips(breakdown) {
+  if (!breakdown) return "";
+  const r = breakdown.recency_factor;
+  const e = breakdown.has_errors_boost;
+  const hasR = typeof r === "number" && Number.isFinite(r);
+  const hasE = typeof e === "number" && Number.isFinite(e);
+  if (!hasR && !hasE) return "";
+  const parts = [];
+  if (hasR) parts.push(`<span class="chip-rec">recency <b>${r.toFixed(2)}</b></span>`);
+  if (hasE && e > 0)
+    parts.push(`<span class="chip-err">errors <b>+${e.toFixed(2)}</b></span>`);
+  return `<div class="score-chips">${parts.join("")}</div>`;
 }
 
 async function selectSession(sessionId, opts = {}) {
@@ -562,8 +1071,11 @@ function renderPredictionPanel(ctx) {
       <h3>🔮 What past-you did next</h3>
       <span class="muted">${ctx.neighbors_used || 0} of ${ctx.neighbors_searched || 0} neighbor(s) matched</span>
     </header>
+    <div class="prediction-grid" id="prediction-grid"></div>
     <div class="prediction-list"></div>
   `;
+  // WOW-4: render the cinematic 4×3 thumbnail grid above the per-tool list.
+  renderPredictionGrid(panel, preds, ctx.source_session_id);
   const list = panel.querySelector(".prediction-list");
   for (const p of preds) {
     const freqPct = Math.round((p.frequency || 0) * 100);
@@ -606,6 +1118,168 @@ function renderPredictionPanel(ctx) {
         }, 600);
       });
     list.appendChild(card);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// WOW-4: Predict Cinematic Grid (4×3 thumbnails + view-transition zoom)
+// ─────────────────────────────────────────────────────────────────────────────
+// We reuse the prediction response: each prediction references a from_session
+// that we treat as a "neighbor". Dedupe by session id so we don't show the
+// same card twice when multiple tools predict from the same neighbor. Limit to
+// 12 thumbnails. Click → fade/zoom into Replay via document.startViewTransition.
+
+async function renderPredictionGrid(panel, preds, sourceSessionId) {
+  const grid = panel.querySelector("#prediction-grid");
+  if (!grid) return;
+  // Group predictions by from_session_id so each thumbnail consolidates the
+  // tools predicted from that neighbor.
+  const byNeighbor = new Map();
+  for (const p of preds) {
+    const sid = p.from_session_id;
+    if (!sid) continue;
+    let row = byNeighbor.get(sid);
+    if (!row) {
+      row = {
+        sid,
+        project: p.from_session_project,
+        tools: [],
+        confidenceMax: 0,
+      };
+      byNeighbor.set(sid, row);
+    }
+    row.tools.push(p.tool_name);
+    row.confidenceMax = Math.max(row.confidenceMax, p.confidence || 0);
+  }
+  const items = Array.from(byNeighbor.values()).slice(0, 12);
+  if (!items.length) {
+    grid.remove();
+    return;
+  }
+  state.predictGrid = { sessionId: sourceSessionId, items };
+  grid.innerHTML = "";
+  // Fetch payloads in parallel so each thumbnail can show enrich.outcome,
+  // enrich.arc, and a tool histogram derived from tool_counts (in payload).
+  const payloads = await Promise.all(
+    items.map((it) =>
+      invoke("get_session", { sessionId: it.sid }).catch(() => null),
+    ),
+  );
+  items.forEach((it, i) => {
+    const p = payloads[i] || {};
+    const title = p.ai_title || it.project || "(untitled)";
+    const topic = enrichField(p, "topic");
+    const outcome = enrichField(p, "outcome");
+    const arc = enrichField(p, "arc");
+    // Approximate "top 3 tools" by accumulating tool counts from the payload
+    // (tool_counts), falling back to the predicted tool names if missing.
+    const toolCounts = (p.tool_counts && typeof p.tool_counts === "object") ? p.tool_counts : null;
+    let topTools = [];
+    if (toolCounts) {
+      topTools = Object.entries(toolCounts)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 3);
+    } else {
+      const counts = new Map();
+      for (const t of it.tools) counts.set(t, (counts.get(t) || 0) + 1);
+      topTools = Array.from(counts.entries())
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 3);
+    }
+    const card = document.createElement("button");
+    card.type = "button";
+    card.className = `pred-thumb arc-${arcClass(arc)}`;
+    // view-transition-name pairs the thumbnail with the Replay header.
+    card.style.viewTransitionName = `card-${cssSafeId(it.sid)}`;
+    card.dataset.sessionId = it.sid;
+    const toolsHtml = topTools.length
+      ? topTools
+          .map(
+            ([name, count]) =>
+              `<span class="pt-tool">${escapeHtml(name)}<span class="pt-count">×${count}</span></span>`,
+          )
+          .join("")
+      : "";
+    const outcomeBadge = outcome
+      ? `<span class="pt-outcome pt-outcome-${outcomeClass(outcome)}">${escapeHtml(outcome)}</span>`
+      : "";
+    card.innerHTML = `
+      <header class="pt-head">
+        <span class="pt-arc" title="${escapeHtml(arc || "")}">${arcIcon(arc)}</span>
+        <span class="pt-proj">${escapeHtml(it.project || "?")}</span>
+        ${outcomeBadge}
+      </header>
+      <h4 class="pt-title">${escapeHtml(title.slice(0, 80))}</h4>
+      ${topic ? `<div class="pt-topic">${escapeHtml(topic)}</div>` : ""}
+      <div class="pt-tools">${toolsHtml}</div>
+      <footer class="pt-foot">
+        <code class="pt-sid">${escapeHtml(it.sid.slice(0, 8))}…</code>
+        <span class="pt-conf">${Math.round((it.confidenceMax || 0) * 100)}%</span>
+      </footer>
+    `;
+    card.addEventListener("click", () => cinematicZoom(it.sid, p, card));
+    card.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        cinematicZoom(it.sid, p, card);
+      }
+    });
+    grid.appendChild(card);
+  });
+}
+
+function arcClass(arc) {
+  const s = String(arc || "").toLowerCase();
+  if (s.includes("debug")) return "debug";
+  if (s.includes("fix")) return "fix";
+  if (s.includes("impl") || s.includes("build")) return "impl";
+  if (s.includes("explor")) return "explore";
+  return "mixed";
+}
+function arcIcon(arc) {
+  switch (arcClass(arc)) {
+    case "debug": return "🔬";
+    case "fix": return "🛠";
+    case "impl": return "🧱";
+    case "explore": return "🧭";
+    default: return "·";
+  }
+}
+
+function cssSafeId(s) {
+  return String(s).replace(/[^a-zA-Z0-9_-]/g, "_");
+}
+
+// WOW-4: cinematic zoom from a grid thumbnail into the Replay modal. Uses the
+// View Transitions API where available; falls back to a 240ms opacity fade.
+function cinematicZoom(sid, payload, cardEl) {
+  // Tag the Replay modal with the same view-transition-name so the browser
+  // pairs the start (thumbnail) with the end (replay header).
+  const modal = document.getElementById("replay-modal");
+  if (modal) {
+    const headerEl = modal.querySelector("header");
+    if (headerEl) {
+      headerEl.style.viewTransitionName = `card-${cssSafeId(sid)}`;
+      headerEl.dataset.transitionFor = sid;
+    }
+  }
+  const doOpen = () => openReplay(sid, payload || { project_name: cardEl?.querySelector(".pt-proj")?.textContent });
+
+  if (!REDUCED_MOTION.matches && document.startViewTransition) {
+    document.startViewTransition(() => {
+      doOpen();
+    });
+  } else {
+    // Reduced-motion fallback: 240ms opacity blend. The replay modal already
+    // animates via <dialog> showModal so this just keeps the spec promise.
+    if (cardEl) {
+      cardEl.style.transition = "opacity 240ms ease";
+      cardEl.style.opacity = "0.4";
+      setTimeout(() => {
+        cardEl.style.opacity = "1";
+      }, 260);
+    }
+    doOpen();
   }
 }
 
@@ -674,13 +1348,93 @@ async function onTopology() {
   const modal = document.getElementById("topology-modal");
   modal.showModal();
   const canvas = document.getElementById("topology-canvas");
-  canvas.innerHTML = `<div class="empty">Computing MST…</div>`;
+  // WOW-2: preserve the agent filter pill + gap overlay nodes when reloading.
+  preserveTopologyChrome(canvas, () => {
+    canvas.innerHTML = `<div class="empty">Computing MST…</div>`;
+  });
   try {
     const topo = await invoke("topology", { sample: 80, perPoint: 6 });
     renderTopology3D(topo, canvas);
   } catch (err) {
     canvas.innerHTML = `<div class="empty">Topology failed: ${escapeHtml(String(err))}</div>`;
   }
+}
+
+// WOW-2: when we clear topology DOM to re-render, salvage the chrome
+// (agent-filter + gap overlay containers) so we don't lose them or have to
+// re-create them as a side-effect of every refresh.
+function preserveTopologyChrome(host, mutate) {
+  const filter = document.getElementById("agent-filter");
+  const overlay = document.getElementById("gap-overlay");
+  mutate();
+  if (filter && !host.contains(filter)) host.appendChild(filter);
+  if (overlay && !host.contains(overlay)) {
+    overlay.innerHTML = "";
+    host.appendChild(overlay);
+  }
+}
+
+// WOW-2: agent filter pill — toggles which nodes are visible by source_agent.
+// source_agent isn't carried by TopoNode, so we resolve it via get_session
+// in a single batch the first time the modal is opened.
+function attachAgentFilterHandlers() {
+  for (const pill of document.querySelectorAll(".agent-pill")) {
+    pill.addEventListener("click", () => {
+      const agent = pill.dataset.agent;
+      if (state.agentFilter === agent) return;
+      state.agentFilter = agent;
+      for (const p of document.querySelectorAll(".agent-pill")) {
+        const isActive = p === pill;
+        p.classList.toggle("active", isActive);
+        p.setAttribute("aria-checked", isActive ? "true" : "false");
+      }
+      applyAgentFilter();
+    });
+  }
+}
+
+function applyAgentFilter() {
+  if (!topologyGraph) return;
+  const sel = state.agentFilter;
+  topologyGraph.nodeVisibility((n) => {
+    if (sel === "both") return true;
+    const agent = state.agentByNode.get(n.id);
+    if (!agent) return true; // unknown → show until lookup arrives
+    return agent === sel;
+  });
+  // Single-agent mode: paint nodes uniformly to make the lens unmistakable.
+  topologyGraph.nodeColor((n) => {
+    const agent = state.agentByNode.get(n.id) || "claude_code";
+    if (sel === "claude_code") return "oklch(74% 0.16 245)";
+    if (sel === "codex") return "oklch(80% 0.15 75)";
+    // Both: honor the existing project color (or dim when highlight active).
+    if (highlightedProject && n.project !== highlightedProject) return dim(n.color);
+    return n.color;
+  });
+  // Shape encoding — open circle for codex, filled for claude. We approximate
+  // this on 3d-force-graph with nodeOpacity to keep the WebGL path light.
+  topologyGraph.nodeOpacity(0.95);
+  // Re-render link directional particles too so cross-project gateways stay
+  // visible only between currently-visible nodes.
+  const data = topologyGraph.graphData();
+  topologyGraph.linkDirectionalParticles((l) => {
+    if (sel !== "both") {
+      const aOk = nodeVisible(l.source);
+      const bOk = nodeVisible(l.target);
+      if (!aOk || !bOk) return 0;
+    }
+    return l.cross ? 2 : 0;
+  });
+  // Touch the data ref so 3d-force-graph picks up the visibility change.
+  topologyGraph.graphData(data);
+}
+
+function nodeVisible(nodeRef) {
+  const id = typeof nodeRef === "object" ? nodeRef.id : nodeRef;
+  if (state.agentFilter === "both") return true;
+  const agent = state.agentByNode.get(id);
+  if (!agent) return true;
+  return agent === state.agentFilter;
 }
 
 // 3d-force-graph instance kept around so we can dispose it cleanly between
@@ -698,7 +1452,17 @@ function disposeTopology() {
 
 function renderTopology3D(topo, mount) {
   disposeTopology();
+  // WOW-2: salvage chrome before wiping innerHTML.
+  const filterEl = document.getElementById("agent-filter");
+  const overlayEl = document.getElementById("gap-overlay");
+  if (filterEl) filterEl.remove();
+  if (overlayEl) overlayEl.remove();
   mount.innerHTML = "";
+  if (filterEl) mount.appendChild(filterEl);
+  if (overlayEl) {
+    overlayEl.innerHTML = "";
+    mount.appendChild(overlayEl);
+  }
   const { nodes, edges } = topo;
   const statsEl = document.getElementById("topology-stats");
   const legendEl = document.getElementById("topology-legend");
@@ -706,11 +1470,16 @@ function renderTopology3D(topo, mount) {
   if (legendEl) legendEl.innerHTML = "";
 
   if (!nodes.length) {
-    mount.innerHTML = `<div class="empty">No nodes yet — re-index first.</div>`;
+    // WOW-2: preserve the agent-filter + gap-overlay chrome on the empty path.
+    preserveTopologyChrome(mount, () => {
+      mount.innerHTML = `<div class="empty">No nodes yet — re-index first.</div>`;
+    });
     return;
   }
   if (typeof window.ForceGraph3D !== "function") {
-    mount.innerHTML = `<div class="empty">3D engine failed to load (vendor/3d-force-graph.min.js).</div>`;
+    preserveTopologyChrome(mount, () => {
+      mount.innerHTML = `<div class="empty">3D engine failed to load (vendor/3d-force-graph.min.js).</div>`;
+    });
     return;
   }
 
@@ -786,18 +1555,19 @@ function renderTopology3D(topo, mount) {
     .nodeOpacity(0.95)
     .nodeResolution(16)
     .nodeLabel((n) => topologyTooltip(n))
-    // Cross-project bridges in white = "look here, an idea jumped between
-    // projects". In-project edges in muted blue = the within-cluster glue.
+    // WOW-2: cross-project bridges in violet (oklch purple) = a gateway
+    // between idea-clusters. linkDirectionalParticles=2 (built-in 3d-force-graph
+    // particles) emphasizes the direction without custom shaders.
     .linkColor((l) =>
       l.cross
-        ? `rgba(255, 214, 10, ${0.55 + l.similarity * 0.35})`
+        ? `oklch(75% 0.20 290 / ${(0.55 + l.similarity * 0.40).toFixed(3)})`
         : `rgba(10, 132, 255, ${0.30 + l.similarity * 0.45})`,
     )
     .linkOpacity(1)
     .linkWidth((l) => (l.cross ? 1.4 + l.similarity * 2.5 : 0.4 + l.similarity * 1.6))
     .linkDirectionalParticles((l) => (l.cross ? 2 : 0))
     .linkDirectionalParticleWidth(1.2)
-    .linkDirectionalParticleColor(() => "#ffd60a")
+    .linkDirectionalParticleColor(() => "oklch(80% 0.18 295)")
     .onNodeClick((node) => {
       document.getElementById("topology-modal").close();
       selectSession(node.id);
@@ -814,6 +1584,16 @@ function renderTopology3D(topo, mount) {
   setTimeout(() => G.zoomToFit(900, 80), 1400);
 
   topologyGraph = G;
+
+  // WOW-2: kick off background source_agent fetch, then re-apply the agent
+  // filter when results land. Batches via a small concurrency pool so we
+  // don't fire 10k get_session calls at once on large corpora.
+  hydrateAgentMetadata(nodes).then(() => {
+    if (topologyGraph === G) applyAgentFilter();
+  });
+  // Set up the gap overlay so insight HTML divs follow the 3D camera. The
+  // rAF loop self-cancels when the modal closes (disposeTopology nulls G).
+  startGapOverlayLoop(G, projectList, topo.gap_insights || []);
 
   // ---- Stats bar + legend -------------------------------------------------
   if (statsEl) {
@@ -1057,6 +1837,109 @@ function projectClusterForce(strength) {
   return force;
 }
 
+// WOW-2: small async pool that hydrates `source_agent` for each topology node
+// without paying a full N-roundtrip latency. 6 in flight is comfortable for
+// macOS Tauri IPC + qdrant on localhost.
+async function hydrateAgentMetadata(nodes) {
+  const PARALLEL = 6;
+  let i = 0;
+  async function worker() {
+    while (i < nodes.length) {
+      const idx = i++;
+      const sid = nodes[idx].session_id;
+      if (state.agentByNode.has(sid)) continue;
+      try {
+        const p = await invoke("get_session", { sessionId: sid });
+        const agent = (p && (p.source_agent || p["source_agent"])) || "claude_code";
+        state.agentByNode.set(sid, agent);
+      } catch {
+        // Default to claude_code so unknowns don't disappear from the view.
+        state.agentByNode.set(sid, "claude_code");
+      }
+    }
+  }
+  const workers = [];
+  for (let k = 0; k < PARALLEL; k++) workers.push(worker());
+  await Promise.all(workers);
+}
+
+// WOW-2: position gap-insight HTML overlays over the 3D-force-graph canvas
+// using its `graph2ScreenCoords` projection. One requestAnimationFrame loop
+// per topology open; auto-cancels when topologyGraph is reset.
+function startGapOverlayLoop(G, projectList, gapInsights) {
+  const overlay = document.getElementById("gap-overlay");
+  if (!overlay) return;
+  overlay.innerHTML = "";
+  // Build the cards once; positioning happens in the rAF loop.
+  // Centroid for each project = average position of its nodes (computed
+  // every frame so dragging works).
+  const cards = [];
+  for (const g of gapInsights.slice(0, 4)) {
+    const card = document.createElement("div");
+    card.className = `gap-overlay-card gap-${g.kind}`;
+    card.innerHTML = `
+      <span class="gap-overlay-kind">${escapeHtml(g.kind)}</span>
+      <span class="gap-overlay-msg">${escapeHtml(g.message)}</span>
+    `;
+    overlay.appendChild(card);
+    cards.push({ el: card, a: g.project_a, b: g.project_b });
+  }
+  // Project centroid cache (recomputed each frame).
+  function projectCentroid(name) {
+    if (!G || !name) return null;
+    let sx = 0, sy = 0, sz = 0, n = 0;
+    for (const node of G.graphData().nodes) {
+      if (node.project !== name) continue;
+      sx += node.x || 0;
+      sy += node.y || 0;
+      sz += node.z || 0;
+      n++;
+    }
+    if (!n) return null;
+    return { x: sx / n, y: sy / n, z: sz / n };
+  }
+  function frame() {
+    if (topologyGraph !== G) return; // disposed
+    if (REDUCED_MOTION.matches) {
+      // Reduced motion: pin to top-left in the canvas, no animation.
+      cards.forEach((c, i) => {
+        c.el.style.transform = `translate(12px, ${12 + i * 56}px)`;
+      });
+      requestAnimationFrame(frame);
+      return;
+    }
+    for (const c of cards) {
+      const ca = projectCentroid(c.a);
+      const cb = c.b ? projectCentroid(c.b) : null;
+      let mx, my, mz;
+      if (ca && cb) {
+        mx = (ca.x + cb.x) / 2;
+        my = (ca.y + cb.y) / 2;
+        mz = (ca.z + cb.z) / 2;
+      } else if (ca) {
+        mx = ca.x; my = ca.y; mz = ca.z;
+      } else {
+        c.el.style.opacity = "0";
+        continue;
+      }
+      let screen;
+      try {
+        screen = G.graph2ScreenCoords(mx, my, mz);
+      } catch {
+        screen = null;
+      }
+      if (!screen) {
+        c.el.style.opacity = "0";
+        continue;
+      }
+      c.el.style.opacity = "1";
+      c.el.style.transform = `translate(${(screen.x | 0)}px, ${(screen.y | 0)}px) translate(-50%, -50%)`;
+    }
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+}
+
 const COLOR_PALETTE = [
   "#ff9f0a", "#bf5af2", "#30d158", "#ff375f", "#ffd60a",
   "#0a84ff", "#ff6b35", "#af52de", "#66d4cf", "#ffb340",
@@ -1073,7 +1956,15 @@ function projectColor(name) {
 function openMixModal() {
   renderMixDropzones();
   document.getElementById("mix-results").innerHTML = "";
+  // WOW-5: hydrate the target field with the focused stack card.
+  const tgt = document.getElementById("mix-target");
+  if (tgt && !tgt.value && state.stack[state.stackFocus]) {
+    tgt.value = state.stack[state.stackFocus].session_id;
+    state.mix.target = tgt.value;
+  }
   document.getElementById("mix-modal").showModal();
+  // Defer the canvas init until after the dialog has its final size.
+  requestAnimationFrame(() => initHyperplane());
 }
 
 function addToMix(side, sessionId) {
@@ -1122,25 +2013,119 @@ async function runMix() {
   }
   const out = document.getElementById("mix-results");
   out.textContent = "Running discovery…";
+  // WOW-5: prefer the pair-based Discovery API (P4 KB-03) when we have a
+  // target. We turn each `positive` (and each `negative` paired with the
+  // *first* positive as anchor) into a ContextPair.
+  const tgtInput = document.getElementById("mix-target");
+  const target = (tgtInput && tgtInput.value.trim()) || state.mix.target || null;
+  state.mix.target = target;
   try {
-    const hits = await invoke("mix_match", {
-      positive: state.mix.positive,
-      negative: state.mix.negative,
-      limit: 10,
-    });
-    if (!hits.length) {
-      out.textContent = "No discovery hits.";
-      return;
+    let hits;
+    if (target && state.mix.positive.length >= 1) {
+      const anchor = state.mix.positive[0];
+      const pairs = [];
+      for (const p of state.mix.positive.slice(1)) {
+        pairs.push({ positive: p, negative: anchor });
+      }
+      for (const n of state.mix.negative) {
+        pairs.push({ positive: anchor, negative: n });
+      }
+      if (!pairs.length) {
+        pairs.push({ positive: anchor, negative: anchor });
+      }
+      try {
+        hits = await invoke("mix_match_with_pairs", {
+          targetSessionId: target,
+          pairs,
+          limit: 10,
+        });
+      } catch (pairErr) {
+        // Fall back to the legacy positive/negative API.
+        console.warn("mix_match_with_pairs failed, falling back:", pairErr);
+        hits = await invoke("mix_match", {
+          positive: state.mix.positive,
+          negative: state.mix.negative,
+          limit: 10,
+        });
+      }
+    } else {
+      hits = await invoke("mix_match", {
+        positive: state.mix.positive,
+        negative: state.mix.negative,
+        limit: 10,
+      });
     }
-    out.innerHTML = "<h4>Discovered</h4>";
-    for (const h of hits) {
-      const row = document.createElement("div");
-      row.className = "mix-row";
-      row.textContent = `${h.score.toFixed(3)}  ${h.project_name}  ${h.session_id}`;
-      out.appendChild(row);
-    }
+    state.mix.lastHits = hits || [];
+    renderMixResults(out, hits || []);
+    // WOW-5: render the resulting set as flying particles on the hyperplane.
+    paintHyperplaneResults(hits || []);
   } catch (err) {
     out.textContent = `Mix failed: ${err}`;
+  }
+}
+
+function renderMixResults(host, hits) {
+  if (!hits.length) {
+    host.textContent = "No discovery hits.";
+    return;
+  }
+  host.innerHTML = "<h4 class=\"mix-results-title\">Discovered</h4>";
+  for (const h of hits) {
+    const row = document.createElement("div");
+    row.className = "mix-row";
+    const score = (h.score ?? 0).toFixed(3);
+    row.innerHTML = `
+      <div class="mix-row-head">
+        <span class="mix-score">${score}</span>
+        <span class="mix-proj">${escapeHtml(h.project_name || "?")}</span>
+        <code class="mix-sid">${escapeHtml(h.session_id.slice(0, 12))}…</code>
+      </div>
+      <div class="mix-row-title">${escapeHtml(h.ai_title || "(untitled)")}</div>
+      <div class="mix-row-actions">
+        <button type="button" class="btn xs" data-act="up" data-sid="${escapeHtml(h.session_id)}">👍 more like this</button>
+        <button type="button" class="btn xs" data-act="down" data-sid="${escapeHtml(h.session_id)}">👎 less</button>
+        <button type="button" class="btn xs" data-act="replay" data-sid="${escapeHtml(h.session_id)}">Replay</button>
+      </div>
+    `;
+    row.querySelectorAll("button[data-act]").forEach((btn) =>
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const sid = btn.dataset.sid;
+        const act = btn.dataset.act;
+        if (act === "replay") {
+          openReplay(sid, h);
+        } else {
+          applyRelevanceFeedback(sid, act === "up", host);
+        }
+      }),
+    );
+    host.appendChild(row);
+  }
+}
+
+// WOW-5: KA-04 — re-rank current results by binary feedback on a row.
+async function applyRelevanceFeedback(sessionId, isPositive, host) {
+  const query = state.mix.lastQuery || state.query || "";
+  if (!query) {
+    setStatus("Type a query first for the relevance feedback to attach to.");
+    return;
+  }
+  try {
+    const pos = isPositive ? [sessionId] : [];
+    const neg = isPositive ? [] : [sessionId];
+    const re = await invoke("relevance_feedback", {
+      previousQuery: query,
+      positiveIds: pos,
+      negativeIds: neg,
+      limit: 10,
+    });
+    if (re && re.length) {
+      const projected = re.map(legacyHitToLensResult);
+      renderMixResults(host, projected);
+      paintHyperplaneResults(projected);
+    }
+  } catch (err) {
+    setStatus(`Relevance feedback failed: ${err}`);
   }
 }
 
@@ -1196,6 +2181,204 @@ function escapeHtml(s) {
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c],
   );
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// WOW-5: Discovery Hyperplane (vanilla 2D canvas, no Three.js)
+// ─────────────────────────────────────────────────────────────────────────────
+// We don't have direct access to per-session embeddings from the frontend; we
+// approximate a visual hyperplane by laying out positives on one side, negatives
+// on the other, and emitting result cards from the positive side. Plane angle
+// is derived from the anchor counts so it moves visually with the user's
+// inputs.
+
+const HYPERPLANE_FPS_BUDGET_MS = 16.67;
+
+function initHyperplane() {
+  const canvas = document.getElementById("hyperplane-canvas");
+  if (!canvas) return;
+  // Resize the canvas to its actual CSS box for sharp lines on HiDPI.
+  const rect = canvas.getBoundingClientRect();
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  canvas.width = Math.max(640, rect.width | 0) * dpr;
+  canvas.height = Math.max(280, rect.height | 0) * dpr;
+  const ctx = canvas.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  // Cancel any prior loop.
+  if (state.hyperplane.raf) cancelAnimationFrame(state.hyperplane.raf);
+  state.hyperplane.particles = particlesFor(state.mix.lastHits || []);
+  state.hyperplane.t0 = performance.now();
+  loopHyperplane();
+}
+
+function loopHyperplane() {
+  const canvas = document.getElementById("hyperplane-canvas");
+  if (!canvas) return;
+  const ctx = canvas.getContext("2d");
+  const W = canvas.clientWidth || canvas.width;
+  const H = canvas.clientHeight || canvas.height;
+  const now = performance.now();
+  const elapsed = (now - state.hyperplane.t0) / 1000;
+  // Plane angle slowly drifts unless reduced-motion is set, so the scene
+  // feels alive even when the user just opened it.
+  const angle = REDUCED_MOTION.matches ? 0 : Math.sin(elapsed * 0.18) * 0.25;
+  drawHyperplane(ctx, W, H, angle);
+  // 60fps budget guard — if we slip, drop the drift animation.
+  const frameStart = now;
+  // Schedule next frame.
+  state.hyperplane.raf = requestAnimationFrame(() => {
+    const drawMs = performance.now() - frameStart;
+    if (drawMs > HYPERPLANE_FPS_BUDGET_MS * 2) {
+      // Bail out of the drift animation to stay snappy on slow machines.
+      state.hyperplane.particles = (state.hyperplane.particles || []).slice(0, 10);
+    }
+    loopHyperplane();
+  });
+}
+
+function drawHyperplane(ctx, W, H, planeAngle) {
+  ctx.clearRect(0, 0, W, H);
+  // Background gradient — subtle space backdrop.
+  const bg = ctx.createLinearGradient(0, 0, 0, H);
+  bg.addColorStop(0, "rgba(38, 32, 60, 0.55)");
+  bg.addColorStop(1, "rgba(18, 20, 32, 0.75)");
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, W, H);
+
+  // Hyperplane axis: vertical line through the canvas center, tilted by
+  // planeAngle. Negative side = left, Positive side = right.
+  const cx = W / 2;
+  const cy = H / 2;
+  const len = Math.max(W, H);
+  const dx = Math.sin(planeAngle) * len;
+  const dy = Math.cos(planeAngle) * len;
+  // Fill positive / negative half-planes.
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(planeAngle);
+  // Positive half = right of the line.
+  ctx.fillStyle = "rgba(48, 209, 88, 0.06)";
+  ctx.fillRect(0, -H, W, H * 2);
+  ctx.fillStyle = "rgba(255, 69, 58, 0.06)";
+  ctx.fillRect(-W, -H, W, H * 2);
+  ctx.restore();
+
+  // The hyperplane itself.
+  ctx.strokeStyle = "oklch(78% 0.18 285)";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(cx - dx, cy - dy);
+  ctx.lineTo(cx + dx, cy + dy);
+  ctx.stroke();
+
+  // Labels.
+  ctx.font = "11px -apple-system, system-ui, sans-serif";
+  ctx.fillStyle = "rgba(255, 255, 255, 0.62)";
+  ctx.textAlign = "right";
+  ctx.fillText("− negative side", W - 14, H - 14);
+  ctx.textAlign = "left";
+  ctx.fillStyle = "rgba(180, 240, 200, 0.72)";
+  ctx.fillText("+ positive side", 14, H - 14);
+
+  // Anchors.
+  drawAnchorChips(ctx, W, H, "negative", state.mix.negative, planeAngle);
+  drawAnchorChips(ctx, W, H, "positive", state.mix.positive, planeAngle);
+
+  // Result particles — light starbursts emitted from the positive side.
+  const parts = state.hyperplane.particles || [];
+  for (const p of parts) {
+    const t = REDUCED_MOTION.matches
+      ? 1
+      : Math.min(1, (performance.now() - p.spawn) / 900);
+    const ease = 1 - Math.pow(1 - t, 3); // cubic-bezier-ish ease-out
+    const x = p.from.x + (p.to.x - p.from.x) * ease;
+    const y = p.from.y + (p.to.y - p.from.y) * ease;
+    ctx.beginPath();
+    const r = 6 + p.score * 8;
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    const a = 0.35 + p.score * 0.5;
+    ctx.fillStyle = `oklch(78% 0.16 ${130 - p.score * 60} / ${a})`;
+    ctx.fill();
+    // Score label
+    if (t > 0.7) {
+      ctx.fillStyle = "rgba(255, 255, 255, 0.78)";
+      ctx.font = "10px var(--mono, ui-monospace, monospace)";
+      ctx.textAlign = "center";
+      ctx.fillText(p.label.slice(0, 12), x, y - r - 4);
+    }
+  }
+}
+
+function drawAnchorChips(ctx, W, H, side, ids, planeAngle) {
+  const cx = W / 2;
+  const cy = H / 2;
+  const radius = Math.min(W, H) * 0.34;
+  const horizontalSign = side === "positive" ? 1 : -1;
+  ids.forEach((id, idx) => {
+    const angleSpread = (idx - (ids.length - 1) / 2) * 0.18;
+    const phi = planeAngle + angleSpread + Math.PI / 2 * 0;
+    const rx = cx + horizontalSign * radius * Math.cos(angleSpread);
+    const ry = cy + radius * Math.sin(angleSpread) * 0.6;
+    ctx.beginPath();
+    ctx.arc(rx, ry, 11, 0, Math.PI * 2);
+    ctx.fillStyle =
+      side === "positive"
+        ? "oklch(78% 0.16 150)"
+        : "oklch(72% 0.20 25)";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255,255,255,0.65)";
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.fillStyle = "rgba(0,0,0,0.85)";
+    ctx.font = "10px var(--mono, ui-monospace, monospace)";
+    ctx.textAlign = "center";
+    ctx.fillText(id.slice(0, 4), rx, ry + 3);
+  });
+}
+
+// Build flying-particle records for the canvas from a fresh result set.
+// Maximum N=20 to keep frame work bounded.
+function particlesFor(hits) {
+  const canvas = document.getElementById("hyperplane-canvas");
+  if (!canvas) return [];
+  const W = canvas.clientWidth || canvas.width;
+  const H = canvas.clientHeight || canvas.height;
+  const cx = W / 2;
+  const cy = H / 2;
+  const out = [];
+  hits.slice(0, 20).forEach((h, i) => {
+    const a = (i / Math.max(1, hits.length - 1)) * Math.PI - Math.PI / 2;
+    const tx = cx + Math.cos(a) * (W * 0.36) + 80;
+    const ty = cy + Math.sin(a) * (H * 0.32);
+    out.push({
+      from: { x: cx, y: cy },
+      to: { x: tx, y: ty },
+      score: Math.max(0, Math.min(1, h.score ?? 0)),
+      label: h.project_name || h.session_id.slice(0, 6),
+      spawn: performance.now() + i * 50,
+    });
+  });
+  return out;
+}
+
+function paintHyperplaneResults(hits) {
+  state.hyperplane.particles = particlesFor(hits);
+}
+
+// Stop the hyperplane loop when the mix modal closes (avoid leaking rAFs).
+document.addEventListener(
+  "DOMContentLoaded",
+  () => {
+    const m = document.getElementById("mix-modal");
+    if (!m) return;
+    m.addEventListener("close", () => {
+      if (state.hyperplane.raf) {
+        cancelAnimationFrame(state.hyperplane.raf);
+        state.hyperplane.raf = null;
+      }
+    });
+  },
+  { once: true },
+);
 
 // ---------------------------------------------------------------------------
 // Phase 5 — Replay engine
