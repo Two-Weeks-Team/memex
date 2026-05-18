@@ -1,8 +1,11 @@
 pub mod cli;
 pub mod commands;
 pub mod crud;
+pub mod embed_late;
+pub mod eval_ndcg;
 pub mod indexer;
 pub mod parser;
+pub mod retrieval;
 pub mod schema;
 pub mod sec;
 pub mod snapshot;
@@ -78,6 +81,11 @@ pub fn run() {
             commands::tail_recent_errors,
             commands::list_sessions,
             commands::predict_next_actions,
+            // P4 advanced retrieval
+            commands::mix_match_with_pairs,
+            commands::list_sessions_ordered,
+            commands::lens_search_grouped,
+            commands::relevance_feedback,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
