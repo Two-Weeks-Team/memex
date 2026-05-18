@@ -1149,6 +1149,297 @@ pub async fn recall(
         .collect())
 }
 
+// ----------------------------------------------------------------------------
+// Predictive next-action — "What would past-you do next?"
+// ----------------------------------------------------------------------------
+
+/// One predicted next-step the user might take, derived from how past sessions
+/// proceeded *from a similar conversational position*.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct PredictedAction {
+    pub rank: usize,
+    pub tool_name: String,
+    /// Short human-readable summary of the input (e.g., "cargo build" or
+    /// "src/lib.rs").
+    pub example_input_summary: String,
+    /// The full input JSON from the source session, so the UI can show the
+    /// concrete command/file/etc.
+    pub example_input_raw: serde_json::Value,
+    /// Aggregate evidence: fraction of (neighbor_session × next-N-turn) slots
+    /// in which this tool appeared.
+    pub frequency: f32,
+    /// Mean cosine similarity of the neighbor sessions that contributed.
+    pub confidence: f32,
+    /// Source attribution — which past session this example came from.
+    pub from_session_id: String,
+    pub from_session_project: String,
+    pub from_turn_uuid: String,
+    pub from_turn_index: usize,
+    pub from_turn_text_preview: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct PredictionContext {
+    pub source_session_id: String,
+    pub source_last_turn_preview: String,
+    pub neighbors_searched: usize,
+    pub neighbors_used: usize,
+    pub predictions: Vec<PredictedAction>,
+}
+
+/// **Predictive next-action** — Memex's recommendation answer to
+/// *"what would past-you have done next at this point?"*
+///
+/// Algorithm (intentionally LLM-free):
+/// 1. Re-parse the active session from `source_path` (payload lookup).
+/// 2. Embed the concatenated text of its last `last_n_turns` turns.
+/// 3. Query the `content` named vector for `neighbors` similar past sessions.
+/// 4. For each neighbor, find the *pivot turn* — the one whose text shares the
+///    most distinctive vocabulary with the active session's most recent turn.
+///    This anchors "where we are" in that neighbor's timeline.
+/// 5. Walk forward `horizon` turns from the pivot and collect every tool call.
+/// 6. Aggregate by tool name × neighbor-similarity; rank by `frequency × conf`.
+///
+/// The output is a small ranked list — each entry carries a concrete example
+/// (so the UI can render a Bash command or file path), a source attribution,
+/// and the exact turn index so the user can jump to that moment in Replay.
+pub async fn predict_next_actions(
+    client: &Qdrant,
+    embedder: &Embedder,
+    session_id: &str,
+    last_n_turns: usize,
+    horizon: usize,
+    neighbors: u64,
+) -> Result<PredictionContext> {
+    use std::collections::HashSet;
+    use std::path::Path as StdPath;
+
+    // ---- 1. Active session ---------------------------------------------
+    let payload = get_session_payload(client, session_id)
+        .await?
+        .context("active session not in index — re-index first")?;
+    let source_path = payload
+        .get("source_path")
+        .and_then(|v| v.kind.as_ref())
+        .and_then(|k| match k {
+            qdrant_client::qdrant::value::Kind::StringValue(s) => Some(s.clone()),
+            _ => None,
+        })
+        .context("active session payload is missing source_path")?;
+    let active = crate::parser::parse_session(StdPath::new(&source_path))?;
+    if active.turns.is_empty() {
+        return Ok(PredictionContext {
+            source_session_id: session_id.to_string(),
+            source_last_turn_preview: String::new(),
+            neighbors_searched: 0,
+            neighbors_used: 0,
+            predictions: Vec::new(),
+        });
+    }
+
+    // Concatenate the last N turns' text for the query embedding.
+    let active_tail: Vec<&crate::parser::Turn> =
+        active.turns.iter().rev().take(last_n_turns).collect();
+    let recent_text: String = active_tail
+        .iter()
+        .rev()
+        .map(|t| t.text.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    let anchor_text = active
+        .turns
+        .last()
+        .map(|t| t.text.clone())
+        .unwrap_or_default();
+    let source_last_turn_preview: String = anchor_text.chars().take(220).collect();
+
+    // ---- 2. Embed + nearest content-vector neighbors -------------------
+    let vecs = embedder.embed(vec![if recent_text.trim().is_empty() {
+        anchor_text.clone()
+    } else {
+        recent_text
+    }])?;
+    let qvec = vecs.into_iter().next().context("no embedding for query")?;
+    let q: Query = qvec.into();
+    let res = client
+        .query(
+            QueryPointsBuilder::new(COLLECTION)
+                .query(q)
+                .using("content")
+                .limit(neighbors + 1) // +1 because we filter out the active session itself
+                .with_payload(true),
+        )
+        .await?;
+
+    let mut neighbor_meta: Vec<(String, f32, String, String)> = Vec::new();
+    for p in res.result {
+        let Some(sid) = payload_str(&p.payload, "session_id") else { continue };
+        if sid == session_id {
+            continue;
+        }
+        let Some(src) = payload_str(&p.payload, "source_path") else { continue };
+        let project = payload_str(&p.payload, "project_name").unwrap_or_default();
+        neighbor_meta.push((sid, p.score, src, project));
+        if neighbor_meta.len() as u64 >= neighbors {
+            break;
+        }
+    }
+    let neighbors_searched = neighbor_meta.len();
+
+    // ---- 3. Per-neighbor pivot detection + horizon walk ---------------
+    use std::collections::HashMap;
+    let mut by_tool: HashMap<String, Vec<PredictedAction>> = HashMap::new();
+    let mut neighbors_used = 0usize;
+
+    // Pre-compute the anchor's distinctive words once.
+    let anchor_words: HashSet<String> = anchor_text
+        .split_whitespace()
+        .filter(|w| w.len() > 4)
+        .map(|w| w.trim_matches(|c: char| !c.is_alphanumeric()).to_lowercase())
+        .filter(|w| w.len() > 4)
+        .collect();
+
+    for (nb_sid, sim_score, source, nb_project) in &neighbor_meta {
+        let Ok(nb) = crate::parser::parse_session(StdPath::new(source)) else { continue };
+        if nb.turns.is_empty() {
+            continue;
+        }
+        let pivot = find_pivot_turn(&nb.turns, &anchor_words);
+        neighbors_used += 1;
+
+        // Walk forward `horizon` turns from pivot+1.
+        for offset in 1..=horizon {
+            let idx = pivot + offset;
+            if idx >= nb.turns.len() {
+                break;
+            }
+            let turn = &nb.turns[idx];
+            for tc in &turn.tool_calls {
+                let action = PredictedAction {
+                    rank: 0,
+                    tool_name: tc.name.clone(),
+                    example_input_summary: summarize_tool_input(&tc.name, &tc.input),
+                    example_input_raw: tc.input.clone(),
+                    frequency: 0.0,
+                    confidence: *sim_score,
+                    from_session_id: nb_sid.clone(),
+                    from_session_project: nb_project.clone(),
+                    from_turn_uuid: turn.uuid.clone(),
+                    from_turn_index: idx,
+                    from_turn_text_preview: turn.text.chars().take(180).collect(),
+                };
+                by_tool.entry(tc.name.clone()).or_default().push(action);
+            }
+        }
+    }
+
+    // ---- 4. Aggregate + rank ------------------------------------------
+    let total_actions: usize = by_tool.values().map(|v| v.len()).sum();
+    let mut predictions: Vec<PredictedAction> = Vec::new();
+    for (_, mut actions) in by_tool {
+        if actions.is_empty() {
+            continue;
+        }
+        let freq = actions.len() as f32 / total_actions.max(1) as f32;
+        let avg_conf: f32 =
+            actions.iter().map(|a| a.confidence).sum::<f32>() / actions.len() as f32;
+        // Representative example: pick the action whose neighbor was the most
+        // similar to the active session.
+        actions.sort_by(|a, b| {
+            b.confidence
+                .partial_cmp(&a.confidence)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        let mut best = actions.into_iter().next().unwrap();
+        best.frequency = freq;
+        best.confidence = avg_conf;
+        predictions.push(best);
+    }
+    predictions.sort_by(|a, b| {
+        let sa = a.frequency * 0.55 + a.confidence * 0.45;
+        let sb = b.frequency * 0.55 + b.confidence * 0.45;
+        sb.partial_cmp(&sa).unwrap_or(std::cmp::Ordering::Equal)
+    });
+    predictions.truncate(6);
+    for (i, p) in predictions.iter_mut().enumerate() {
+        p.rank = i + 1;
+    }
+
+    Ok(PredictionContext {
+        source_session_id: session_id.to_string(),
+        source_last_turn_preview,
+        neighbors_searched,
+        neighbors_used,
+        predictions,
+    })
+}
+
+/// Lexical pivot finder — picks the turn in `turns` with the most word
+/// overlap with the anchor. Falls back to "two-thirds in" if no good signal
+/// (assuming the user is mid-flow, the resolution would be later).
+fn find_pivot_turn(turns: &[crate::parser::Turn], anchor_words: &std::collections::HashSet<String>) -> usize {
+    let fallback = (turns.len() * 2 / 3).min(turns.len().saturating_sub(1));
+    if anchor_words.is_empty() {
+        return fallback;
+    }
+    let mut best_overlap = 0usize;
+    let mut best_idx = fallback;
+    for (i, t) in turns.iter().enumerate() {
+        let count = t
+            .text
+            .split_whitespace()
+            .filter(|w| w.len() > 4)
+            .map(|w| w.trim_matches(|c: char| !c.is_alphanumeric()).to_lowercase())
+            .filter(|w| anchor_words.contains(w))
+            .count();
+        if count > best_overlap {
+            best_overlap = count;
+            best_idx = i;
+        }
+    }
+    if best_overlap < 2 {
+        fallback
+    } else {
+        best_idx
+    }
+}
+
+fn summarize_tool_input(tool_name: &str, input: &serde_json::Value) -> String {
+    let s = match tool_name {
+        "Bash" => input
+            .get("command")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string(),
+        "Edit" | "MultiEdit" | "Write" | "Read" | "NotebookEdit" => input
+            .get("file_path")
+            .or_else(|| input.get("notebook_path"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string(),
+        "WebFetch" | "WebSearch" => input
+            .get("url")
+            .or_else(|| input.get("query"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string(),
+        "Task" | "Agent" => input
+            .get("description")
+            .or_else(|| input.get("subagent_type"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string(),
+        "Grep" | "Glob" => input
+            .get("pattern")
+            .or_else(|| input.get("query"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string(),
+        _ => serde_json::to_string(input).unwrap_or_default(),
+    };
+    s.chars().take(160).collect()
+}
+
 /// Fetch a single session's payload (for the inspector pane in the UI).
 pub async fn get_session_payload(
     client: &Qdrant,

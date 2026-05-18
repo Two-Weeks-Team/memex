@@ -5,7 +5,7 @@ use std::env;
 use std::process::ExitCode;
 
 const CLI_SUBCOMMANDS: &[&str] = &[
-    "scan", "search", "lens", "mix", "topology", "recall", "snapshot",
+    "scan", "search", "lens", "mix", "topology", "recall", "predict", "snapshot",
     "help", "--help", "-h",
 ];
 

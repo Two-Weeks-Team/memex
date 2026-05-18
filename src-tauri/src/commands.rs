@@ -222,6 +222,28 @@ fn qdrant_value_to_json(v: qdrant_client::qdrant::Value) -> serde_json::Value {
 }
 
 #[tauri::command]
+pub async fn predict_next_actions(
+    state: State<'_, AppStateArc>,
+    session_id: String,
+    last_n_turns: Option<usize>,
+    horizon: Option<usize>,
+    neighbors: Option<u64>,
+) -> Result<indexer::PredictionContext, String> {
+    let qdrant = state.qdrant().await.map_err(stringify)?;
+    let embedder = state.embedder().await.map_err(stringify)?;
+    indexer::predict_next_actions(
+        &qdrant,
+        &embedder,
+        &session_id,
+        last_n_turns.unwrap_or(3),
+        horizon.unwrap_or(3),
+        neighbors.unwrap_or(8),
+    )
+    .await
+    .map_err(stringify)
+}
+
+#[tauri::command]
 pub async fn snapshot_export(path: PathBuf) -> Result<String, String> {
     indexer::snapshot_export(&path).await.map_err(stringify)
 }

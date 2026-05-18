@@ -425,8 +425,6 @@ async function selectSession(sessionId, opts = {}) {
   try {
     const payload = await invoke("get_session", { sessionId });
     if (!payload) {
-      // Session may not be indexed in Qdrant yet — fall back to the stack
-      // summary so the inspector still shows something.
       const summary = state.stack.find((s) => s.session_id === sessionId);
       if (summary) {
         renderInspector(summary, sessionId);
@@ -434,12 +432,158 @@ async function selectSession(sessionId, opts = {}) {
       }
     }
     renderInspector(payload, sessionId);
+    // Path 2 — auto-load predictive next actions for the selected session.
+    // Non-blocking; the panel populates when the backend returns.
+    if (!silent) loadPredictions(sessionId);
   } catch (err) {
-    // For silent (prefetch) failures, don't overwrite the inspector with an
-    // error — the lazy AppState might still be warming up. Just leave the
-    // previous content alone.
     if (silent) return;
     inspector.innerHTML = `<div class="empty">Error: ${escapeHtml(String(err))}</div>`;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Path 2 — Predictive next-actions panel
+// ---------------------------------------------------------------------------
+
+const TOOL_ICON = {
+  Bash: "🖥",
+  Edit: "✏️",
+  MultiEdit: "✏️",
+  Write: "📝",
+  Read: "📖",
+  Grep: "🔎",
+  Glob: "🔎",
+  WebFetch: "🌐",
+  WebSearch: "🌐",
+  Task: "🤖",
+  Agent: "🤖",
+  TaskCreate: "📋",
+  TaskUpdate: "📋",
+  TaskList: "📋",
+  NotebookEdit: "📓",
+};
+
+function toolIcon(name) {
+  return TOOL_ICON[name] || "🛠";
+}
+
+async function loadPredictions(sessionId) {
+  // Render a placeholder immediately so the user knows something's happening.
+  renderPredictionPanel({
+    loading: true,
+    source_session_id: sessionId,
+  });
+  try {
+    const ctx = await invoke("predict_next_actions", {
+      sessionId,
+      lastNTurns: 3,
+      horizon: 3,
+      neighbors: 8,
+    });
+    if (state.selected !== sessionId) return; // user clicked another card
+    renderPredictionPanel(ctx);
+  } catch (err) {
+    if (state.selected !== sessionId) return;
+    renderPredictionPanel({
+      error: String(err),
+      source_session_id: sessionId,
+    });
+  }
+}
+
+function renderPredictionPanel(ctx) {
+  // Always render INSIDE the inspector, below the payload kvs section.
+  const inspector = document.getElementById("inspector");
+  let panel = document.getElementById("prediction-panel");
+  if (!panel) {
+    panel = document.createElement("section");
+    panel.id = "prediction-panel";
+    panel.className = "prediction-panel";
+    inspector.appendChild(panel);
+  }
+  if (ctx.loading) {
+    panel.innerHTML = `
+      <header class="prediction-header">
+        <h3>🔮 What past-you did next</h3>
+        <span class="muted">Searching similar sessions…</span>
+      </header>
+      <div class="prediction-loading">
+        <div class="shimmer"></div>
+        <div class="shimmer"></div>
+        <div class="shimmer"></div>
+      </div>
+    `;
+    return;
+  }
+  if (ctx.error) {
+    panel.innerHTML = `
+      <header class="prediction-header">
+        <h3>🔮 What past-you did next</h3>
+      </header>
+      <div class="empty">No prediction (${escapeHtml(ctx.error)})</div>
+    `;
+    return;
+  }
+  const preds = ctx.predictions || [];
+  if (!preds.length) {
+    panel.innerHTML = `
+      <header class="prediction-header">
+        <h3>🔮 What past-you did next</h3>
+        <span class="muted">${ctx.neighbors_searched || 0} neighbor(s) inspected</span>
+      </header>
+      <div class="empty">No close-enough past sessions to project a next action from.</div>
+    `;
+    return;
+  }
+  panel.innerHTML = `
+    <header class="prediction-header">
+      <h3>🔮 What past-you did next</h3>
+      <span class="muted">${ctx.neighbors_used || 0} of ${ctx.neighbors_searched || 0} neighbor(s) matched</span>
+    </header>
+    <div class="prediction-list"></div>
+  `;
+  const list = panel.querySelector(".prediction-list");
+  for (const p of preds) {
+    const freqPct = Math.round((p.frequency || 0) * 100);
+    const confPct = Math.round((p.confidence || 0) * 100);
+    const card = document.createElement("article");
+    card.className = "prediction-card";
+    card.innerHTML = `
+      <div class="prediction-rank">${p.rank}</div>
+      <div class="prediction-body">
+        <div class="prediction-head">
+          <span class="prediction-icon">${toolIcon(p.tool_name)}</span>
+          <span class="prediction-tool">${escapeHtml(p.tool_name)}</span>
+          <span class="prediction-meta">${freqPct}% of times · sim ${confPct}%</span>
+        </div>
+        <pre class="prediction-example">${escapeHtml(p.example_input_summary || "—")}</pre>
+        <div class="prediction-source">
+          <span class="legend-dot xs" style="background:${projectColor(p.from_session_project)}"></span>
+          <span class="prediction-source-text">from <strong>${escapeHtml(p.from_session_project || "?")}</strong> · turn #${p.from_turn_index}</span>
+          <button type="button" class="btn ghost xs" data-replay-id="${p.from_session_id}" data-replay-turn="${p.from_turn_index}">Jump to replay</button>
+        </div>
+      </div>
+      <div class="prediction-freq-bar"><span style="width:${freqPct}%"></span></div>
+    `;
+    card
+      .querySelector("button[data-replay-id]")
+      .addEventListener("click", async (e) => {
+        e.stopPropagation();
+        const sid = e.target.dataset.replayId;
+        const turn = parseInt(e.target.dataset.replayTurn, 10);
+        await openReplay(sid, { project_name: p.from_session_project });
+        // After turns load, jump to that index.
+        setTimeout(() => {
+          if (state.replay.sessionId === sid) {
+            state.replay.cursor = Math.min(
+              turn,
+              state.replay.turns.length - 1,
+            );
+            renderReplayTurn(state.replay.cursor);
+          }
+        }, 600);
+      });
+    list.appendChild(card);
   }
 }
 

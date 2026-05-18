@@ -82,6 +82,21 @@ pub enum Command {
         #[arg(long, default_value_t = 5)]
         limit: u64,
     },
+    /// Predict next likely actions for a session by mining how similar past
+    /// sessions proceeded from a comparable conversational position.
+    Predict {
+        /// Session ID to predict from (the "active" session).
+        session_id: String,
+        /// How many recent turns of the active session to use as context.
+        #[arg(long, default_value_t = 3)]
+        last_n: usize,
+        /// How many turns ahead to walk in each neighbor.
+        #[arg(long, default_value_t = 3)]
+        horizon: usize,
+        /// How many similar past sessions to consult.
+        #[arg(long, default_value_t = 8)]
+        neighbors: u64,
+    },
     /// Snapshot management.
     Snapshot {
         #[command(subcommand)]
@@ -122,6 +137,12 @@ pub fn run(args: Vec<String>) -> Result<()> {
             out,
         } => cmd_topology(sample, per_point, out),
         Command::Recall { error_text, limit } => cmd_recall(error_text, limit),
+        Command::Predict {
+            session_id,
+            last_n,
+            horizon,
+            neighbors,
+        } => cmd_predict(session_id, last_n, horizon, neighbors),
         Command::Snapshot { op } => cmd_snapshot(op),
     }
 }
@@ -272,6 +293,51 @@ fn cmd_topology(sample: u32, per_point: u32, out: Option<PathBuf>) -> Result<()>
             eprintln!("wrote {}", p.display());
         } else {
             println!("{json}");
+        }
+        anyhow::Ok(())
+    })
+}
+
+fn cmd_predict(session_id: String, last_n: usize, horizon: usize, neighbors: u64) -> Result<()> {
+    let rt = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
+    rt.block_on(async {
+        let client = indexer::connect().await?;
+        let embedder = indexer::Embedder::new()?;
+        let ctx = indexer::predict_next_actions(
+            &client, &embedder, &session_id, last_n, horizon, neighbors,
+        )
+        .await?;
+        eprintln!(
+            "predicting next actions for {} — looked at {} similar session(s), used {}",
+            session_id, ctx.neighbors_searched, ctx.neighbors_used
+        );
+        if !ctx.source_last_turn_preview.is_empty() {
+            eprintln!(
+                "\nanchor (last turn): {}…",
+                ctx.source_last_turn_preview.chars().take(120).collect::<String>()
+            );
+        }
+        if ctx.predictions.is_empty() {
+            eprintln!("\nno predictions — try a different anchor or re-index more sessions");
+            return anyhow::Ok(());
+        }
+        println!(
+            "\n{:<4} {:<14} {:<7} {:<7} {:<30} from-session"
+            ,
+            "#", "tool", "freq", "conf", "example"
+        );
+        println!("{}", "-".repeat(110));
+        for p in &ctx.predictions {
+            println!(
+                "{:<4} {:<14} {:<7.2} {:<7.3} {:<30} {} (turn #{})",
+                p.rank,
+                truncate(&p.tool_name, 14),
+                p.frequency,
+                p.confidence,
+                truncate(&p.example_input_summary, 30),
+                truncate(&p.from_session_project, 22),
+                p.from_turn_index
+            );
         }
         anyhow::Ok(())
     })

@@ -1337,6 +1337,172 @@ textarea:focus {
   color: #bdf0c9;
 }
 
+/* --- Prediction panel (Path 2: "What past-you did next") ----------------- */
+
+.prediction-panel {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.prediction-header {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 10px;
+}
+
+.prediction-header h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.prediction-header .muted {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--text-muted);
+}
+
+.prediction-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.prediction-card {
+  display: grid;
+  grid-template-columns: 28px 1fr;
+  gap: 10px;
+  padding: 10px 12px 12px;
+  background: linear-gradient(135deg, rgba(191, 90, 242, 0.06) 0%, rgba(10, 132, 255, 0.04) 100%);
+  border: 1px solid rgba(191, 90, 242, 0.22);
+  border-radius: 9px;
+  position: relative;
+  overflow: hidden;
+}
+
+.prediction-rank {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #bf5af2 0%, #0a84ff 100%);
+  color: white;
+  font-family: var(--mono);
+  font-weight: 700;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  box-shadow: 0 4px 10px rgba(191, 90, 242, 0.28);
+}
+
+.prediction-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.prediction-head {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+
+.prediction-icon {
+  font-size: 14px;
+  line-height: 1;
+}
+
+.prediction-tool {
+  font-weight: 600;
+  color: var(--text-primary);
+  font-size: 12.5px;
+}
+
+.prediction-meta {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--text-secondary);
+}
+
+.prediction-example {
+  margin: 0;
+  padding: 6px 10px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-primary);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 80px;
+  overflow: auto;
+}
+
+.prediction-source {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--sans);
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.prediction-source-text {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.prediction-freq-bar {
+  grid-column: 1 / -1;
+  margin-top: 4px;
+  height: 3px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.prediction-freq-bar > span {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #bf5af2 0%, #0a84ff 100%);
+  border-radius: 2px;
+  transition: width 0.4s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+/* Shimmer loaders */
+.prediction-loading {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.shimmer {
+  height: 38px;
+  border-radius: 8px;
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.03) 0%,
+    rgba(255, 255, 255, 0.08) 50%,
+    rgba(255, 255, 255, 0.03) 100%
+  );
+  background-size: 300% 100%;
+  animation: shimmer-roll 1.4s ease-in-out infinite;
+}
+
+@keyframes shimmer-roll {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
 /* --- Recall banner ------------------------------------------------------ */
 
 .recall-banner {
