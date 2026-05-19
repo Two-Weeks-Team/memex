@@ -29,10 +29,21 @@ pub struct SnapshotSandbox {
 }
 
 impl SnapshotSandbox {
+    /// Build the default sandbox at the platform-appropriate per-user data
+    /// directory (`~/Library/Application Support/dev.sgwannabe.memex/snapshots`
+    /// on macOS, `$XDG_DATA_HOME/dev.sgwannabe.memex/snapshots` on Linux,
+    /// `%APPDATA%\dev.sgwannabe.memex\snapshots` on Windows).
+    ///
+    /// PORTABILITY (Gemini review on PR #2, snapshot.rs:35): replaced the
+    /// hardcoded macOS `$HOME/Library/Application Support/...` path with
+    /// `dirs::data_dir()` so the snapshot directory lives in the platform's
+    /// canonical app-data location everywhere. macOS resolves it back to
+    /// the same `Library/Application Support` location, but Linux/Windows
+    /// get sensible defaults out of the box.
     pub fn from_env() -> Result<Self> {
-        let home = std::env::var_os("HOME").context("HOME unset")?;
-        let root = PathBuf::from(home)
-            .join("Library/Application Support/dev.sgwannabe.memex/snapshots");
+        let root = dirs::data_dir()
+            .context("could not resolve platform data directory")?
+            .join("dev.sgwannabe.memex/snapshots");
         std::fs::create_dir_all(&root)
             .with_context(|| format!("create_dir_all {}", root.display()))?;
         Ok(Self {
@@ -100,6 +111,23 @@ impl SnapshotSandbox {
         match op {
             SnapshotOp::Export => {
                 if canonical.exists() {
+                    // SECURITY HARDENING (Codex review on PR #2, snapshot.rs:99):
+                    // even on Export the file *can* exist if a previous
+                    // export was left in place; if so, canonicalize the full
+                    // path so a symlink-on-disk pointing outside the sandbox
+                    // is rejected here rather than silently followed. We
+                    // also bail because Export onto an existing file would
+                    // overwrite — the original intent.
+                    let full = canonical
+                        .canonicalize()
+                        .with_context(|| format!("canonicalize {}", canonical.display()))?;
+                    if !full.starts_with(&self.root) {
+                        bail!(
+                            "snapshot file escapes sandbox via symlink: {} → {}",
+                            canonical.display(),
+                            full.display()
+                        );
+                    }
                     bail!("snapshot already exists: {}", canonical.display());
                 }
             }
@@ -107,6 +135,26 @@ impl SnapshotSandbox {
                 if !canonical.exists() {
                     bail!("snapshot not found: {}", canonical.display());
                 }
+                // SECURITY HARDENING (Codex review on PR #2, snapshot.rs:99):
+                // for Import we must fully canonicalize the target — the
+                // previous logic only canonicalized the parent directory,
+                // then naively re-joined the file name, so an in-sandbox
+                // symlink (`snapshots/ok.snapshot -> /tmp/evil.snapshot`)
+                // bypassed containment entirely (`SignedEnvelope::verify`
+                // and `snapshot_import` would happily follow it). Resolving
+                // the full path lets us reject the symlink target if it
+                // escapes the sandbox root.
+                let full = canonical
+                    .canonicalize()
+                    .with_context(|| format!("canonicalize {}", canonical.display()))?;
+                if !full.starts_with(&self.root) {
+                    bail!(
+                        "snapshot file escapes sandbox via symlink: {} → {}",
+                        canonical.display(),
+                        full.display()
+                    );
+                }
+                return Ok(full);
             }
         }
         Ok(canonical)
@@ -205,18 +253,23 @@ impl SignedEnvelope {
                 CURRENT_QDRANT_VERSION
             );
         }
-        if sig_minor != cur_minor {
-            return Ok(VerifyOutcome::WarnQdrantMinor {
-                expected: CURRENT_QDRANT_VERSION.to_string(),
-                found: sig.qdrant_version.clone(),
-            });
-        }
-
-        // Schema version check.
+        // PRIORITY FIX (CodeRabbit PR #2 review, snapshot.rs:208): when BOTH
+        // schema_version and qdrant minor drift, prefer surfacing the schema
+        // mismatch first because it's the higher-risk signal — a schema
+        // mismatch can corrupt payload semantics, whereas a minor Qdrant
+        // delta is usually safe-on-best-effort. Previously, the minor check
+        // ran first and returned early, hiding any concurrent schema drift
+        // entirely.
         if sig.schema_version != CURRENT_SCHEMA_VERSION {
             return Ok(VerifyOutcome::WarnSchemaMismatch {
                 expected: CURRENT_SCHEMA_VERSION,
                 found: sig.schema_version,
+            });
+        }
+        if sig_minor != cur_minor {
+            return Ok(VerifyOutcome::WarnQdrantMinor {
+                expected: CURRENT_QDRANT_VERSION.to_string(),
+                found: sig.qdrant_version.clone(),
             });
         }
         Ok(VerifyOutcome::Ok)
@@ -224,9 +277,23 @@ impl SignedEnvelope {
 }
 
 fn parse_semver_major_minor(s: &str) -> Option<(u32, u32)> {
-    let mut it = s.split('.');
-    let major = it.next()?.parse().ok()?;
-    let minor = it.next()?.parse().ok()?;
+    // ROBUSTNESS (Gemini PR #2 review, snapshot.rs:231): tolerate the full
+    // set of strings Qdrant has ever emitted for its version: bare two-part
+    // "1.18", three-part "1.18.0", and pre-release tags like
+    // "1.18.0-rc1" / "1.18.0+meta" — the previous split-on-'.' + parse
+    // chain rejected all but the canonical three-part shape, which would
+    // hard-fail snapshot verification mid-export every time we shipped a
+    // pre-release Qdrant during testing.
+    //
+    // We don't take a direct `semver` crate dep because the rest of the
+    // codebase doesn't need full semver, and the existing transitive
+    // `semver` (via cargo metadata) isn't guaranteed to stay across deps
+    // upgrades. A tiny hand-rolled parser is more robust + zero-cost.
+    let trimmed = s.split(|c: char| c == '-' || c == '+').next().unwrap_or(s);
+    let mut it = trimmed.split('.');
+    let major = it.next()?.trim().parse::<u32>().ok()?;
+    let minor_str = it.next().unwrap_or("0").trim();
+    let minor = minor_str.parse::<u32>().ok()?;
     Some((major, minor))
 }
 

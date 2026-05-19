@@ -201,7 +201,7 @@ Run `scripts/demo/record-demo.sh --dry-run` to verify each shot fits its window.
 ## Acceptance criteria (recap)
 
 - [ ] AC-7.1.1 — Length 180s ±2s
-- [ ] AC-7.1.2 — 1:42 → 1:58 silence (12s exactly = 720 frames at 60fps or 288 at 24fps)
+- [ ] AC-7.1.2 — 1:42 → 1:54 silence (12s exactly = 720 frames at 60fps or 288 at 24fps)
 - [ ] AC-7.1.3 — All 18 shots present
 - [ ] AC-7.1.4 — 60fps capture, 24fps export allowed
 - [ ] AC-7.1.5 — Outro shows Apache-2.0 + Qdrant logo + repo URL

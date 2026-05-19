@@ -101,7 +101,12 @@ pub async fn dual_get_session_payload(
     };
 
     // 1) Try v3 (only if it exists, so a fresh DB doesn't error on lookup).
-    if client.collection_exists(COLLECTION_V3).await.unwrap_or(false) {
+    // CORRECTNESS FIX (Codex/Gemini review on PR #3, crud.rs:104+): the
+    // previous `unwrap_or(false)` collapsed transient Qdrant errors
+    // (connectivity, auth, server panic) to "collection does not exist",
+    // which is silently the wrong answer — we'd return partial / `None`
+    // data instead of surfacing the outage. Propagate the error with `?`.
+    if client.collection_exists(COLLECTION_V3).await? {
         let res = client
             .get_points(GetPointsBuilder::new(COLLECTION_V3, vec![pid.clone()]).with_payload(true))
             .await?;
@@ -109,12 +114,8 @@ pub async fn dual_get_session_payload(
             return Ok(Some(p.payload));
         }
     }
-    // 2) Fall back to v2.
-    if client
-        .collection_exists(COLLECTION_V2)
-        .await
-        .unwrap_or(false)
-    {
+    // 2) Fall back to v2 (propagate errors per the same rationale above).
+    if client.collection_exists(COLLECTION_V2).await? {
         let res = client
             .get_points(GetPointsBuilder::new(COLLECTION_V2, vec![pid]).with_payload(true))
             .await?;
@@ -138,7 +139,12 @@ pub async fn dual_get_points(
     let mut by_id: HashMap<String, RetrievedPoint> = HashMap::new();
     let mut missing: Vec<PointId> = point_ids.clone();
 
-    if client.collection_exists(COLLECTION_V3).await.unwrap_or(false) {
+    // CORRECTNESS FIX (Codex/Gemini review on PR #3, crud.rs:104+): the
+    // previous `unwrap_or(false)` collapsed transient Qdrant errors
+    // (connectivity, auth, server panic) to "collection does not exist",
+    // which is silently the wrong answer — we'd return partial / `None`
+    // data instead of surfacing the outage. Propagate the error with `?`.
+    if client.collection_exists(COLLECTION_V3).await? {
         let v3 = client
             .get_points(
                 GetPointsBuilder::new(COLLECTION_V3, point_ids.clone()).with_payload(true),
@@ -157,10 +163,7 @@ pub async fn dual_get_points(
     }
 
     if !missing.is_empty()
-        && client
-            .collection_exists(COLLECTION_V2)
-            .await
-            .unwrap_or(false)
+        && client.collection_exists(COLLECTION_V2).await?
     {
         let v2 = client
             .get_points(GetPointsBuilder::new(COLLECTION_V2, missing).with_payload(true))
@@ -264,6 +267,36 @@ pub struct MigrationReport {
 /// accepted by Qdrant (the vector slot just stays empty for that point).
 pub async fn migrate_v2_to_v3(client: &Qdrant) -> Result<MigrationReport> {
     migrate_named(client, COLLECTION_V2, COLLECTION_V3).await
+}
+
+/// Auto-migration wrapper used by `AppState::qdrant()` on startup. Returns:
+/// - `Ok(None)` when no migration is needed (v2 empty OR v3 already has data
+///   ≥ v2 — we treat the user as already migrated)
+/// - `Ok(Some(report))` when a migration ran
+/// - `Err(_)` on transient Qdrant failure (caller logs + swallows)
+///
+/// Conservative on purpose: we never re-migrate a v3 that already has any
+/// points, since that would (a) be a no-op (idempotent upsert by point_id)
+/// and (b) burn user-visible time on every restart.
+pub async fn migrate_v2_to_v3_if_needed(client: &Qdrant) -> Result<Option<MigrationReport>> {
+    let v2_exists = client
+        .collection_exists(COLLECTION_V2)
+        .await
+        .with_context(|| format!("collection_exists({COLLECTION_V2}) probe"))?;
+    if !v2_exists {
+        return Ok(None);
+    }
+    let v2_count = count_points(client, COLLECTION_V2).await.unwrap_or(0);
+    if v2_count == 0 {
+        return Ok(None);
+    }
+    let v3_count = count_points(client, COLLECTION_V3).await.unwrap_or(0);
+    if v3_count >= v2_count {
+        // v3 already covers (or exceeds) v2 — typical post-`scan --index` state.
+        return Ok(None);
+    }
+    let report = migrate_v2_to_v3(client).await?;
+    Ok(Some(report))
 }
 
 /// Test hook — migrate between arbitrary named collections.

@@ -156,7 +156,9 @@ pub async fn mix_match_with_pairs(
         })
         .collect();
 
-    let context = ContextInputBuilder::default().pairs(pair_vec.clone()).build();
+    // Drop `.clone()` (Gemini PR #4 review, retrieval.rs:159): `pair_vec`
+    // is consumed by the builder and not read again before the request.
+    let context = ContextInputBuilder::default().pairs(pair_vec).build();
     let discover = qdrant_client::qdrant::DiscoverInput {
         target: Some(VectorInput::from(target_pid)),
         context: Some(context),
@@ -173,18 +175,7 @@ pub async fn mix_match_with_pairs(
         )
         .await?;
 
-    Ok(resp
-        .result
-        .into_iter()
-        .map(|p| SearchHit {
-            score: p.score,
-            session_id: payload_string(&p.payload, "session_id"),
-            project_name: payload_string(&p.payload, "project_name"),
-            ai_title: payload_string(&p.payload, "ai_title"),
-            start_iso: payload_string(&p.payload, "start_iso"),
-            vector_scores: HashMap::new(),
-        })
-        .collect())
+    Ok(resp.result.into_iter().map(map_search_hit).collect())
 }
 
 // ---------------------------------------------------------------------------
@@ -271,13 +262,22 @@ pub async fn lens_search_grouped(
 
     if let Some(gb) = group_by {
         let q: Query = qvec.into();
+        // SEMANTICS FIX (Codex PR #4 review, retrieval.rs:280): `limit` in
+        // the non-grouped path is the absolute cap on the flattened hit
+        // list, but `QueryPointGroupsBuilder::limit(N)` is "max N groups",
+        // which means the flat list could grow to `N * group_size`. That
+        // tripped UI pagination that assumed `flat.len() <= limit`. We
+        // pass a *group_limit* derived from `limit` so the flat list stays
+        // within `limit` (rounded up): `group_limit = ceil(limit / group_size)`.
+        let group_size = gb.group_size.max(1) as u64;
+        let group_limit = limit.div_ceil(group_size).max(1);
         let resp = client
             .query_groups(
                 QueryPointGroupsBuilder::new(COLLECTION_V3, gb.key.clone())
                     .query(q)
                     .using("content".to_string())
-                    .group_size(gb.group_size as u64)
-                    .limit(limit)
+                    .group_size(group_size)
+                    .limit(group_limit)
                     .with_payload(WithPayloadSelector::from(true))
                     .params(search_params_filtered_acorn(None)),
             )
@@ -291,14 +291,7 @@ pub async fn lens_search_grouped(
                 let gid = group_id_to_string(&g.id);
                 let mut hits: Vec<SearchHit> = Vec::new();
                 for sp in g.hits {
-                    let hit = SearchHit {
-                        score: sp.score,
-                        session_id: payload_string(&sp.payload, "session_id"),
-                        project_name: payload_string(&sp.payload, "project_name"),
-                        ai_title: payload_string(&sp.payload, "ai_title"),
-                        start_iso: payload_string(&sp.payload, "start_iso"),
-                        vector_scores: HashMap::new(),
-                    };
+                    let hit = map_search_hit(sp);
                     flat.push(hit.clone());
                     hits.push(hit);
                 }
@@ -306,6 +299,13 @@ pub async fn lens_search_grouped(
             }
         }
 
+        // SEMANTICS FIX (continued from above): even after picking
+        // `group_limit = ceil(limit / group_size)`, the LAST group can
+        // contribute a partial set, so the flat list can briefly exceed
+        // `limit`. Clamp here so the public contract is exact.
+        if flat.len() > limit as usize {
+            flat.truncate(limit as usize);
+        }
         Ok(LensSearchResponse {
             flat,
             groups: Some(groups),
@@ -323,18 +323,7 @@ pub async fn lens_search_grouped(
                     .params(search_params_filtered_acorn(None)),
             )
             .await?;
-        let flat: Vec<SearchHit> = resp
-            .result
-            .into_iter()
-            .map(|p| SearchHit {
-                score: p.score,
-                session_id: payload_string(&p.payload, "session_id"),
-                project_name: payload_string(&p.payload, "project_name"),
-                ai_title: payload_string(&p.payload, "ai_title"),
-                start_iso: payload_string(&p.payload, "start_iso"),
-                vector_scores: HashMap::new(),
-            })
-            .collect();
+        let flat: Vec<SearchHit> = resp.result.into_iter().map(map_search_hit).collect();
         Ok(LensSearchResponse { flat, groups: None })
     }
 }
@@ -375,7 +364,9 @@ pub async fn relevance_feedback(
         })
     };
 
-    let target_vi: VectorInput = qvec.clone().into();
+    // Drop `.clone()` (Gemini PR #4 review, retrieval.rs:378): `qvec` is
+    // moved into the VectorInput and not read again below.
+    let target_vi: VectorInput = qvec.into();
 
     let mut builder = RelevanceFeedbackInputBuilder::new(target_vi);
     // Positive feedback: score = 1.0
@@ -423,23 +414,39 @@ pub async fn relevance_feedback(
         )
         .await?;
 
-    Ok(resp
-        .result
-        .into_iter()
-        .map(|p| SearchHit {
-            score: p.score,
-            session_id: payload_string(&p.payload, "session_id"),
-            project_name: payload_string(&p.payload, "project_name"),
-            ai_title: payload_string(&p.payload, "ai_title"),
-            start_iso: payload_string(&p.payload, "start_iso"),
-            vector_scores: HashMap::new(),
-        })
-        .collect())
+    Ok(resp.result.into_iter().map(map_search_hit).collect())
 }
 
 // ---------------------------------------------------------------------------
 // Payload helpers (local, mirror indexer.rs::payload_str)
+//
+// NOTE (Gemini PR #4 review, retrieval.rs:470): these payload helpers
+// duplicate `indexer.rs::payload_str` + friends. We keep them local for
+// now because lifting them into a shared module touches the whole
+// indexer/retrieval/lens dependency graph; the optional value-vs-default
+// shape (`Option<String>` vs `String` here) also differs across call
+// sites in a way that resists a single shared signature. Deferred to a
+// dedicated cleanup PR.
 // ---------------------------------------------------------------------------
+
+/// QUALITY FIX (Gemini PR #4 review, retrieval.rs:186): the mapping from a
+/// Qdrant scored point payload to a `SearchHit` was inlined verbatim at four
+/// call sites in this file (lines 179, 294, 329, 429 in the original PR).
+/// Centralized here so changes to the SearchHit schema (or to the payload
+/// field naming convention) only need to be applied once. `vector_scores`
+/// stays empty because callers fill it in afterwards when running breakdown
+/// queries — keeping that responsibility outside the mapping function
+/// preserves the existing behavior of `lens_search_grouped`'s flat list.
+fn map_search_hit(p: qdrant_client::qdrant::ScoredPoint) -> SearchHit {
+    SearchHit {
+        score: p.score,
+        session_id: payload_string(&p.payload, "session_id"),
+        project_name: payload_string(&p.payload, "project_name"),
+        ai_title: payload_string(&p.payload, "ai_title"),
+        start_iso: payload_string(&p.payload, "start_iso"),
+        vector_scores: HashMap::new(),
+    }
+}
 
 fn payload_string(p: &HashMap<String, qdrant_client::qdrant::Value>, key: &str) -> String {
     p.get(key)

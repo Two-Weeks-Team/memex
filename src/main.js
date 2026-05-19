@@ -376,8 +376,15 @@ async function runLensSearch() {
       // Normalize v2 → unified shape (carries score_breakdown).
       hits = (hits || []).map(normalizeLensResult);
     } catch (v2Err) {
-      // Fallback to legacy `lens_search`. Strip content_late from the
-      // weights map so the legacy command doesn't trip on an unknown key.
+      // OBSERVABILITY (Gemini PR #7 review, main.js:390): the v2 call may
+      // fail for reasons OTHER than "not deployed yet" (Qdrant transient
+      // 503, formula validation error after a schema migration, etc.) —
+      // log so a developer hitting this fallback can diagnose without
+      // having to redeploy a debug build. The fallback path itself is the
+      // safe behavior; logging adds no extra work in the happy path.
+      console.warn("lens_search_v2 failed, falling back to legacy:", v2Err);
+      // Strip content_late from the weights map so the legacy command
+      // doesn't trip on an unknown key.
       const legacyWeights = { ...weights };
       delete legacyWeights.content_late;
       delete legacyWeights.diversity;
@@ -794,6 +801,12 @@ async function renderHeatChip(cardEl) {
   } catch {
     /* ignore */
   }
+  // RACE FIX (Codex PR #7 review, main.js:826): the IPC round-trip can
+  // take long enough that the pointer leaves this card (or moves onto a
+  // different one) before we return. If we blindly call .classList.remove
+  // / .innerHTML now, the chip ends up showing stale metadata for a card
+  // that's no longer hovered. Guard with the canonical hoveredId.
+  if (state.heatTrail.hoveredId !== sid) return;
   if (!payload) {
     chip.classList.add("hidden");
     return;
@@ -1452,17 +1465,14 @@ function disposeTopology() {
 
 function renderTopology3D(topo, mount) {
   disposeTopology();
-  // WOW-2: salvage chrome before wiping innerHTML.
-  const filterEl = document.getElementById("agent-filter");
-  const overlayEl = document.getElementById("gap-overlay");
-  if (filterEl) filterEl.remove();
-  if (overlayEl) overlayEl.remove();
-  mount.innerHTML = "";
-  if (filterEl) mount.appendChild(filterEl);
-  if (overlayEl) {
-    overlayEl.innerHTML = "";
-    mount.appendChild(overlayEl);
-  }
+  // DEDUP FIX (Gemini PR #7 review, main.js:1465): the agent-filter +
+  // gap-overlay salvage dance was inlined here, but the empty/no-engine
+  // branches below already use the `preserveTopologyChrome` helper. Use
+  // that same helper here for consistency and so future chrome additions
+  // only need to be tracked in one place.
+  preserveTopologyChrome(mount, () => {
+    mount.innerHTML = "";
+  });
   const { nodes, edges } = topo;
   const statsEl = document.getElementById("topology-stats");
   const legendEl = document.getElementById("topology-legend");
@@ -1840,8 +1850,15 @@ function projectClusterForce(strength) {
 // WOW-2: small async pool that hydrates `source_agent` for each topology node
 // without paying a full N-roundtrip latency. 6 in flight is comfortable for
 // macOS Tauri IPC + qdrant on localhost.
+//
+// MAGIC NUMBER FIX (Gemini PR #7 review, main.js:1844): the concurrency
+// cap is named via this module-level constant so it can be tuned without
+// hunting through code. Bumping it >8 risks saturating Tauri's IPC queue
+// on big-corpus topology views; <4 noticeably slows hydration.
+const HYDRATE_AGENT_WORKERS = 6;
+
 async function hydrateAgentMetadata(nodes) {
-  const PARALLEL = 6;
+  const PARALLEL = HYDRATE_AGENT_WORKERS;
   let i = 0;
   async function worker() {
     while (i < nodes.length) {
@@ -2022,16 +2039,24 @@ async function runMix() {
   try {
     let hits;
     if (target && state.mix.positive.length >= 1) {
+      // FUNCTIONAL FIX (Codex PR #7 review, main.js:2031): the backend
+      // `ContextPair` deserializer (retrieval.rs::ContextPair) expects
+      // snake_case `positive_session_id` / `negative_session_id` fields.
+      // Sending `{positive, negative}` made every `mix_match_with_pairs`
+      // call fail at the deserialization boundary, so this code path
+      // ALWAYS silently fell back to legacy `mix_match`, meaning the
+      // Hyperplane modal's "target session pair" semantics never reached
+      // the server — which broke the WOW-5 Act IV demo storyline.
       const anchor = state.mix.positive[0];
       const pairs = [];
       for (const p of state.mix.positive.slice(1)) {
-        pairs.push({ positive: p, negative: anchor });
+        pairs.push({ positive_session_id: p, negative_session_id: anchor });
       }
       for (const n of state.mix.negative) {
-        pairs.push({ positive: anchor, negative: n });
+        pairs.push({ positive_session_id: anchor, negative_session_id: n });
       }
       if (!pairs.length) {
-        pairs.push({ positive: anchor, negative: anchor });
+        pairs.push({ positive_session_id: anchor, negative_session_id: anchor });
       }
       try {
         hits = await invoke("mix_match_with_pairs", {
@@ -2236,7 +2261,13 @@ function loopHyperplane() {
 }
 
 function drawHyperplane(ctx, W, H, planeAngle) {
-  ctx.clearRect(0, 0, W, H);
+  // HiDPI FIX (Gemini PR #7 review, main.js:2239): on retina displays the
+  // canvas backing store is scaled by devicePixelRatio while W/H are
+  // logical CSS pixels. Clearing only (0,0,W,H) leaves a stripe of the
+  // previous frame visible along the right/bottom edges. Clear the full
+  // backing store explicitly. The fill/draw operations below still use
+  // logical W/H because the context's transform handles the DPR scaling.
+  ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
   // Background gradient — subtle space backdrop.
   const bg = ctx.createLinearGradient(0, 0, 0, H);
   bg.addColorStop(0, "rgba(38, 32, 60, 0.55)");

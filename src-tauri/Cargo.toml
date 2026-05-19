@@ -43,6 +43,11 @@ sha2 = "0.10"
 # P5 — KC-05 (Semaphore-cap pool sizing) + KG-02 (LRU cache for predict pivot parses).
 num_cpus = "1"
 lru = "0.12"
+# Cross-platform `~`/data-dir resolution. Already a transitive dep via tauri;
+# named here so the explicit `dirs::home_dir()` / `dirs::data_dir()` calls
+# in sec.rs + snapshot.rs are honest about what they rely on. Gemini review
+# on PR #2.
+dirs = "5"
 
 [dev-dependencies]
 pretty_assertions = "1"

@@ -492,12 +492,34 @@ pub fn build_point_v3_with_multivec(
 ) -> PointStruct {
     use qdrant_client::qdrant::{
         vector, vectors::VectorsOptions, DenseVector, MultiDenseVector, NamedVectors,
-        Vector as ProtoVector, Vectors,
+        SparseVector as ProtoSparseVector, Vector as ProtoVector, Vectors,
     };
 
     let id = point_id_proto(&session.session_id);
     let payload = session_payload_v3(session);
     let mut named: HashMap<String, ProtoVector> = HashMap::new();
+    // Capture path / tool source text BEFORE we move `dense` into the named
+    // map — we need them to derive the sparse vector counterparts. The
+    // sparse slots (`path_sparse`, `tool_sparse`) are part of the v3 schema
+    // (see `schema::SPARSE_VECTORS`), and the query side calls
+    // `lens::text_to_sparse` against the same tokenizer / hash function,
+    // so the document side **must** also write tokenized counts here.
+    //
+    // FUNCTIONAL FIX (Codex review on PR #6, lens.rs:389): without writing
+    // sparse vectors at index time, the `path` and `tool` lens weights
+    // silently produced empty result sets because the formula referenced
+    // prefetches against unpopulated sparse slots.
+    let extracts = session_extracts(session);
+    let path_text = extracts
+        .iter()
+        .find(|(k, _)| k == "path")
+        .map(|(_, t)| t.clone())
+        .unwrap_or_default();
+    let tool_text = extracts
+        .iter()
+        .find(|(k, _)| k == "tool")
+        .map(|(_, t)| t.clone())
+        .unwrap_or_default();
     for (k, v) in dense {
         named.insert(
             k,
@@ -517,6 +539,39 @@ pub fn build_point_v3_with_multivec(
             },
         );
     }
+
+    // KB-02 — derive sparse vectors from the same source-field text the
+    // query side embeds via `text_to_sparse`. Empty sparse maps are simply
+    // omitted (Qdrant accepts partial upserts against the named-vector
+    // schema), which keeps short / pathless sessions from polluting the
+    // index with empty entries.
+    let path_sparse = crate::lens::text_to_sparse(&path_text);
+    if !path_sparse.indices.is_empty() {
+        named.insert(
+            "path_sparse".to_string(),
+            ProtoVector {
+                vector: Some(vector::Vector::Sparse(ProtoSparseVector {
+                    values: path_sparse.values,
+                    indices: path_sparse.indices,
+                })),
+                ..Default::default()
+            },
+        );
+    }
+    let tool_sparse = crate::lens::text_to_sparse(&tool_text);
+    if !tool_sparse.indices.is_empty() {
+        named.insert(
+            "tool_sparse".to_string(),
+            ProtoVector {
+                vector: Some(vector::Vector::Sparse(ProtoSparseVector {
+                    values: tool_sparse.values,
+                    indices: tool_sparse.indices,
+                })),
+                ..Default::default()
+            },
+        );
+    }
+
     PointStruct {
         id: Some(id),
         payload: payload.into(),
@@ -1124,7 +1179,10 @@ pub async fn topology(
         // P5 KG-01 — memoize the heavy compute on (root, max_mtime). Cache
         // misses fall through to the full scan+compute below; hits return the
         // cached `Arc<CachedInsights>` so we just clone the inner Vecs out.
-        let max_mt = crate::insights_cache::InsightsCache::fingerprint(&root);
+        // Composite fingerprint (mtime + file_count + total_size) so the
+        // cache invalidates on deletion / in-place edit, not just on the
+        // newest-file mtime moving forward (Codex review fix on PR #5).
+        let fingerprint = crate::insights_cache::InsightsCache::fingerprint(&root);
         let root_for_compute = root.clone();
         let nodes_ref = nodes.clone();
         let edges_ref = edges.clone();
@@ -1132,7 +1190,7 @@ pub async fn topology(
             matrix2.pairs.clone();
         let node_project_ref = node_project.clone();
         let pid_to_session_ref = pid_to_session.clone();
-        match INSIGHTS_CACHE.get_or_compute(root, max_mt, move || {
+        match INSIGHTS_CACHE.get_or_compute(root, fingerprint, move || {
             let sessions = crate::parser::scan_dir(&root_for_compute)?;
             let (pi, gi) = compute_insights(
                 &sessions,
@@ -1800,11 +1858,19 @@ pub(crate) fn payload_str(
 
 /// Snapshot export — calls Qdrant's HTTP snapshot endpoint and copies the file
 /// to `dest`. Returns the chosen filename on the server.
+///
+/// FUNCTIONAL FIX (Codex review on PR #4, indexer.rs:444): the write path is
+/// `COLLECTION_V3` since P3 KG-03, so backups MUST snapshot the v3 collection
+/// or the resulting archive omits every newly indexed session. The previous
+/// implementation snapshotted the legacy v2 collection (`memex_sessions`),
+/// which on a fresh database (post-hotfix #9) is **empty**, so exports
+/// silently produced an empty backup.
 pub async fn snapshot_export(dest: &Path) -> Result<String> {
     let url = std::env::var("MEMEX_QDRANT_HTTP")
         .unwrap_or_else(|_| "http://localhost:6333".into());
     let client = reqwest::Client::new();
-    let create_url = format!("{url}/collections/{COLLECTION}/snapshots");
+    let collection = crate::schema::COLLECTION_V3;
+    let create_url = format!("{url}/collections/{collection}/snapshots");
     let resp: serde_json::Value = client
         .post(&create_url)
         .send()
@@ -1820,7 +1886,7 @@ pub async fn snapshot_export(dest: &Path) -> Result<String> {
         .context("snapshot name missing in response")?
         .to_string();
 
-    let download_url = format!("{url}/collections/{COLLECTION}/snapshots/{name}");
+    let download_url = format!("{url}/collections/{collection}/snapshots/{name}");
     let bytes = client
         .get(&download_url)
         .send()
@@ -1838,7 +1904,11 @@ pub async fn snapshot_import(src: &Path) -> Result<()> {
         .unwrap_or_else(|_| "http://localhost:6333".into());
     let bytes = tokio::fs::read(src).await?;
     let client = reqwest::Client::new();
-    let upload_url = format!("{url}/collections/{COLLECTION}/snapshots/upload?priority=snapshot");
+    // Import into v3 — matches the export collection (see snapshot_export
+    // docstring). v2 is read-only fallback only; restoring into v2 would
+    // bypass the v3 query path entirely.
+    let collection = crate::schema::COLLECTION_V3;
+    let upload_url = format!("{url}/collections/{collection}/snapshots/upload?priority=snapshot");
     let part = reqwest::multipart::Part::bytes(bytes).file_name(
         src.file_name()
             .and_then(|s| s.to_str())

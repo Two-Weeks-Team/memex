@@ -62,6 +62,33 @@ impl AppState {
         crate::crud::ensure_collection_v3(&client)
             .await
             .context("failed to ensure v3 collection schema")?;
+
+        // FUNCTIONAL FIX (Codex review on PR #3, commands.rs:64): on upgrade
+        // from a Memex install that only ever wrote v2, the v3 collection is
+        // empty at startup, so every search/topology/recall returns nothing
+        // until the user manually triggers `scan --index`. Auto-trigger the
+        // v2→v3 carry-forward as a background task so the UI stays
+        // responsive (the migration is paginated, but on a large v2 it may
+        // take minutes). The task is best-effort — failures are logged but
+        // don't block the app from running.
+        let client_for_bg = client.clone();
+        tokio::spawn(async move {
+            match crate::crud::migrate_v2_to_v3_if_needed(&client_for_bg).await {
+                Ok(Some(report)) => {
+                    eprintln!(
+                        "[memex] v2→v3 migration done: {} new points (v2 had {}, v3 was empty), {} skipped, took {}ms",
+                        report.migrated, report.v2_count, report.v2_count.saturating_sub(report.migrated), report.elapsed_ms,
+                    );
+                }
+                Ok(None) => {
+                    // Either v2 is empty or v3 already has data — no-op.
+                }
+                Err(e) => {
+                    eprintln!("[memex] v2→v3 migration skipped: {e:#}");
+                }
+            }
+        });
+
         *guard = Some(client.clone());
         Ok(client)
     }
@@ -255,7 +282,22 @@ pub async fn snapshot_export(path: PathBuf) -> Result<String, String> {
         .validate_path(&path, crate::snapshot::SnapshotOp::Export)
         .map_err(stringify)?;
     let name = indexer::snapshot_export(&canonical).await.map_err(stringify)?;
-    crate::snapshot::SignedEnvelope::sign(&canonical).map_err(stringify)?;
+    // ATOMICITY FIX (CodeRabbit PR #2 review, commands.rs:254): if signing
+    // fails we'd leave an unsigned snapshot in the sandbox that subsequent
+    // exports refuse to overwrite (sandbox `Export` op rejects existing
+    // files) AND that imports happily accept as "legacy unsigned" — both
+    // wrong outcomes. Delete the unsigned bytes on sign failure so the user
+    // can re-run export cleanly, and surface the sign error to them.
+    if let Err(sign_err) = crate::snapshot::SignedEnvelope::sign(&canonical) {
+        let cleanup = std::fs::remove_file(&canonical);
+        return Err(format!(
+            "snapshot signing failed: {sign_err:#}; rollback {}",
+            match cleanup {
+                Ok(()) => "ok".to_string(),
+                Err(e) => format!("ALSO FAILED: {e}"),
+            }
+        ));
+    }
     Ok(name)
 }
 
@@ -323,13 +365,21 @@ pub async fn refresh_index(
     state: State<'_, AppStateArc>,
     path: Option<PathBuf>,
 ) -> Result<serde_json::Value, String> {
-    let sessions = if let Some(root) = path {
-        // Single-root override path — try Claude parser first; if the root
-        // doesn't look like a Codex sessions dir, default to Claude.
-        scan_root_routed(&root).map_err(stringify)?
-    } else {
-        scan_all_roots().map_err(stringify)?
-    };
+    // PERFORMANCE FIX (Gemini PR #5 review, commands.rs:332): the directory
+    // walk + JSONL parse is synchronous and CPU-bound — running it on the
+    // tokio worker froze the UI on large corpora. Offload to the blocking
+    // pool so the webview stays responsive. The dispatcher must allocate
+    // the closure inputs by `clone()` so the spawned task owns them.
+    let sessions = tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<parser::Session>> {
+        if let Some(root) = path {
+            scan_root_routed(&root)
+        } else {
+            scan_all_roots()
+        }
+    })
+    .await
+    .map_err(|e| format!("refresh_index parse task panicked: {e}"))?
+    .map_err(stringify)?;
     let total = sessions.len();
     let qdrant = state.qdrant().await.map_err(stringify)?;
     let embedder = state.embedder().await.map_err(stringify)?;
@@ -374,16 +424,44 @@ fn scan_all_roots() -> anyhow::Result<Vec<parser::Session>> {
     Ok(all)
 }
 
-/// Route a single explicit root: prefer the Codex parser when the path
-/// contains `/.codex/sessions` (case-insensitive substring match — matches
-/// the same heuristic `schema::infer_source_agent` uses on the source path).
+/// Route a single explicit root to the right parser.
+///
+/// ROBUSTNESS FIX (Codex PR #5 review, commands.rs:383): the previous
+/// implementation matched on the literal substring `/.codex/sessions`,
+/// which silently fell back to the Claude parser whenever the user
+/// pointed Memex at the same data via:
+///   - a symlink (e.g. `~/codex_data -> ~/.codex/sessions`)
+///   - an alternate mount path
+///   - a different letter case (HFS+ case-insensitive volumes)
+///
+/// The Claude parser then accepts Codex JSONL but extracts almost no fields
+/// from the alien schema, so refresh_index/list_sessions silently pollute
+/// the index with empty sessions instead of surfacing a parse error. Fix:
+/// canonicalize first and also peek at the first rollout filename pattern
+/// to detect Codex content regardless of how the user reached the path.
 fn scan_root_routed(root: &std::path::Path) -> anyhow::Result<Vec<parser::Session>> {
-    let s = root.to_string_lossy();
-    if s.contains("/.codex/sessions") {
-        crate::codex_parser::scan_codex_dir(root)
-    } else {
-        parser::scan_dir(root)
+    // 1) Canonical path string — resolves symlinks, normalises case on HFS+.
+    let canonical = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    let s_lower = canonical.to_string_lossy().to_lowercase();
+    if s_lower.contains("/.codex/sessions") || s_lower.ends_with(".codex/sessions") {
+        return crate::codex_parser::scan_codex_dir(&canonical);
     }
+    // 2) Content sniff — look at the first rollout-shaped file. Codex
+    //    sessions follow the `rollout-*.jsonl` convention, while Claude's
+    //    are typically `<uuid>.jsonl`. We only need to check ONE file to
+    //    pick the right parser.
+    let first_rollout = walkdir::WalkDir::new(&canonical)
+        .max_depth(4)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .find(|e| {
+            let name = e.file_name().to_string_lossy().to_lowercase();
+            name.starts_with("rollout-") && name.ends_with(".jsonl")
+        });
+    if first_rollout.is_some() {
+        return crate::codex_parser::scan_codex_dir(&canonical);
+    }
+    parser::scan_dir(&canonical)
 }
 
 fn default_codex_root() -> PathBuf {

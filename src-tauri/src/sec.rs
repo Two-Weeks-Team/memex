@@ -31,11 +31,16 @@ pub struct SandboxRoot {
 }
 
 impl SandboxRoot {
-    /// Discover roots from $HOME. Tolerates either agent being absent so
-    /// users with only one of the two can still run Memex.
+    /// Discover roots from the platform home directory. Tolerates either
+    /// agent being absent so users with only one of the two can still run
+    /// Memex.
+    ///
+    /// PORTABILITY (Gemini review on PR #2, sec.rs:38): replaced the raw
+    /// `$HOME` env-var read with `dirs::home_dir()` so the same code path
+    /// resolves correctly on Windows (where `HOME` is conventionally absent
+    /// in favor of `%USERPROFILE%`). `dirs` is a transitive dependency.
     pub fn from_env() -> Result<Self> {
-        let home = std::env::var_os("HOME").context("HOME unset")?;
-        let home = PathBuf::from(home);
+        let home = dirs::home_dir().context("could not resolve home directory")?;
         let candidates = [
             (SourceAgent::ClaudeCode, home.join(".claude/projects")),
             (SourceAgent::Codex, home.join(".codex/sessions")),
