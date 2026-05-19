@@ -20,6 +20,11 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-opener = "2"
+# P8 — memex:// deep links route to one of the 5 WOW surfaces. The plugin
+# registers the scheme via Info.plist (macOS) and Manifest (Windows/Linux)
+# and emits a `deep-link://new-url` event back to the webview, which the
+# frontend listens for and dispatches to the matching tab.
+tauri-plugin-deep-link = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 walkdir = "2.5"

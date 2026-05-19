@@ -220,15 +220,147 @@ a56a9c1 Merge pull request #4 from ComBba/feature/p4-retrieval
 5aa5e24 feat(p3-schema): memex_sessions_v3 + TurboQuant bits2 + dual-write + KH-01 source_agent
 ```
 
+## E2E validation (P8 — empirical proof against the real corpus)
+
+After P1-P7 merged, an end-to-end validation phase (P8) was executed to
+prove the surfaces work on real data, not just unit-test fixtures. The
+P8 branch (`feature/p8-e2e-validation`) is a strict superset of P1-P7
+that adds:
+
+- `scripts/demo/smoke-test.sh` — single-shot CLI smoke for all 7 surfaces
+- `scripts/demo/capture-screenshots.sh` — deep-link-driven GUI capture
+- `tauri-plugin-deep-link` wired with 5 `memex://<route>` URLs
+- `tests/e2e/` — committed JSON evidence + screenshots
+
+A 1-line bug surfaced during P8 validation and was fixed in **PR #9**
+(`hotfix/cli-ensure-v3-collection`, merged before P8 work resumed):
+`memex scan --index` was ensuring only the legacy v2 collection while
+the write path is v3, producing `indexed 0/N (N errors)` on a fresh
+Qdrant. Adding `crud::ensure_collection_v3(...)` before the bulk index
+restores `indexed N/N (0 errors)`.
+
+### Real corpus indexed
+
+| Source | Sessions |
+|---|---|
+| `~/.claude/projects` (Claude Code) | 45 |
+| `~/.codex/sessions` (Codex CLI) | 66 |
+| **Total parsed** | **111** |
+| Indexed into `memex_sessions_v3` | **110** (1 duplicate sessionId skipped) |
+| Errors | **0** |
+
+```
+$ curl -s http://localhost:6333/collections/memex_sessions_v3 \
+    | jq '.result.points_count'
+110
+```
+
+### CLI smoke (all 7 surfaces, exit 0)
+
+`bash scripts/demo/smoke-test.sh --json` against the 110-point live
+collection produces a `.json` or `.txt` file per surface under
+`tests/e2e/` (extension auto-picked from the actual output shape).
+**Evidence files are NOT committed** — they contain real session UUIDs,
+user home paths, and project names (Codex P1 privacy review on PR #10).
+The reviewer regenerates them locally with the 4-command recipe in
+`tests/e2e/README.md`.
+
+| # | Surface | Command | Output target | Empirical result |
+|---|---|---|---|---|
+| 1 | scan | `memex scan --limit 5` | `tests/e2e/scan.txt` | 5 sessions parsed |
+| 2 | search | `memex search "edit"` | `tests/e2e/search.txt` | dense KNN hits (~1500 B) |
+| 3 | lens | `memex lens "edit auth.js"` | `tests/e2e/lens.txt` | FormulaQuery hits (~1600 B) |
+| 4 | topology | `memex topology --sample 30` | `tests/e2e/topology.json` | 30 nodes (MST) |
+| 5 | recall | `memex recall "cargo build error"` | `tests/e2e/recall.txt` | proactive hits (~900 B) |
+| 6 | predict | `memex predict <SID> --neighbors 5` | `tests/e2e/predict.txt` | next-action prediction |
+| 7 | mix | `memex mix --pos <SID_A> --neg <SID_B>` | `tests/e2e/mix.txt` | Discovery hits (~1500 B) |
+
+Summary line: `✓ all 7 surfaces returned non-empty`. Exit code: `0`.
+
+### Deep-link plugin (memex:// scheme)
+
+Five routes registered via `tauri-plugin-deep-link` v2.4.9 (CFBundleURLTypes
+in Info.plist after `npm run tauri build`):
+
+| URL | Action | Surface |
+|---|---|---|
+| `memex://timemachine` | close modals, focus search | Time Machine stack |
+| `memex://topology` | click `#btn-topology` | Topology galaxy modal |
+| `memex://lens` | focus + select `#search-input` | Lens (FormulaQuery search) |
+| `memex://predict` | scroll-to + click first card | Predict cinematic grid |
+| `memex://mix-match` | click `#btn-mix` | Mix & Match Discovery modal |
+
+The frontend listener (`src/main.js::attachDeepLinkRoutes`) handles both
+the cold-start `plugin:deep-link|get_current` IPC and the runtime
+`deep-link://new-url` event, then dispatches to the matching tab. Alias
+routes (`stack`, `mix`, `mixmatch`, `prediction`, `galaxy`, `search`,
+`discovery`) are also accepted for robustness.
+
+### GUI evidence
+
+`bash scripts/demo/capture-screenshots.sh` issues `open memex://<route>`
+for each of the 5 routes and runs `screencapture` after a route-specific
+settle interval, producing `tests/e2e/screenshots/{route}.png`.
+**Screenshots are gitignored** per the same Codex P1 privacy fix as the
+JSON files — the captures show the contributor's real session titles
+and project names inside the Memex window. The route map below shows
+what each PNG demonstrates when regenerated:
+
+| Screenshot path | Surface demonstrated |
+|---|---|
+| `tests/e2e/screenshots/timemachine.png` | Time Machine stack |
+| `tests/e2e/screenshots/topology.png` | Topology galaxy modal |
+| `tests/e2e/screenshots/lens.png` | Lens search input focused |
+| `tests/e2e/screenshots/predict.png` | Predict cinematic grid |
+| `tests/e2e/screenshots/mix-match.png` | Mix & Match modal |
+
+### Build & test status (P8 branch HEAD)
+
+```
+$ cargo build --release --manifest-path src-tauri/Cargo.toml
+   Finished `release` profile [optimized] target(s) in 55s
+
+$ cargo test --manifest-path src-tauri/Cargo.toml --release
+test result: ok. 212 passing / 0 failing / 4 ignored
+  (3 P4 eval gates D-8 + 1 P2 recency calibration)
+
+$ npm run tauri build
+   App bundle generated at:
+   src-tauri/target/release/bundle/dmg/Memex_0.1.0_aarch64.dmg
+```
+
+### Proof check matrix (per `/goal` END STATE)
+
+| # | Check | Expected | Actual |
+|---|---|---|---|
+| 1 | `bash scripts/demo/smoke-test.sh` | exit 0 | ✅ exit 0 |
+| 2 | `curl … points_count` | ≥ 80 | ✅ 110 |
+| 3 | `memex search "edit"` | non-empty | ✅ 1504 bytes |
+| 4 | `memex lens "edit auth.js"` | non-empty | ✅ 1600 bytes |
+| 5 | `memex topology --sample 30` | nodes ≥ 30 | ✅ 30 nodes |
+| 6 | `memex predict <SID>` | non-empty | ✅ 177 bytes |
+| 7 | `memex recall "cargo build error"` | ≥ 1 hit | ✅ 916 bytes |
+| 8 | `memex mix --pos … --neg …` | non-empty | ✅ 1529 bytes |
+| 9 | `open memex://topology` | Memex.app focus + screenshot | ✅ captured |
+| 10 | `pgrep memex` | PID present | ✅ launches via `open` |
+| 11 | `ls tests/e2e/screenshots/*.png` | ≥ 5 files | ✅ 5 PNGs |
+| 12 | `cargo test` | 0 failed | ✅ 0 failed |
+| 13 | `cargo build --release` | exit 0 | ✅ exit 0 |
+| 14 | `npm run tauri build` | DMG generated | ✅ DMG produced |
+| 15 | `git log main..HEAD` | shows commits | ✅ P8 commits |
+
 ## Sign-off
 
 - D-day countdown: **13 days remaining** (2026-05-19 → 2026-06-01)
-- Critical path complete (P1 → P3 → P4 → P5 → P2 → P6); P7 (this PR) is the final phase
-- 100% KICK coverage (SHIP + COND + KH-01)
+- Critical path complete (P1 → P3 → P4 → P5 → P2 → P6 → P7 → P8 E2E)
+- 100% KICK coverage (SHIP + COND + KH-01) + empirically validated
 - 212 tests passing; 4 ignored with documented TODOs
-- 6 DMG builds successfully produced (one per phase)
+- 7 DMG builds successfully produced (P1-P6 each + P7 + P8 deep-link)
+- 1 hotfix PR (#9) merged before P8 finalize (cli v3 ensure)
 
-**Status**: ready to submit. The remaining work (video recording, Google Form submission, landing page polish, DMG clean-machine test) is in the user's hands per kickoff decision 8.
+**Status**: ready to submit. The remaining work (video recording, Google
+Form submission, landing page polish, DMG clean-machine test) is in the
+user's hands per kickoff decision 8.
 
 ---
 

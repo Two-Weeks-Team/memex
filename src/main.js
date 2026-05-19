@@ -97,6 +97,8 @@ document.addEventListener("DOMContentLoaded", async () => {
   attachWow3Controls();
   attachHeatTrailHandlers();
   attachAgentFilterHandlers();
+  // P8 — `memex://<route>` deep links: register listener + handle launch URL.
+  attachDeepLinkRoutes();
   // Kick off both pollers; the stack uses pure jsonl parsing so it succeeds
   // even before Qdrant comes up, giving the user something to look at
   // immediately.
@@ -104,6 +106,129 @@ document.addEventListener("DOMContentLoaded", async () => {
   await pollUntilReady();
   startRecallPolling();
 });
+
+// ---------------------------------------------------------------------------
+// P8 — Deep-link router
+// ---------------------------------------------------------------------------
+// Maps `memex://<route>` to one of the 5 WOW surfaces, then focuses the
+// matching control. The plugin emits a `deep-link://new-url` event back to
+// the webview; we also poll `getCurrent()` once to catch the URL the app
+// was launched with (cold-start case).
+//
+// Routes:
+//   memex://timemachine — return to main Time Machine view (clear modals)
+//   memex://topology    — open Topology galaxy modal
+//   memex://lens        — focus the search input (lens is the search box)
+//   memex://predict     — focus the predict panel for the active session
+//   memex://mix-match   — open the Mix & Match modal
+function dispatchDeepLink(rawUrl) {
+  if (!rawUrl) return;
+  let route;
+  try {
+    const u = new URL(rawUrl);
+    if (u.protocol !== "memex:") return;
+    // ROBUSTNESS FIX (Gemini PR #10 review, main.js:133):
+    //   - Prefer `hostname` over `host` so a stray port like
+    //     `memex://topology:8080` doesn't end up as `topology:8080`.
+    //   - Trim leading AND trailing slashes from pathname fallback so
+    //     `memex:topology/` is treated the same as `memex:topology`.
+    // memex://topology      → hostname="topology", pathname=""
+    // memex://mix-match     → hostname="mix-match", pathname=""
+    // memex:topology        → hostname="", pathname="topology" (handled here)
+    route = (u.hostname || u.pathname.replace(/^\/+|\/+$/g, ""))
+      .trim()
+      .toLowerCase();
+  } catch {
+    return;
+  }
+  // Close any open modal first; the target route opens its own if needed.
+  document.querySelectorAll("dialog[open]").forEach((d) => d.close());
+  switch (route) {
+    case "":
+    case "timemachine":
+    case "time-machine":
+    case "stack":
+      // Already on main view after closing modals; focus the search input
+      // so the user has a sensible keyboard target.
+      document.getElementById("search-input")?.focus();
+      break;
+    case "topology":
+    case "galaxy":
+      document.getElementById("btn-topology")?.click();
+      break;
+    case "lens":
+    case "search":
+      document.getElementById("search-input")?.focus();
+      document.getElementById("search-input")?.select?.();
+      break;
+    case "predict":
+    case "prediction":
+      // IDEMPOTENCY FIX (Gemini PR #10 review, main.js:167): Predict needs an
+      // active session, but the previous implementation ALWAYS clicked the
+      // first card — which forcibly stole the user's existing selection
+      // every time `memex://predict` was triggered (e.g., from a recurring
+      // notification deep-link). Respect `state.selected` if already set;
+      // only auto-select the topmost card when there is no active session.
+      if (state.selected) {
+        // Scroll the existing selection into view so the user knows where
+        // the predict surface is anchored.
+        const existing = document.querySelector(
+          `#results [data-session-id="${state.selected}"]`
+        );
+        existing?.scrollIntoView?.({ behavior: "smooth", block: "center" });
+      } else {
+        const firstCard = document.querySelector(
+          "#results .stack-card, #results .card"
+        );
+        firstCard?.scrollIntoView?.({ behavior: "smooth", block: "center" });
+        firstCard?.click?.();
+      }
+      break;
+    case "mix":
+    case "mix-match":
+    case "mixmatch":
+    case "discovery":
+      document.getElementById("btn-mix")?.click();
+      break;
+    default:
+      // Unknown route — fall back to focusing the search input.
+      document.getElementById("search-input")?.focus();
+      break;
+  }
+}
+
+async function attachDeepLinkRoutes() {
+  // Guard: feature only available inside the Tauri runtime.
+  if (typeof window.__TAURI__ === "undefined") return;
+  const events = window.__TAURI__.event;
+  if (events && typeof events.listen === "function") {
+    try {
+      await events.listen("deep-link://new-url", (event) => {
+        // Plugin payload is an array of URLs (Tauri v2 multi-URL launch).
+        const urls = Array.isArray(event?.payload)
+          ? event.payload
+          : [event?.payload].filter(Boolean);
+        for (const u of urls) dispatchDeepLink(u);
+      });
+    } catch {
+      // Listener registration is best-effort; skip in non-Tauri builds.
+    }
+  }
+  // Cold-start: if the app was launched via `open memex://…`, the plugin
+  // exposes the launch URL via the `plugin:deep-link|get_current` IPC.
+  try {
+    const launch = await window.__TAURI__.core?.invoke?.(
+      "plugin:deep-link|get_current"
+    );
+    if (Array.isArray(launch)) {
+      for (const u of launch) dispatchDeepLink(u);
+    } else if (typeof launch === "string") {
+      dispatchDeepLink(launch);
+    }
+  } catch {
+    // Plugin not available (browser preview, missing capability) — ignore.
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Time Machine stack — initial view + arrow/wheel nav

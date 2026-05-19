@@ -27,6 +27,17 @@ qdrant.log
 .memex/
 *.snapshot
 
+# E2E proof artifacts contain real session UUIDs, user home paths, project
+# names, and UI screenshots of private data. Regenerable on demand via
+# `bash scripts/demo/smoke-test.sh --json` + `capture-screenshots.sh`, so
+# they stay local-only. README + scripts are the canonical "evidence" now.
+# (Codex P1 review on PR #10, tests/e2e/topology.json:22.)
+tests/e2e/*.json
+tests/e2e/*.txt
+tests/e2e/screenshots/*.png
+tests/e2e/screenshots/*.jpg
+tests/e2e/logs/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
