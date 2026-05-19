@@ -400,10 +400,19 @@ indexed 79/80 session(s) into 'memex_sessions' (1 duplicate sessionId(s) skipped
 ### Step 5 — Launch
 
 ```bash
-npm run tauri dev      # hot-reload dev mode
+npm run tauri dev      # hot-reload dev mode (WebKit Inspector ON)
 # OR
-npm run tauri build    # → src-tauri/target/release/bundle/macos/Memex.app + .dmg
+npm run tauri build    # local release build (WebKit Inspector ON)
+# OR — distribution build (.dmg you'd hand to someone else)
+npm run tauri:dist     # → bundle/dmg/Memex_*.dmg, Inspector OFF for shipping
 ```
+
+`tauri:dist` passes `--no-default-features`, which drops the `devtools`
+Cargo feature so the resulting bundle is the production-hygiene one
+(no right-click → Inspect Element on the shipped `.dmg`). `npm run
+tauri dev` and `npm run tauri build` keep Inspector on so local
+debugging isn't blocked. See issue [#5](https://github.com/sgwannabe/memex/issues/5)
+for the threat-model discussion.
 
 When the window opens, the bottom status bar should read:
 ```
