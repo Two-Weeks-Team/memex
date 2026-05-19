@@ -1582,10 +1582,17 @@ textarea:focus {
   overflow: visible;
 }
 
+/* D-13 root-cause fix — "giant purple oval":
+ * Hard CSS caps so even if a future regression sneaks a too-large
+ * stroke-width past the JS guard, the rendered stroke can't exceed
+ * 4.5 CSS px. drop-shadow lowered so the soft purple halo can't bleed
+ * into a viewport-spanning glow when many trails overlap. */
 .heat-trail path,
 .heat-trail circle {
   transition: opacity 240ms cubic-bezier(0.22, 0.61, 0.36, 1);
-  filter: drop-shadow(0 0 8px rgba(160, 96, 255, 0.45));
+  filter: drop-shadow(0 0 4px rgba(160, 96, 255, 0.35));
+  /* Cap stroke-width in CSS as the last line of defence. */
+  stroke-width: min(4.5px, var(--heat-stroke-cap, 4.5px));
 }
 
 /* Hover chip — surfaces enrich fields for the focused stack card.
