@@ -18,8 +18,13 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["tray-icon"] }
+tauri = { version = "2", features = ["tray-icon", "devtools"] }
 tauri-plugin-opener = "2"
+# P8 — memex:// deep links route to one of the 5 WOW surfaces. The plugin
+# registers the scheme via Info.plist (macOS) and Manifest (Windows/Linux)
+# and emits a `deep-link://new-url` event back to the webview, which the
+# frontend listens for and dispatches to the matching tab.
+tauri-plugin-deep-link = "2"
 tauri-plugin-notification = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -38,7 +43,19 @@ once_cell = "1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream", "multipart"] }
 futures = "0.3"
 petgraph = "0.6"
+notify = "6"
+notify-debouncer-full = "0.3"
+sha2 = "0.10"
+# P5 — KC-05 (Semaphore-cap pool sizing) + KG-02 (LRU cache for predict pivot parses).
+num_cpus = "1"
+lru = "0.12"
+# Cross-platform `~`/data-dir resolution. Already a transitive dep via tauri;
+# named here so the explicit `dirs::home_dir()` / `dirs::data_dir()` calls
+# in sec.rs + snapshot.rs are honest about what they rely on. Gemini review
+# on PR #2.
+dirs = "5"
 
 [dev-dependencies]
 pretty_assertions = "1"
+tempfile = "3"
 

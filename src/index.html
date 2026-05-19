@@ -38,6 +38,43 @@
           raise it to bias toward that signal.
         </p>
         <div id="lens-sliders" class="sliders"></div>
+
+        <!-- ── WOW-3: fusion + diversity controls (P2 KA-01/02/05) ── -->
+        <div class="lens-extras" role="group" aria-label="Fusion controls">
+          <div class="fusion-switch" role="radiogroup" aria-label="Fusion mode">
+            <span class="fusion-label">Fusion</span>
+            <button
+              type="button"
+              class="fusion-pill active"
+              data-fusion="formula"
+              role="radio"
+              aria-checked="true"
+            >Formula</button>
+            <button
+              type="button"
+              class="fusion-pill"
+              data-fusion="rrf"
+              role="radio"
+              aria-checked="false"
+            >RRF</button>
+          </div>
+          <div class="slider" id="diversity-wrap">
+            <div class="slider-label">
+              <span>diversity (MMR)</span>
+              <span class="slider-value" id="diversity-value">off</span>
+            </div>
+            <input
+              id="diversity-slider"
+              type="range"
+              min="0"
+              max="1"
+              step="0.05"
+              value="0"
+              aria-label="MMR diversity"
+            />
+          </div>
+        </div>
+
         <button id="btn-reset-lens" type="button" class="btn ghost">Reset lens</button>
 
         <h2 class="side-title pad-top">Recall</h2>
@@ -54,6 +91,25 @@
       </aside>
 
       <section class="results" id="results">
+        <!-- WOW-1: heat-trail SVG overlay. Lives inside .results so card
+             coords are in the same coordinate system. pointer-events:none
+             so cards remain clickable through it. -->
+        <svg
+          id="heat-trail"
+          class="heat-trail"
+          aria-hidden="true"
+          width="100%"
+          height="100%"
+        ></svg>
+        <!-- WOW-1: hover chip surfacing enrich fields for the focused card. -->
+        <div
+          id="heat-chip"
+          class="heat-chip hidden"
+          role="status"
+          aria-live="polite"
+        ></div>
+        <!-- Upstream: Time Machine rail — stack-mode timeline UI. Sibling of
+             the SVG overlay; positioned by .time-rail rules in styles.css. -->
         <aside class="time-rail" id="timeRail" aria-label="Time Machine rail"></aside>
         <div class="empty" id="results-empty">
           Start typing to search across <span id="results-count">your</span> sessions.
@@ -74,7 +130,50 @@
         <button type="button" class="btn ghost" data-close>Close</button>
       </header>
       <div class="topology-body">
-        <div id="topology-canvas" class="topology"></div>
+        <div id="topology-canvas" class="topology">
+          <!-- WOW-2: agent filter pill — Claude / Codex / Both -->
+          <div
+            id="agent-filter"
+            class="agent-filter"
+            role="radiogroup"
+            aria-label="Filter sessions by source agent"
+          >
+            <button
+              type="button"
+              class="agent-pill"
+              data-agent="claude_code"
+              role="radio"
+              aria-checked="false"
+              title="Show Claude Code sessions only"
+            >
+              <span class="agent-glyph" aria-hidden="true">●</span> Claude
+            </button>
+            <button
+              type="button"
+              class="agent-pill"
+              data-agent="codex"
+              role="radio"
+              aria-checked="false"
+              title="Show Codex sessions only"
+            >
+              <span class="agent-glyph open" aria-hidden="true">○</span> Codex
+            </button>
+            <button
+              type="button"
+              class="agent-pill active"
+              data-agent="both"
+              role="radio"
+              aria-checked="true"
+              title="Show both agents"
+            >Both</button>
+          </div>
+          <!-- WOW-2: gap-insight HTML overlays projected over 3d-force-graph canvas -->
+          <div
+            id="gap-overlay"
+            class="gap-overlay"
+            aria-hidden="true"
+          ></div>
+        </div>
         <aside class="topology-side" id="topology-side">
           <div class="topology-stats" id="topology-stats">
             <span class="empty muted">Computing clusters…</span>
@@ -84,26 +183,88 @@
       </div>
     </dialog>
 
-    <dialog id="mix-modal" class="modal">
+    <dialog id="mix-modal" class="modal mix-modal">
       <header>
-        <h3>Mix &amp; Match — Discovery API</h3>
+        <h3>Mix &amp; Match — Discovery Hyperplane</h3>
         <button type="button" class="btn ghost" data-close>Close</button>
       </header>
       <div class="mix-body">
         <p class="side-desc">
-          Drag two or more results below as positives (anchors) and at least
-          one as negative (anti-context). Discovery will rank similar
-          sessions accordingly.
+          Tell Memex what you like (positive) and what to avoid (negative),
+          then it finds sessions that lean toward the positives and away
+          from the negatives. Add at least one positive OR one negative
+          to enable discovery.
         </p>
-        <label>Positive sessions</label>
-        <div id="mix-positive" class="dropzone" data-side="positive">
-          <span class="dropzone-hint">drop ids here…</span>
+
+        <!-- WOW-5: 3D-feel hyperplane canvas. Vanilla 2D — no Three.js. -->
+        <div class="hyperplane-wrap">
+          <canvas
+            id="hyperplane-canvas"
+            class="hyperplane-canvas"
+            width="900"
+            height="380"
+            aria-label="Discovery hyperplane visualization"
+          ></canvas>
+          <div class="hyperplane-legend">
+            <span class="hp-key hp-positive">positive anchors</span>
+            <span class="hp-key hp-negative">negative anchors</span>
+            <span class="hp-key hp-result">discovered</span>
+          </div>
         </div>
-        <label>Negative sessions</label>
-        <div id="mix-negative" class="dropzone" data-side="negative">
-          <span class="dropzone-hint">drop ids here…</span>
+
+        <!-- Self-contained session picker. UX FIX (D-13 review): the previous
+             modal had only two "drop zones" that listed selected items, but
+             the `+ pos` / `− neg` action buttons lived on stack cards in the
+             main view — which a `<dialog>.showModal()` backdrop blocks.
+             Users opened the modal and had no way to add anything from
+             inside. Now the modal has its own search input + results list
+             with per-row + pos / − neg buttons, so it's fully usable
+             standalone. The main-view buttons still work for users who
+             prefer to pre-stage selections before opening the modal. -->
+        <div class="mix-picker">
+          <label class="mix-picker-lbl" for="mix-picker-input">
+            <span>Find sessions to add (type a query, press ↵)</span>
+            <input
+              type="text"
+              id="mix-picker-input"
+              class="mix-picker-input"
+              placeholder='e.g. "auth refactor", "cargo build error", or paste a session_id'
+              autocomplete="off"
+              spellcheck="false"
+            />
+          </label>
+          <div id="mix-picker-results" class="mix-picker-results" role="listbox" aria-label="Search results"></div>
         </div>
-        <button id="btn-run-mix" type="button" class="btn primary">Run discovery</button>
+
+        <div class="mix-dropzones">
+          <div class="dz-col">
+            <label>Positive sessions</label>
+            <div id="mix-positive" class="dropzone pos" data-side="positive">
+              <span class="dropzone-hint">search above OR click + pos on a card behind the modal…</span>
+            </div>
+          </div>
+          <div class="dz-col">
+            <label>Negative sessions</label>
+            <div id="mix-negative" class="dropzone neg" data-side="negative">
+              <span class="dropzone-hint">search above OR click − neg on a card behind the modal…</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="mix-controls">
+          <label class="mix-target-lbl">
+            <span>Target session (optional, for pairs)</span>
+            <input
+              type="text"
+              id="mix-target"
+              class="mix-target"
+              placeholder="session_id (auto = focused stack card)"
+              autocomplete="off"
+              spellcheck="false"
+            />
+          </label>
+          <button id="btn-run-mix" type="button" class="btn primary">Run discovery</button>
+        </div>
         <div id="mix-results" class="mix-results"></div>
       </div>
     </dialog>

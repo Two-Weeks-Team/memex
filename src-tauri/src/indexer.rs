@@ -18,13 +18,12 @@ use std::sync::Mutex;
 
 use anyhow::{Context, Result};
 use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
-use futures::future::try_join_all;
 use once_cell::sync::Lazy;
 use qdrant_client::{
     qdrant::{
         point_id::PointIdOptions, vectors_config, ContextInputBuilder, ContextInputPair,
         CreateCollectionBuilder, CreateFieldIndexCollectionBuilder, Distance, FieldType,
-        Filter, GetPointsBuilder, PointId, PointStruct, Query,
+        Filter, PointId, PointStruct, Query,
         QueryPointsBuilder, SearchMatrixPointsBuilder, UpsertPointsBuilder, VectorInput,
         VectorParamsBuilder, VectorParamsMap, VectorsConfig,
     },
@@ -44,6 +43,16 @@ const EMBED_BATCH: usize = 32;
 
 static CODE_FENCE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"```[\w+-]*\n([\s\S]*?)```").unwrap());
+
+// P5 KG-01 — Topology insights memo cache. One process-wide instance so
+// repeated `topology` calls within a session benefit from the warm cache.
+static INSIGHTS_CACHE: Lazy<crate::insights_cache::InsightsCache> =
+    Lazy::new(crate::insights_cache::InsightsCache::new);
+
+// P5 KG-02 — Predict pivot-parse LRU. Same process-wide singleton pattern;
+// memoizes `parser::parse_session` per (path, mtime).
+static PREDICT_PARSE_CACHE: Lazy<crate::parse_cache::ParseLruCache> =
+    Lazy::new(crate::parse_cache::ParseLruCache::new);
 
 /// Wraps a fastembed `TextEmbedding` (BGE-small-en-v1.5). The model needs
 /// `&mut self` to embed (internal ONNX session state), so we serialize access
@@ -367,6 +376,54 @@ fn session_payload(s: &Session) -> Payload {
     Payload::try_from(payload).expect("payload conversion")
 }
 
+/// V3-shaped payload for a parsed Session. Adds:
+/// - `schema_version: 3`
+/// - `start_ts_dt` / `end_ts_dt` (RFC 3339 strings — used by the datetime index)
+/// - `source_agent` (KH-01)
+/// - reserved enrich fields (`intent`, `entities`, `outcome`, `arc`, `topic` —
+///   all null/empty until P5 enrich.rs fills them)
+///
+/// The v2-shaped numeric `start_ts` / `end_ts` are dropped on v3 — the datetime
+/// index does the heavy lifting. Other fields mirror v2.
+fn session_payload_v3(s: &Session) -> Payload {
+    let mut tool_count = 0i64;
+    let mut has_errors = false;
+    for turn in &s.turns {
+        tool_count += turn.tool_calls.len() as i64;
+        if turn.tool_results.iter().any(|r| r.is_error) {
+            has_errors = true;
+        }
+    }
+    let source_path = s.source_path.to_string_lossy().into_owned();
+    let start_iso = s.start_time.map(|t| t.to_rfc3339()).unwrap_or_default();
+    let end_iso = s.end_time.map(|t| t.to_rfc3339()).unwrap_or_default();
+    let mut v3 = crate::schema::V3Payload::from_session_fields(
+        s.session_id.clone(),
+        source_path,
+        s.project_name.clone().unwrap_or_default(),
+        s.project_path.clone().unwrap_or_default(),
+        s.git_branch.clone().unwrap_or_default(),
+        s.ai_title.clone().unwrap_or_default(),
+        s.claude_version.clone().unwrap_or_default(),
+        start_iso,
+        end_iso,
+        s.event_counts.user as i64,
+        s.event_counts.assistant as i64,
+        tool_count,
+        has_errors,
+    );
+    // P5 — populate the 5 enrich-stage fields heuristically (LLM-free).
+    // `enrich` is pure and deterministic; safe to call once per session here
+    // so the upsert carries the labels without a separate update round-trip.
+    let out = crate::enrich::enrich(s, &s.turns);
+    v3.intent = Some(out.intent);
+    v3.entities = out.entities;
+    v3.outcome = Some(out.outcome);
+    v3.arc = Some(out.arc);
+    v3.topic = Some(out.topic);
+    v3.to_qdrant_payload()
+}
+
 pub fn build_point(session: &Session, vectors_by_name: Vec<(String, Vec<f32>)>) -> PointStruct {
     let id = point_id(&session.session_id);
     let payload = session_payload(session);
@@ -374,6 +431,22 @@ pub fn build_point(session: &Session, vectors_by_name: Vec<(String, Vec<f32>)>) 
     PointStruct::new(id, vec_map, payload)
 }
 
+/// Build a v3 point with the new payload shape. Vector data is identical to v2
+/// (we don't re-embed) — only the payload differs.
+pub fn build_point_v3(session: &Session, vectors_by_name: Vec<(String, Vec<f32>)>) -> PointStruct {
+    let id = point_id(&session.session_id);
+    let payload = session_payload_v3(session);
+    let vec_map: HashMap<String, Vec<f32>> = vectors_by_name.into_iter().collect();
+    PointStruct::new(id, vec_map, payload)
+}
+
+/// **Write path** — upserts only into the v3 collection (KG-03 dual-write rule:
+/// v2 is frozen as read-only fallback).
+///
+/// KB-01 — in addition to the 5 dense vectors, we now also write a
+/// `content_late` multivector built from sliding-window token-level chunks of
+/// the content text (BGE-small embed per chunk). This is the second-half of
+/// the late-interaction MaxSim path; queries are wired in `lens_search`.
 pub async fn index_session(
     client: &Qdrant,
     embedder: &Embedder,
@@ -382,16 +455,140 @@ pub async fn index_session(
     let extracts = session_extracts(session);
     let texts: Vec<String> = extracts.iter().map(|(_, t)| t.clone()).collect();
     let vectors = embedder.embed(texts)?;
-    let named: Vec<(String, Vec<f32>)> = extracts
-        .into_iter()
-        .map(|(k, _)| k)
+    let named_dense: Vec<(String, Vec<f32>)> = extracts
+        .iter()
+        .map(|(k, _)| k.clone())
         .zip(vectors.into_iter())
         .collect();
-    let point = build_point(session, named);
+
+    // KB-01 — late-interaction chunks. We use the *content* text (first
+    // extract) as the basis because that's what the multivector slot is
+    // semantically tied to (`MULTIVECTOR_NAME = "content_late"`).
+    let content_text = extracts
+        .iter()
+        .find(|(k, _)| k == "content")
+        .map(|(_, t)| t.clone())
+        .unwrap_or_default();
+    let chunk_vectors: Vec<Vec<f32>> =
+        crate::embed_late::embed_token_level(embedder, &content_text)?;
+
+    let point = build_point_v3_with_multivec(session, named_dense, chunk_vectors);
     client
-        .upsert_points(UpsertPointsBuilder::new(COLLECTION, vec![point]).wait(true))
+        .upsert_points(
+            UpsertPointsBuilder::new(crate::schema::COLLECTION_V3, vec![point]).wait(true),
+        )
         .await?;
     Ok(())
+}
+
+/// Build a v3 point with named dense vectors + optional `content_late`
+/// multivector. When `multivec_chunks` is empty the multivector slot is
+/// simply omitted (Qdrant 1.18 accepts a partial upsert against the named
+/// vector schema).
+pub fn build_point_v3_with_multivec(
+    session: &Session,
+    dense: Vec<(String, Vec<f32>)>,
+    multivec_chunks: Vec<Vec<f32>>,
+) -> PointStruct {
+    use qdrant_client::qdrant::{
+        vector, vectors::VectorsOptions, DenseVector, MultiDenseVector, NamedVectors,
+        SparseVector as ProtoSparseVector, Vector as ProtoVector, Vectors,
+    };
+
+    let id = point_id_proto(&session.session_id);
+    let payload = session_payload_v3(session);
+    let mut named: HashMap<String, ProtoVector> = HashMap::new();
+    // Capture path / tool source text BEFORE we move `dense` into the named
+    // map — we need them to derive the sparse vector counterparts. The
+    // sparse slots (`path_sparse`, `tool_sparse`) are part of the v3 schema
+    // (see `schema::SPARSE_VECTORS`), and the query side calls
+    // `lens::text_to_sparse` against the same tokenizer / hash function,
+    // so the document side **must** also write tokenized counts here.
+    //
+    // FUNCTIONAL FIX (Codex review on PR #6, lens.rs:389): without writing
+    // sparse vectors at index time, the `path` and `tool` lens weights
+    // silently produced empty result sets because the formula referenced
+    // prefetches against unpopulated sparse slots.
+    let extracts = session_extracts(session);
+    let path_text = extracts
+        .iter()
+        .find(|(k, _)| k == "path")
+        .map(|(_, t)| t.clone())
+        .unwrap_or_default();
+    let tool_text = extracts
+        .iter()
+        .find(|(k, _)| k == "tool")
+        .map(|(_, t)| t.clone())
+        .unwrap_or_default();
+    for (k, v) in dense {
+        named.insert(
+            k,
+            ProtoVector {
+                vector: Some(vector::Vector::Dense(DenseVector { data: v })),
+                ..Default::default()
+            },
+        );
+    }
+    if !multivec_chunks.is_empty() {
+        let mv = MultiDenseVector::from(multivec_chunks);
+        named.insert(
+            crate::schema::MULTIVECTOR_NAME.to_string(),
+            ProtoVector {
+                vector: Some(vector::Vector::MultiDense(mv)),
+                ..Default::default()
+            },
+        );
+    }
+
+    // KB-02 — derive sparse vectors from the same source-field text the
+    // query side embeds via `text_to_sparse`. Empty sparse maps are simply
+    // omitted (Qdrant accepts partial upserts against the named-vector
+    // schema), which keeps short / pathless sessions from polluting the
+    // index with empty entries.
+    let path_sparse = crate::lens::text_to_sparse(&path_text);
+    if !path_sparse.indices.is_empty() {
+        named.insert(
+            "path_sparse".to_string(),
+            ProtoVector {
+                vector: Some(vector::Vector::Sparse(ProtoSparseVector {
+                    values: path_sparse.values,
+                    indices: path_sparse.indices,
+                })),
+                ..Default::default()
+            },
+        );
+    }
+    let tool_sparse = crate::lens::text_to_sparse(&tool_text);
+    if !tool_sparse.indices.is_empty() {
+        named.insert(
+            "tool_sparse".to_string(),
+            ProtoVector {
+                vector: Some(vector::Vector::Sparse(ProtoSparseVector {
+                    values: tool_sparse.values,
+                    indices: tool_sparse.indices,
+                })),
+                ..Default::default()
+            },
+        );
+    }
+
+    PointStruct {
+        id: Some(id),
+        payload: payload.into(),
+        vectors: Some(Vectors {
+            vectors_options: Some(VectorsOptions::Vectors(NamedVectors { vectors: named })),
+        }),
+    }
+}
+
+/// Helper — returns a `PointId` from a session id using the same uuid_v5
+/// derivation as `point_id`.
+fn point_id_proto(session_id: &str) -> PointId {
+    PointId {
+        point_id_options: Some(qdrant_client::qdrant::point_id::PointIdOptions::Uuid(
+            point_id(session_id),
+        )),
+    }
 }
 
 /// Result of a bulk indexing pass — distinguishes "actually indexed" from
@@ -409,6 +606,24 @@ pub async fn bulk_index(
     embedder: &Embedder,
     sessions: &[Session],
 ) -> Result<BulkIndexReport> {
+    // Keep the legacy `&Embedder` signature compatible by delegating to the
+    // Arc-based path. Callers that already have `Arc<Embedder>` (every
+    // commands.rs entry point does) should prefer `bulk_index_arc` to skip
+    // the extra Arc allocation. For CLI test paths that hold an owned
+    // `Embedder` we still need a way to get an Arc — `Arc::new` on the value
+    // requires ownership, which the borrow doesn't carry. We can't fix that
+    // without breaking the legacy API, so we synthesize a per-call Arc via
+    // a no-clone proxy: just call the legacy per-session loop.
+    bulk_index_legacy(client, embedder, sessions).await
+}
+
+/// New (P5 KC-05) Arc-based entry point. Performs cross-session batched
+/// embedding with `embed_pool` + `Semaphore` cap.
+pub async fn bulk_index_arc(
+    client: &Qdrant,
+    embedder: std::sync::Arc<Embedder>,
+    sessions: &[Session],
+) -> Result<BulkIndexReport> {
     use indicatif::{ProgressBar, ProgressStyle};
     let pb = ProgressBar::new(sessions.len() as u64);
     pb.set_style(
@@ -417,11 +632,6 @@ pub async fn bulk_index(
             .progress_chars("=> "),
     );
 
-    // B2: two jsonl files can carry the same `sessionId` (we've seen this in
-    // real ~/.claude/projects data). UUID v5(session_id) makes those collide
-    // on the Qdrant point id, so the second upsert *silently overwrites*
-    // the first. Detect + log + keep the first occurrence so the count
-    // we report matches what Qdrant actually stores.
     let mut seen_ids: HashSet<String> = HashSet::new();
     let mut report = BulkIndexReport {
         indexed: 0,
@@ -429,13 +639,15 @@ pub async fn bulk_index(
         errors: 0,
     };
 
+    let pool = crate::embed_pool::EmbedPool::new(embedder.clone());
+    let mut window: Vec<&Session> = Vec::with_capacity(crate::embed_pool::CROSS_SESSION_BATCH);
+
     for s in sessions {
         let label = s
             .project_name
             .clone()
             .unwrap_or_else(|| s.session_id.clone());
         pb.set_message(label);
-
         if !seen_ids.insert(s.session_id.clone()) {
             pb.println(format!(
                 "  ⊘ duplicate sessionId={} ({}) — kept first occurrence",
@@ -446,7 +658,56 @@ pub async fn bulk_index(
             pb.inc(1);
             continue;
         }
+        window.push(s);
+        pb.inc(1);
+        if window.len() >= crate::embed_pool::CROSS_SESSION_BATCH {
+            flush_batch(client, &pool, &embedder, &mut window, &mut report, &pb).await;
+        }
+    }
+    if !window.is_empty() {
+        flush_batch(client, &pool, &embedder, &mut window, &mut report, &pb).await;
+    }
+    pb.finish_with_message("done");
+    Ok(report)
+}
 
+/// Legacy (per-session) bulk index — retained so callers that hold a plain
+/// `&Embedder` still compile. Internally delegates to `index_session` one at
+/// a time.
+async fn bulk_index_legacy(
+    client: &Qdrant,
+    embedder: &Embedder,
+    sessions: &[Session],
+) -> Result<BulkIndexReport> {
+    use indicatif::{ProgressBar, ProgressStyle};
+    let pb = ProgressBar::new(sessions.len() as u64);
+    pb.set_style(
+        ProgressStyle::with_template("{wide_bar} {pos}/{len} ({eta}) {msg}")
+            .unwrap()
+            .progress_chars("=> "),
+    );
+    let mut seen_ids: HashSet<String> = HashSet::new();
+    let mut report = BulkIndexReport {
+        indexed: 0,
+        duplicates_skipped: 0,
+        errors: 0,
+    };
+    for s in sessions {
+        let label = s
+            .project_name
+            .clone()
+            .unwrap_or_else(|| s.session_id.clone());
+        pb.set_message(label);
+        if !seen_ids.insert(s.session_id.clone()) {
+            pb.println(format!(
+                "  ⊘ duplicate sessionId={} ({}) — kept first occurrence",
+                &s.session_id[..8.min(s.session_id.len())],
+                s.source_path.display()
+            ));
+            report.duplicates_skipped += 1;
+            pb.inc(1);
+            continue;
+        }
         match index_session(client, embedder, s).await {
             Ok(()) => report.indexed += 1,
             Err(e) => {
@@ -458,6 +719,115 @@ pub async fn bulk_index(
     }
     pb.finish_with_message("done");
     Ok(report)
+}
+
+/// Flush one batch — collect 5 extracts per session, embed them in ONE pool
+/// call, build all per-session points, then upsert them in a SINGLE Qdrant
+/// round-trip.
+///
+/// PERF FIX (Gemini PR #5 review, indexer.rs:737): the previous loop body
+/// called `upsert_points(vec![point])` once per session with `wait(true)`.
+/// That is one round-trip per session, and `wait(true)` makes each call
+/// block until the server has finished indexing — so the legacy bulk cost
+/// was `N × (RTT + index_time)` even though `pool.embed_batch` had already
+/// amortized the embedding cost. By batching the points into a single
+/// `UpsertPointsBuilder` we collapse network cost to one round-trip per
+/// batch (`CROSS_SESSION_BATCH=32`).
+///
+/// Trade-off — on a batch-level error we can no longer attribute the
+/// failure to a specific session. We charge **all** sessions in the batch
+/// as `errors` in that case, which matches the existing conservative
+/// behavior `pool.embed_batch` already had for embedding failures.
+async fn flush_batch(
+    client: &Qdrant,
+    pool: &crate::embed_pool::EmbedPool,
+    embedder: &Embedder,
+    window: &mut Vec<&Session>,
+    report: &mut BulkIndexReport,
+    pb: &indicatif::ProgressBar,
+) {
+    let local: Vec<&Session> = std::mem::take(window);
+    if local.is_empty() {
+        return;
+    }
+    let mut all_texts: Vec<String> = Vec::with_capacity(local.len() * 5);
+    let mut extracts_per_session: Vec<[(String, String); 5]> = Vec::with_capacity(local.len());
+    for s in &local {
+        let ex = session_extracts(s);
+        for (_, t) in &ex {
+            all_texts.push(t.clone());
+        }
+        extracts_per_session.push(ex);
+    }
+    let vectors = match pool.embed_batch(all_texts).await {
+        Ok(v) => v,
+        Err(e) => {
+            pb.println(format!("  ⚠ batch embed: {:#}", e));
+            // Conservative: charge every session in the window as an error so
+            // the report adds up.
+            report.errors = report.errors.saturating_add(local.len());
+            return;
+        }
+    };
+
+    // Pack all sessions into PointStructs. Late-embed failures are charged
+    // per-session here (we DO have per-session attribution at this stage,
+    // since `embed_token_level` is local CPU work — not a Qdrant call).
+    let mut points: Vec<qdrant_client::qdrant::PointStruct> = Vec::with_capacity(local.len());
+    let mut batched_session_ids: Vec<String> = Vec::with_capacity(local.len());
+    for (i, s) in local.iter().enumerate() {
+        let extracts = &extracts_per_session[i];
+        let base = i * 5;
+        let named_dense: Vec<(String, Vec<f32>)> = extracts
+            .iter()
+            .enumerate()
+            .map(|(j, (k, _))| (k.clone(), vectors[base + j].clone()))
+            .collect();
+        let content_text = extracts
+            .iter()
+            .find(|(k, _)| k == "content")
+            .map(|(_, t)| t.clone())
+            .unwrap_or_default();
+        let chunk_vectors = match crate::embed_late::embed_token_level(embedder, &content_text) {
+            Ok(v) => v,
+            Err(e) => {
+                pb.println(format!("  ⚠ {}: late embed: {:#}", s.session_id, e));
+                report.errors += 1;
+                continue;
+            }
+        };
+        let point = build_point_v3_with_multivec(s, named_dense, chunk_vectors);
+        points.push(point);
+        batched_session_ids.push(s.session_id.clone());
+    }
+
+    if points.is_empty() {
+        return;
+    }
+
+    // SINGLE-round-trip upsert. Still `wait(true)` so the indexed counter
+    // reflects "server has fully indexed", matching the previous semantics.
+    let batched_n = points.len();
+    match client
+        .upsert_points(UpsertPointsBuilder::new(crate::schema::COLLECTION_V3, points).wait(true))
+        .await
+    {
+        Ok(_) => {
+            report.indexed = report.indexed.saturating_add(batched_n);
+        }
+        Err(e) => {
+            // Batch failure: we don't know which point(s) the server
+            // rejected. Charge them all so the report's total adds up.
+            pb.println(format!(
+                "  ⚠ batch upsert failed ({} session(s)): {:#}",
+                batched_n, e
+            ));
+            for sid in &batched_session_ids {
+                pb.println(format!("    · affected session_id={}", sid));
+            }
+            report.errors = report.errors.saturating_add(batched_n);
+        }
+    }
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -484,10 +854,18 @@ pub struct LensWeights {
     pub error: f32,
     #[serde(default = "default_weight")]
     pub code: f32,
+    /// KB-01 — late-interaction MaxSim weight. Defaults to 0.0 (off) so
+    /// existing callers that don't set it keep the dense-only behavior.
+    #[serde(default = "default_zero_weight")]
+    pub content_late: f32,
 }
 
 fn default_weight() -> f32 {
     1.0
+}
+
+fn default_zero_weight() -> f32 {
+    0.0
 }
 
 impl Default for LensWeights {
@@ -498,19 +876,8 @@ impl Default for LensWeights {
             path: 1.0,
             error: 1.0,
             code: 1.0,
+            content_late: 0.0,
         }
-    }
-}
-
-impl LensWeights {
-    fn iter(&self) -> [(&'static str, f32); 5] {
-        [
-            ("content", self.content),
-            ("tool", self.tool),
-            ("path", self.path),
-            ("error", self.error),
-            ("code", self.code),
-        ]
     }
 }
 
@@ -526,98 +893,51 @@ pub async fn search_content(
         path: 0.0,
         error: 0.0,
         code: 0.0,
+        content_late: 0.0,
     };
     lens_search(client, embedder, query, &weights, limit, 50).await
 }
 
-/// **Lens slider** (Plan §3 T3.1).
+/// **Lens slider** (Plan §3 T3.1) — **P2 wiring**: this function is now a
+/// thin shim over `crate::lens::lens_search_v2`, which executes a single
+/// server-side FormulaQuery (KA-01) with per-prefetch recency decay +
+/// has_errors boost. Public signature stays stable for backward compat;
+/// `per_vector_limit` is preserved but no longer used directly (the new
+/// path manages its own PREFETCH_LIMIT internally).
 ///
-/// Runs one cosine search per named vector whose weight > 0, then performs a
-/// weighted score combine in Rust (true weighted blend — not RRF rank fusion).
-/// Returns the top `limit` sessions with each session's per-vector contribution
-/// in `SearchHit.vector_scores` so the UI can render the lens inspector.
+/// Returns the top `limit` sessions; per-vector contributions remain in
+/// `SearchHit.vector_scores` so the inspector keeps rendering correctly.
 pub async fn lens_search(
     client: &Qdrant,
     embedder: &Embedder,
     query: &str,
     weights: &LensWeights,
     limit: u64,
-    per_vector_limit: u64,
+    _per_vector_limit: u64,
 ) -> Result<Vec<SearchHit>> {
-    let vecs = embedder.embed(vec![query.to_string()])?;
-    let qvec = vecs.into_iter().next().context("no embedding for query")?;
-
-    let mut combined: HashMap<String, CombinedHit> = HashMap::new();
-    let mut payloads: HashMap<String, HashMap<String, qdrant_client::qdrant::Value>> = HashMap::new();
-
-    let mut total_w = 0.0_f32;
-    for (_, w) in weights.iter() {
-        total_w += w;
-    }
-    if total_w <= 0.0 {
-        return Ok(Vec::new());
-    }
-
-    // P1: dispatch one query per non-zero-weight vector in parallel so the
-    // wall-clock latency is dominated by the slowest server-side search rather
-    // than the sum of all 5. Qdrant handles parallel single-vector queries
-    // natively without contention on shared HNSW state.
-    let active: Vec<(&'static str, f32)> =
-        weights.iter().into_iter().filter(|(_, w)| *w > 0.0).collect();
-    let queries = active.iter().map(|(vname, _)| {
-        let q: Query = qvec.clone().into();
-        let req = QueryPointsBuilder::new(COLLECTION)
-            .query(q)
-            .using((*vname).to_string())
-            .limit(per_vector_limit)
-            .with_payload(true);
-        async move { client.query(req).await }
-    });
-    let responses = try_join_all(queries).await?;
-
-    for ((vname, w), res) in active.iter().zip(responses.into_iter()) {
-        for p in res.result {
-            let sid = match payload_str(&p.payload, "session_id") {
-                Some(s) => s,
-                None => continue,
-            };
-            let weighted = p.score * (w / total_w);
-            let entry = combined.entry(sid.clone()).or_default();
-            entry.combined_score += weighted;
-            entry.per_vec.insert((*vname).to_string(), p.score);
-            payloads.entry(sid).or_insert(p.payload);
-        }
-    }
-
-    let mut ranked: Vec<(String, CombinedHit)> = combined.into_iter().collect();
-    ranked.sort_by(|a, b| {
-        b.1.combined_score
-            .partial_cmp(&a.1.combined_score)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
-
-    let hits = ranked
-        .into_iter()
-        .take(limit as usize)
-        .map(|(sid, ch)| {
-            let p = payloads.get(&sid).cloned().unwrap_or_default();
-            SearchHit {
-                score: ch.combined_score,
-                session_id: sid.clone(),
-                project_name: payload_str(&p, "project_name").unwrap_or_default(),
-                ai_title: payload_str(&p, "ai_title").unwrap_or_default(),
-                start_iso: payload_str(&p, "start_iso").unwrap_or_default(),
-                vector_scores: ch.per_vec,
+    // Convert the legacy LensWeights → lens::LensWeights (the legacy struct
+    // has no `diversity`/`fusion` knobs; defaults are Formula + no MMR which
+    // matches the previous behavior in terms of result rank stability).
+    let lens_weights: crate::lens::LensWeights = weights.clone().into();
+    // Empty query / all-zero-weights — legacy code returned `Ok(empty)`. The
+    // new API returns Err; map back to empty for backward compat.
+    let res = match crate::lens::lens_search_v2(client, embedder, query, &lens_weights, limit)
+        .await
+    {
+        Ok(v) => v,
+        Err(e) => {
+            let msg = format!("{e}");
+            if msg == "no active lens" || msg == "empty query" {
+                return Ok(Vec::new());
             }
-        })
-        .collect();
-    Ok(hits)
-}
+            return Err(e);
+        }
+    };
 
-#[derive(Default, Debug)]
-struct CombinedHit {
-    combined_score: f32,
-    per_vec: HashMap<String, f32>,
+    Ok(res
+        .into_iter()
+        .map(crate::lens::lens_result_to_searchhit)
+        .collect())
 }
 
 /// **Mix & Match** (Plan §3 T3.2) — Discovery API.
@@ -672,11 +992,12 @@ pub async fn mix_match(
 
     let resp = client
         .query(
-            QueryPointsBuilder::new(COLLECTION)
+            QueryPointsBuilder::new(crate::schema::COLLECTION_V3)
                 .query(discover_input)
                 .using("content".to_string())
                 .limit(limit)
-                .with_payload(true),
+                .with_payload(true)
+                .params(crate::schema::search_params_with_quantization()),
         )
         .await?;
     Ok(resp
@@ -766,9 +1087,14 @@ pub async fn topology(
     projects_root: Option<std::path::PathBuf>,
 ) -> Result<Topology> {
     // 1. Get pairwise distances from Qdrant's distance matrix endpoint.
+    //
+    // SPEC NOTE (P3, KC-01b): SearchMatrixPointsBuilder does not currently
+    // expose a `.params(SearchParams)` setter in qdrant-client 1.18 (the
+    // pairs endpoint runs server-side with its own internal config). The
+    // rescore + oversampling knobs only apply to query-by-vector calls.
     let resp = client
         .search_matrix_pairs(
-            SearchMatrixPointsBuilder::new(COLLECTION)
+            SearchMatrixPointsBuilder::new(crate::schema::COLLECTION_V3)
                 .using("content".to_string())
                 .sample(sample as u64)
                 .limit(nearest_per_point as u64),
@@ -797,12 +1123,9 @@ pub async fn topology(
     let detail = if point_ids.is_empty() {
         Vec::new()
     } else {
-        client
-            .get_points(
-                GetPointsBuilder::new(COLLECTION, point_ids).with_payload(true),
-            )
-            .await?
-            .result
+        // KG-03 dual-read — v3 first, v2 fallback so topology still has labels
+        // for any point that hasn't been migrated yet.
+        crate::crud::dual_get_points(client, point_ids).await?
     };
 
     // node_by_pid: Qdrant point uuid → TopoNode (we still use point uuid as the
@@ -892,8 +1215,39 @@ pub async fn topology(
     }
 
     let (project_insights, gap_insights) = if let Some(root) = projects_root {
-        match crate::parser::scan_dir(&root) {
-            Ok(sessions) => compute_insights(&sessions, &nodes, &edges, &matrix2.pairs, &node_project, &pid_to_session),
+        // P5 KG-01 — memoize the heavy compute on (root, max_mtime). Cache
+        // misses fall through to the full scan+compute below; hits return the
+        // cached `Arc<CachedInsights>` so we just clone the inner Vecs out.
+        // Composite fingerprint (mtime + file_count + total_size) so the
+        // cache invalidates on deletion / in-place edit, not just on the
+        // newest-file mtime moving forward (Codex review fix on PR #5).
+        let fingerprint = crate::insights_cache::InsightsCache::fingerprint(&root);
+        let root_for_compute = root.clone();
+        let nodes_ref = nodes.clone();
+        let edges_ref = edges.clone();
+        let matrix_pairs: Vec<qdrant_client::qdrant::SearchMatrixPair> =
+            matrix2.pairs.clone();
+        let node_project_ref = node_project.clone();
+        let pid_to_session_ref = pid_to_session.clone();
+        match INSIGHTS_CACHE.get_or_compute(root, fingerprint, move || {
+            let sessions = crate::parser::scan_dir(&root_for_compute)?;
+            let (pi, gi) = compute_insights(
+                &sessions,
+                &nodes_ref,
+                &edges_ref,
+                &matrix_pairs,
+                &node_project_ref,
+                &pid_to_session_ref,
+            );
+            Ok(crate::insights_cache::CachedInsights {
+                project_insights: pi,
+                gap_insights: gi,
+            })
+        }) {
+            Ok(cached) => (
+                cached.project_insights.clone(),
+                cached.gap_insights.clone(),
+            ),
             Err(_) => (Vec::new(), Vec::new()),
         }
     } else {
@@ -1163,14 +1517,19 @@ pub async fn recall(
         )],
         ..Default::default()
     };
+    // KB-04 (ACORN): every filtered query takes the ACORN path —
+    // hnsw_ef=128 + exact=false on top of the v3 quantization knobs. The
+    // `is_tenant=true` payload index on project_name (P3, KC-03) is the
+    // structural half; this is the per-query tuning.
     let res = client
         .query(
-            QueryPointsBuilder::new(COLLECTION)
+            QueryPointsBuilder::new(crate::schema::COLLECTION_V3)
                 .query(q)
                 .using("error")
                 .limit(limit)
                 .filter(filter)
-                .with_payload(true),
+                .with_payload(true)
+                .params(crate::retrieval::search_params_filtered_acorn(Some(128))),
         )
         .await?;
     Ok(res
@@ -1264,7 +1623,30 @@ pub async fn predict_next_actions(
             _ => None,
         })
         .context("active session payload is missing source_path")?;
-    let active = crate::parser::parse_session(StdPath::new(&source_path))?;
+    // BUG FIX (empirical E2E discovery on main 2026-05-19): predict_next_actions
+    // was hardcoded to `parser::parse_session` (the Claude JSONL parser) for
+    // EVERY session, including Codex rollouts. The Claude parser silently
+    // succeeds with `turns.is_empty() == true` against Codex's
+    // `{timestamp,type,payload}` envelope, which collapsed predict's "active
+    // session has 0 turns" early-return path and returned "no predictions"
+    // for 100% of Codex sessions. Route via `source_agent` payload field —
+    // same heuristic as schema::infer_source_agent + the scan_root_routed
+    // canonical-path-and-content sniff. (Same routing bug also affects the
+    // per-neighbor parse below, fixed in step 3.)
+    let source_agent = payload
+        .get("source_agent")
+        .and_then(|v| v.kind.as_ref())
+        .and_then(|k| match k {
+            qdrant_client::qdrant::value::Kind::StringValue(s) => Some(s.clone()),
+            _ => None,
+        })
+        .unwrap_or_else(|| "claude_code".to_string());
+    let validated = crate::sec::validate_session_path(StdPath::new(&source_path))?;
+    let active = if source_agent == "codex" {
+        crate::codex_parser::parse_codex_session(&validated)?
+    } else {
+        crate::parser::parse_session(&validated)?
+    };
     if active.turns.is_empty() {
         return Ok(PredictionContext {
             source_session_id: session_id.to_string(),
@@ -1301,15 +1683,18 @@ pub async fn predict_next_actions(
     let q: Query = qvec.into();
     let res = client
         .query(
-            QueryPointsBuilder::new(COLLECTION)
+            QueryPointsBuilder::new(crate::schema::COLLECTION_V3)
                 .query(q)
                 .using("content")
                 .limit(neighbors + 1) // +1 because we filter out the active session itself
-                .with_payload(true),
+                .with_payload(true)
+                .params(crate::schema::search_params_with_quantization()),
         )
         .await?;
 
-    let mut neighbor_meta: Vec<(String, f32, String, String)> = Vec::new();
+    // Carry source_agent alongside the rest so we can route each neighbor's
+    // JSONL through the right parser (see source_agent fix in step 1 above).
+    let mut neighbor_meta: Vec<(String, f32, String, String, String)> = Vec::new();
     for p in res.result {
         let Some(sid) = payload_str(&p.payload, "session_id") else { continue };
         if sid == session_id {
@@ -1317,7 +1702,9 @@ pub async fn predict_next_actions(
         }
         let Some(src) = payload_str(&p.payload, "source_path") else { continue };
         let project = payload_str(&p.payload, "project_name").unwrap_or_default();
-        neighbor_meta.push((sid, p.score, src, project));
+        let agent =
+            payload_str(&p.payload, "source_agent").unwrap_or_else(|| "claude_code".to_string());
+        neighbor_meta.push((sid, p.score, src, project, agent));
         if neighbor_meta.len() as u64 >= neighbors {
             break;
         }
@@ -1337,8 +1724,30 @@ pub async fn predict_next_actions(
         .filter(|w| w.len() > 4)
         .collect();
 
-    for (nb_sid, sim_score, source, nb_project) in &neighbor_meta {
-        let Ok(nb) = crate::parser::parse_session(StdPath::new(source)) else { continue };
+    for (nb_sid, sim_score, source, nb_project, nb_agent) in &neighbor_meta {
+        // SAFETY: neighbor source_path came from Qdrant payload — validate
+        // it lives inside an allowed sandbox root before parsing the JSONL.
+        let Ok(validated) = crate::sec::validate_session_path(StdPath::new(source)) else { continue };
+        // P5 KG-02 — LRU memo keyed by (path, mtime). Cache hits avoid the
+        // re-parse on repeat predict calls touching the same neighbours.
+        // BUG FIX (E2E discovery): route per neighbor's source_agent. Without
+        // this, Codex rollouts go through the Claude parser and return
+        // empty Sessions → predict skips them at `nb.turns.is_empty()`.
+        let mtime = std::fs::metadata(&validated)
+            .and_then(|m| m.modified())
+            .unwrap_or(std::time::UNIX_EPOCH);
+        let nb_is_codex = nb_agent == "codex";
+        let nb_arc = match PREDICT_PARSE_CACHE.get_or_parse(validated.clone(), mtime, |p| {
+            if nb_is_codex {
+                crate::codex_parser::parse_codex_session(p)
+            } else {
+                crate::parser::parse_session(p)
+            }
+        }) {
+            Ok(s) => s,
+            Err(_) => continue,
+        };
+        let nb = &*nb_arc;
         if nb.turns.is_empty() {
             continue;
         }
@@ -1479,28 +1888,21 @@ fn summarize_tool_input(tool_name: &str, input: &serde_json::Value) -> String {
 }
 
 /// Fetch a single session's payload (for the inspector pane in the UI).
+///
+/// KG-03 dual-read: v3 first, fall back to v2 — so points that haven't been
+/// migrated yet still resolve.
 pub async fn get_session_payload(
     client: &Qdrant,
     session_id: &str,
 ) -> Result<Option<HashMap<String, qdrant_client::qdrant::Value>>> {
-    let pid = PointId {
-        point_id_options: Some(PointIdOptions::Uuid(point_id(session_id))),
-    };
-    let res = client
-        .get_points(GetPointsBuilder::new(COLLECTION, vec![pid]).with_payload(true))
-        .await?;
-    Ok(res.result.into_iter().next().map(|p| p.payload))
+    crate::crud::dual_get_session_payload(client, session_id).await
 }
 
-fn payload_i64(
-    p: &HashMap<String, qdrant_client::qdrant::Value>,
-    key: &str,
-) -> Option<i64> {
-    p.get(key).and_then(|v| v.kind.as_ref()).and_then(|k| match k {
-        qdrant_client::qdrant::value::Kind::IntegerValue(i) => Some(*i),
-        _ => None,
-    })
-}
+// `payload_str` / `payload_i64` used to live here (and identical copies
+// lived in retrieval.rs + lens.rs). Lifted into the shared `crate::payload`
+// module (Gemini PR #4 review fix). Re-exported below so existing
+// `indexer::payload_str` callers still work without churn.
+pub(crate) use crate::payload::{payload_i64, payload_str};
 
 fn point_id_string(p: &PointId) -> Option<String> {
     match p.point_id_options.as_ref()? {
@@ -1509,26 +1911,21 @@ fn point_id_string(p: &PointId) -> Option<String> {
     }
 }
 
-
-fn payload_str(
-    p: &HashMap<String, qdrant_client::qdrant::Value>,
-    key: &str,
-) -> Option<String> {
-    p.get(key)
-        .and_then(|v| v.kind.as_ref())
-        .and_then(|k| match k {
-            qdrant_client::qdrant::value::Kind::StringValue(s) => Some(s.clone()),
-            _ => None,
-        })
-}
-
 /// Snapshot export — calls Qdrant's HTTP snapshot endpoint and copies the file
 /// to `dest`. Returns the chosen filename on the server.
+///
+/// FUNCTIONAL FIX (Codex review on PR #4, indexer.rs:444): the write path is
+/// `COLLECTION_V3` since P3 KG-03, so backups MUST snapshot the v3 collection
+/// or the resulting archive omits every newly indexed session. The previous
+/// implementation snapshotted the legacy v2 collection (`memex_sessions`),
+/// which on a fresh database (post-hotfix #9) is **empty**, so exports
+/// silently produced an empty backup.
 pub async fn snapshot_export(dest: &Path) -> Result<String> {
     let url = std::env::var("MEMEX_QDRANT_HTTP")
         .unwrap_or_else(|_| "http://localhost:6333".into());
     let client = reqwest::Client::new();
-    let create_url = format!("{url}/collections/{COLLECTION}/snapshots");
+    let collection = crate::schema::COLLECTION_V3;
+    let create_url = format!("{url}/collections/{collection}/snapshots");
     let resp: serde_json::Value = client
         .post(&create_url)
         .send()
@@ -1544,7 +1941,7 @@ pub async fn snapshot_export(dest: &Path) -> Result<String> {
         .context("snapshot name missing in response")?
         .to_string();
 
-    let download_url = format!("{url}/collections/{COLLECTION}/snapshots/{name}");
+    let download_url = format!("{url}/collections/{collection}/snapshots/{name}");
     let bytes = client
         .get(&download_url)
         .send()
@@ -1562,7 +1959,11 @@ pub async fn snapshot_import(src: &Path) -> Result<()> {
         .unwrap_or_else(|_| "http://localhost:6333".into());
     let bytes = tokio::fs::read(src).await?;
     let client = reqwest::Client::new();
-    let upload_url = format!("{url}/collections/{COLLECTION}/snapshots/upload?priority=snapshot");
+    // Import into v3 — matches the export collection (see snapshot_export
+    // docstring). v2 is read-only fallback only; restoring into v2 would
+    // bypass the v3 query path entirely.
+    let collection = crate::schema::COLLECTION_V3;
+    let upload_url = format!("{url}/collections/{collection}/snapshots/upload?priority=snapshot");
     let part = reqwest::multipart::Part::bytes(bytes).file_name(
         src.file_name()
             .and_then(|s| s.to_str())

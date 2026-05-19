@@ -151,6 +151,15 @@ body {
   background: #1a90ff;
 }
 
+.btn[disabled] {
+  opacity: 0.45;
+  cursor: not-allowed;
+  filter: saturate(0.6);
+}
+.btn[disabled]:hover {
+  background: var(--accent);  /* override the :hover lighten */
+}
+
 .btn.ghost {
   background: transparent;
 }
@@ -1737,7 +1746,810 @@ textarea:focus {
   font-size: 10.5px;
 }
 
-/* --- Watcher chip ------------------------------------------------------- */
+/* ── WOW-1: Time Machine Heat Trail ───────────────────────────────────── */
+
+/* SVG overlay sits on top of the stack cards but doesn't intercept clicks. */
+.heat-trail {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 65; /* above the radial vignette (70 caps), under the HUD */
+  overflow: visible;
+}
+
+/* D-13 root-cause fix — "giant purple oval":
+ * Hard CSS caps so even if a future regression sneaks a too-large
+ * stroke-width past the JS guard, the rendered stroke can't exceed
+ * 4.5 CSS px. drop-shadow lowered so the soft purple halo can't bleed
+ * into a viewport-spanning glow when many trails overlap. */
+.heat-trail path,
+.heat-trail circle {
+  transition: opacity 240ms cubic-bezier(0.22, 0.61, 0.36, 1);
+  filter: drop-shadow(0 0 4px rgba(160, 96, 255, 0.35));
+  /* Cap stroke-width in CSS as the last line of defence. */
+  stroke-width: min(4.5px, var(--heat-stroke-cap, 4.5px));
+}
+
+/* Hover chip — surfaces enrich fields for the focused stack card.
+ *
+ * SIZE/COLOR BUG FIX (D-13 review — user-reported "giant purple oval"):
+ * the chip used to be a free-growing flex container with `backdrop-filter:
+ * saturate(140%) blur(10px)`. When an enrich field (`topic` for code
+ * sessions especially) held a long string like
+ * "memex · command-message>pf:bootstrap</command-message …", the chip
+ * stretched horizontally + the text wrapped vertically inside the bit,
+ * producing a viewport-sized translucent rectangle. macOS WKWebView's
+ * backdrop-filter then saturated the dark vignette background of the
+ * results area into a vivid purple, the chip's 18px border-radius
+ * rounded the result into an oval, and the user saw a "giant purple
+ * blob" with the chip text floating inside it.
+ *
+ * Three guards stop that from happening:
+ *   1. Hard cap chip width to `min(72ch, calc(100% - 32px))` so it
+ *      never exceeds ~720px / 90% of the results container.
+ *   2. Force bits to a single line (`white-space: nowrap`) + ellipsis
+ *      so any individual long string truncates instead of wrapping.
+ *   3. Remove backdrop-filter entirely. The chip already has a solid
+ *      semi-opaque dark bg + purple border — the filter only added the
+ *      offending saturate effect and didn't improve legibility.
+ */
+.heat-chip {
+  position: absolute;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding: 7px 11px;
+  border-radius: 18px;
+  background: rgba(28, 28, 30, 0.92);
+  border: 1px solid rgba(180, 96, 255, 0.45);
+  max-width: min(72ch, calc(100% - 32px));
+  overflow: hidden;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+  pointer-events: none;
+  z-index: 95;
+  font-size: 10.5px;
+  font-family: var(--sans);
+  transition: opacity 200ms ease, transform 220ms cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+.heat-chip.hidden {
+  opacity: 0;
+  transform: translateY(-4px) scale(0.96);
+  pointer-events: none;
+}
+
+.heat-chip .bit {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  color: var(--text-primary);
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.2px;
+  /* GUARD: keep enrich text on a single line. Without this, a long
+   * `topic` like "memex · command-message>pf:bootstrap</command-message …"
+   * wraps inside the bit and inflates the chip's height into a giant
+   * oval (see .heat-chip docblock). */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 38ch;
+}
+
+.heat-chip .bit-arc { background: rgba(122, 191, 255, 0.18); color: #b3d6ff; border-color: rgba(122, 191, 255, 0.35); }
+.heat-chip .bit-intent { background: rgba(180, 96, 255, 0.18); color: #d6b3ff; border-color: rgba(180, 96, 255, 0.35); }
+.heat-chip .bit-topic { background: rgba(255, 214, 10, 0.16); color: #ffe675; border-color: rgba(255, 214, 10, 0.30); }
+.heat-chip .bit-out-ok { background: rgba(48, 209, 88, 0.16); color: #9af0b0; border-color: rgba(48, 209, 88, 0.32); }
+.heat-chip .bit-out-partial { background: rgba(255, 159, 10, 0.16); color: #ffce8a; border-color: rgba(255, 159, 10, 0.32); }
+.heat-chip .bit-out-bad { background: rgba(255, 69, 58, 0.16); color: #ff9d92; border-color: rgba(255, 69, 58, 0.32); }
+.heat-chip .bit-out-neutral { background: rgba(255, 255, 255, 0.06); color: var(--text-secondary); }
+
+/* ── WOW-3: Lens contribution bars + fusion + diversity ───────────────── */
+
+.contrib-bar {
+  display: flex;
+  width: 100%;
+  height: 6px;
+  margin: 4px 0 6px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.contrib-seg {
+  display: block;
+  min-width: 2px;
+  height: 100%;
+  flex-grow: 0;
+  flex-shrink: 0;
+  transition: flex-basis 320ms cubic-bezier(0.22, 0.61, 0.36, 1),
+    background-color 200ms ease;
+}
+
+.contrib-seg.flat {
+  background: linear-gradient(
+    90deg,
+    rgba(10, 132, 255, 0.4),
+    rgba(122, 191, 255, 0.4)
+  );
+}
+
+.contrib-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  margin-bottom: 8px;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-secondary);
+}
+
+.contrib-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.contrib-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.12);
+}
+
+.contrib-num {
+  color: var(--text-muted);
+  margin-left: 2px;
+}
+
+.score-chips {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-secondary);
+}
+
+.score-chips .chip-rec {
+  background: rgba(10, 132, 255, 0.12);
+  color: #c7e0ff;
+  border: 1px solid rgba(10, 132, 255, 0.25);
+  padding: 1px 7px;
+  border-radius: 4px;
+}
+
+.score-chips .chip-err {
+  background: rgba(255, 69, 58, 0.14);
+  color: #ffb4ad;
+  border: 1px solid rgba(255, 69, 58, 0.30);
+  padding: 1px 7px;
+  border-radius: 4px;
+}
+
+/* Fusion + diversity controls in the lens sidebar. */
+.lens-extras {
+  margin-top: 6px;
+  margin-bottom: 12px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.fusion-switch {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-bottom: 10px;
+}
+
+.fusion-label {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--text-secondary);
+  margin-right: 4px;
+}
+
+.fusion-pill {
+  font-family: var(--sans);
+  font-size: 10.5px;
+  font-weight: 500;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--bg-glass);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.fusion-pill:hover {
+  background: var(--bg-glass-hi);
+  color: var(--text-primary);
+}
+
+.fusion-pill.active {
+  background: linear-gradient(135deg, oklch(72% 0.18 290), oklch(70% 0.15 250));
+  color: white;
+  border-color: oklch(72% 0.18 290);
+  box-shadow: 0 0 0 2px rgba(180, 96, 255, 0.22);
+}
+
+.fusion-pill:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* ── WOW-2: Topology agent filter + gap overlay ───────────────────────── */
+
+.agent-filter {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  background: rgba(18, 18, 22, 0.78);
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  backdrop-filter: saturate(140%) blur(12px);
+  -webkit-backdrop-filter: saturate(140%) blur(12px);
+  z-index: 110;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+}
+
+.agent-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 11px;
+  font-family: var(--sans);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.agent-pill:hover {
+  background: var(--bg-glass-hi);
+  color: var(--text-primary);
+}
+
+.agent-pill.active {
+  background: var(--bg-glass-hi);
+  color: var(--text-primary);
+  border-color: var(--border-strong);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+}
+
+.agent-pill .agent-glyph {
+  font-size: 10px;
+  color: oklch(74% 0.16 245);
+}
+
+.agent-pill .agent-glyph.open {
+  color: oklch(80% 0.15 75);
+}
+
+.agent-pill:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.gap-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 90;
+}
+
+.gap-overlay-card {
+  position: absolute;
+  top: 0;
+  left: 0;
+  padding: 8px 12px;
+  max-width: 240px;
+  border-radius: 10px;
+  background: rgba(28, 28, 30, 0.86);
+  border: 1px solid rgba(255, 214, 10, 0.30);
+  backdrop-filter: saturate(140%) blur(8px);
+  -webkit-backdrop-filter: saturate(140%) blur(8px);
+  font-family: var(--sans);
+  font-size: 10.5px;
+  color: var(--text-secondary);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+  display: grid;
+  gap: 3px;
+  pointer-events: auto;
+  will-change: transform;
+  transition: opacity 200ms ease;
+}
+
+.gap-overlay-card.gap-isolated {
+  border-color: rgba(255, 69, 58, 0.35);
+}
+
+.gap-overlay-kind {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: #ffd60a;
+}
+
+.gap-overlay-card.gap-isolated .gap-overlay-kind {
+  color: #ff8a80;
+}
+
+.gap-overlay-msg {
+  color: var(--text-primary);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+/* ── WOW-4: Predict Cinematic Grid (4×3 thumbnails + view-transition) ──── */
+
+.prediction-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 4px 0 14px;
+}
+
+@media (min-width: 720px) {
+  .prediction-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1200px) {
+  .prediction-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.pred-thumb {
+  display: grid;
+  grid-template-rows: auto auto auto auto auto;
+  gap: 5px;
+  padding: 10px 11px 10px;
+  background: linear-gradient(
+    135deg,
+    oklch(35% 0.08 290 / 0.30) 0%,
+    oklch(28% 0.04 240 / 0.30) 100%
+  );
+  border: 1px solid rgba(180, 96, 255, 0.22);
+  border-radius: 10px;
+  cursor: pointer;
+  text-align: left;
+  color: var(--text-primary);
+  transition: transform 220ms cubic-bezier(0.22, 0.61, 0.36, 1),
+    border-color 0.15s, box-shadow 0.2s;
+  font-family: var(--sans);
+}
+
+.pred-thumb:hover {
+  transform: translateY(-2px);
+  border-color: rgba(180, 96, 255, 0.55);
+  box-shadow: 0 14px 32px rgba(120, 60, 200, 0.22);
+}
+
+.pred-thumb:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.pred-thumb.arc-fix { border-left: 3px solid oklch(70% 0.20 25); }
+.pred-thumb.arc-debug { border-left: 3px solid oklch(75% 0.15 60); }
+.pred-thumb.arc-impl { border-left: 3px solid oklch(74% 0.16 245); }
+.pred-thumb.arc-explore { border-left: 3px solid oklch(74% 0.16 165); }
+.pred-thumb.arc-mixed { border-left: 3px solid oklch(70% 0.14 295); }
+
+.pt-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-secondary);
+}
+
+.pt-arc {
+  font-size: 11px;
+}
+
+.pt-proj {
+  font-weight: 600;
+  color: var(--text-primary);
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pt-outcome {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.pt-outcome-ok { background: rgba(48, 209, 88, 0.18); color: #9af0b0; }
+.pt-outcome-partial { background: rgba(255, 159, 10, 0.18); color: #ffce8a; }
+.pt-outcome-bad { background: rgba(255, 69, 58, 0.18); color: #ff9d92; }
+.pt-outcome-neutral { background: rgba(255, 255, 255, 0.08); color: var(--text-secondary); }
+
+.pt-title {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.35;
+  color: var(--text-primary);
+}
+
+.pt-topic {
+  font-size: 10.5px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pt-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.pt-tool {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+}
+
+.pt-tool .pt-count {
+  color: var(--text-muted);
+  margin-left: 3px;
+}
+
+.pt-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.pt-sid {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.pt-conf {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 7px;
+  border-radius: 4px;
+  background: linear-gradient(135deg, oklch(72% 0.18 290), oklch(70% 0.15 250));
+  color: white;
+}
+
+/* ── WOW-5: Discovery Hyperplane ──────────────────────────────────────── */
+
+.mix-modal {
+  width: min(1100px, 94vw);
+  max-height: 90vh;
+}
+
+.hyperplane-wrap {
+  position: relative;
+  padding: 8px 0;
+}
+
+.hyperplane-canvas {
+  display: block;
+  width: 100%;
+  height: 320px;
+  border-radius: 10px;
+  background: radial-gradient(
+    ellipse at 50% 50%,
+    rgba(40, 30, 60, 0.6) 0%,
+    rgba(18, 20, 32, 0.85) 100%
+  );
+  border: 1px solid var(--border-strong);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45) inset;
+}
+
+.hyperplane-legend {
+  display: flex;
+  gap: 14px;
+  padding: 8px 4px 0;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-secondary);
+}
+
+.hp-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.hp-key::before {
+  content: "";
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.hp-key.hp-positive::before { background: oklch(78% 0.16 150); }
+.hp-key.hp-negative::before { background: oklch(72% 0.20 25); }
+.hp-key.hp-result::before { background: oklch(78% 0.16 80); }
+
+/* Self-contained Mix & Match picker (UX FIX D-13): search + result list +
+   per-row + pos / − neg buttons live INSIDE the modal so the user never
+   has to dismiss the dialog to add anchors. The corresponding HTML is
+   `<div class="mix-picker">` in index.html. */
+.mix-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 14px 0 6px;
+}
+
+.mix-picker-lbl {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: oklch(68% 0.01 260);
+}
+
+.mix-picker-input {
+  width: 100%;
+  background: oklch(18% 0.01 260);
+  border: 1px solid oklch(28% 0.01 260);
+  color: oklch(94% 0.01 260);
+  border-radius: 8px;
+  padding: 9px 12px;
+  font-size: 13.5px;
+  font-family: inherit;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.mix-picker-input:focus {
+  outline: none;
+  border-color: oklch(72% 0.14 220);
+  background: oklch(20% 0.01 260);
+}
+
+.mix-picker-results {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 220px;
+  overflow-y: auto;
+  background: oklch(15% 0.01 260);
+  border: 1px solid oklch(26% 0.01 260);
+  border-radius: 8px;
+  padding: 6px;
+}
+
+.mix-picker-results:empty {
+  display: none;
+}
+
+.mix-picker-empty {
+  color: oklch(60% 0.01 260);
+  font-size: 13px;
+  padding: 12px 8px;
+  margin: 0;
+  text-align: center;
+}
+
+.mix-picker-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: oklch(18% 0.01 260);
+  transition: background 0.12s ease;
+}
+.mix-picker-row:hover {
+  background: oklch(22% 0.01 260);
+}
+
+.mix-picker-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.mix-picker-project {
+  font-size: 11.5px;
+  color: oklch(72% 0.14 220);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.mix-picker-title {
+  font-size: 13px;
+  color: oklch(92% 0.01 260);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mix-picker-start {
+  font-size: 11px;
+  color: oklch(60% 0.01 260);
+  font-family: "IBM Plex Mono", "SF Mono", ui-monospace, monospace;
+}
+
+.mix-picker-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.mix-picker-actions .btn[disabled] {
+  opacity: 0.55;
+  cursor: default;
+  background: oklch(28% 0.05 145);
+  color: oklch(82% 0.08 145);
+}
+
+.mix-dropzones {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.dz-col {
+  display: flex;
+  flex-direction: column;
+}
+
+.dropzone.pos {
+  border-color: rgba(48, 209, 88, 0.32);
+  background: rgba(48, 209, 88, 0.04);
+}
+
+.dropzone.neg {
+  border-color: rgba(255, 69, 58, 0.32);
+  background: rgba(255, 69, 58, 0.04);
+}
+
+.mix-controls {
+  display: flex;
+  align-items: end;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+.mix-target-lbl {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.mix-target {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  padding: 6px 10px;
+  background: var(--bg-input);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.mix-target:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.mix-row {
+  background: linear-gradient(
+    135deg,
+    rgba(48, 209, 88, 0.05),
+    rgba(10, 132, 255, 0.05)
+  );
+  border: 1px solid var(--border);
+  padding: 8px 12px;
+  border-radius: 7px;
+  display: grid;
+  gap: 6px;
+}
+
+.mix-row-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.mix-score {
+  color: var(--green);
+  font-weight: 600;
+}
+
+.mix-proj {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.mix-sid {
+  color: var(--text-muted);
+  margin-left: auto;
+}
+
+.mix-row-title {
+  font-size: 12.5px;
+  color: var(--text-primary);
+}
+
+.mix-row-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.mix-results-title {
+  margin: 8px 0 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+/* ── WOW: reduced motion guard ────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  .heat-trail path,
+  .heat-trail circle,
+  .heat-chip,
+  .contrib-seg,
+  .pred-thumb,
+  .gap-overlay-card {
+    transition: none !important;
+    animation: none !important;
+  }
+  /* WOW-1: also hide the SVG entirely when reduced motion is requested. The
+     JS already short-circuits the fetch, but the SVG might still hold a
+     stale render from before the preference flipped. */
+  .heat-trail { display: none; }
+}
+
+/* --- Watcher chip (upstream) ------------------------------------------- */
 
 .watcher-chip {
   margin-left: 8px;

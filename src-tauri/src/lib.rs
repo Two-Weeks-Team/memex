@@ -1,8 +1,22 @@
 pub mod cli;
+pub mod codex_parser;
 pub mod commands;
+pub mod crud;
+pub mod embed_late;
+pub mod embed_pool;
+pub mod enrich;
+pub mod eval_ndcg;
 pub mod indexer;
+pub mod insights_cache;
+pub mod lens;
 pub mod mcp;
+pub mod parse_cache;
 pub mod parser;
+pub mod payload;
+pub mod retrieval;
+pub mod schema;
+pub mod sec;
+pub mod snapshot;
 pub mod watcher;
 
 use std::path::PathBuf;
@@ -21,6 +35,14 @@ use crate::commands::{AppState, AppStateArc};
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        // P8 — `memex://` URL scheme with 5 surface routes:
+        //   memex://timemachine   memex://topology   memex://lens
+        //   memex://predict       memex://mix-match
+        // The plugin emits a `deep-link://new-url` event the frontend listens
+        // to in `src/main.js` (`__TAURI__.event.listen('deep-link://new-url')`)
+        // and dispatches to the matching tab. macOS uses `Info.plist`
+        // `CFBundleURLTypes` (configured via tauri.conf.json `plugins`).
+        .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             // AppState is managed eagerly with EMPTY lazy slots. Qdrant and
@@ -100,6 +122,13 @@ pub fn run() {
             commands::tail_recent_errors,
             commands::list_sessions,
             commands::predict_next_actions,
+            // P4 advanced retrieval
+            commands::mix_match_with_pairs,
+            commands::list_sessions_ordered,
+            commands::lens_search_grouped,
+            commands::relevance_feedback,
+            // P2 KA-01/02/05 — FormulaQuery-backed lens with score breakdown
+            commands::lens_search_v2,
             commands::prompt_history_stats,
         ])
         .run(tauri::generate_context!())

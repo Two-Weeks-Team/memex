@@ -1,0 +1,6 @@
+{"timestamp":"2026-05-18T09:00:00.000Z","type":"session_meta","payload":{"id":"019e39e6-aaaa-bbbb-cccc-000000000003","timestamp":"2026-05-18T09:00:00.000Z","cwd":"/Users/test/projects/demo","originator":"Codex CLI","cli_version":"0.131.0-alpha.9"}}
+{"timestamp":"2026-05-18T09:00:01.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Run cargo test"}]}}
+{"timestamp":"2026-05-18T09:00:02.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Running."}]}}
+{"timestamp":"2026-05-18T09:00:03.000Z","type":"response_item","payload":{"type":"function_call","name":"exec_command","arguments":"{\"cmd\":\"cargo test\"}","call_id":"call_err1"}}
+{"timestamp":"2026-05-18T09:00:04.000Z","type":"response_item","payload":{"type":"function_call_output","call_id":"call_err1","output":"stderr: error: tests failed\ntest failures: 3\nexit code 1"}}
+{"timestamp":"2026-05-18T09:00:05.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Tests failed; need to investigate."}]}}
