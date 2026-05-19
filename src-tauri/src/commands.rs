@@ -84,7 +84,12 @@ impl AppState {
                     // Either v2 is empty or v3 already has data — no-op.
                 }
                 Err(e) => {
-                    eprintln!("[memex] v2→v3 migration skipped: {e:#}");
+                    // LOG FIX (Gemini PR #11 review, commands.rs:87): Err
+                    // means migration *failed* mid-flight (connectivity,
+                    // auth, server panic) — NOT a routine skip. The
+                    // Ok(None) arm above is the actual no-op case. Word
+                    // accordingly so a postmortem can grep for "failed".
+                    eprintln!("[memex] v2→v3 migration failed: {e:#}");
                 }
             }
         });

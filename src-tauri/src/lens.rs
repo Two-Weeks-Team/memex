@@ -573,17 +573,17 @@ fn build_formula(
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs() as f64)
         .unwrap_or(0.0);
+    // SIMPLIFICATION (Gemini PR #11 review, lens.rs:586): `target` accepts
+    // any Expression, so we can pass the precomputed constant directly
+    // instead of wrapping it in a 2-term sum (`+ 0`) just to coerce it.
+    // The `var - base` rebase still needs `sum_with` because there's no
+    // single-arg subtract on the variable side.
     let neg_base = Expression::constant(-(RECENCY_BASE_TS as f32));
     let rebased_start_ts = Expression::sum_with([
         Expression::variable("payload.start_ts"),
-        neg_base.clone(),
+        neg_base,
     ]);
-    let rebased_now = Expression::sum_with([
-        Expression::constant((now_secs - RECENCY_BASE_TS) as f32),
-        // Adding zero would be cleaner, but Expression::sum_with requires
-        // at least 2 terms for the AST to type-check as a SumExpression.
-        Expression::constant(0.0),
-    ]);
+    let rebased_now = Expression::constant((now_secs - RECENCY_BASE_TS) as f32);
     let recency = Expression::exp_decay(
         DecayParamsExpressionBuilder::new(rebased_start_ts)
             .target(rebased_now)

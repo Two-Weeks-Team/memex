@@ -270,14 +270,27 @@ pub async fn migrate_v2_to_v3(client: &Qdrant) -> Result<MigrationReport> {
 }
 
 /// Auto-migration wrapper used by `AppState::qdrant()` on startup. Returns:
-/// - `Ok(None)` when no migration is needed (v2 empty OR v3 already has data
-///   ≥ v2 — we treat the user as already migrated)
+/// - `Ok(None)` when no migration is needed
 /// - `Ok(Some(report))` when a migration ran
 /// - `Err(_)` on transient Qdrant failure (caller logs + swallows)
 ///
-/// Conservative on purpose: we never re-migrate a v3 that already has any
-/// points, since that would (a) be a no-op (idempotent upsert by point_id)
-/// and (b) burn user-visible time on every restart.
+/// SAFETY CONDITION (Codex P1 review on PR #11, crud.rs:298): we ONLY
+/// migrate when v3 is **completely empty**. The previous condition
+/// (`v3_count >= v2_count`) was too permissive — if v3 was partially
+/// populated by an aborted earlier scan (count between 1 and v2_count - 1)
+/// we'd still run migrate_v2_to_v3, which scrolls v2 and upserts every
+/// point carrying ONLY the dense vectors stored in v2. Overlapping
+/// point_ids in v3 would have their v3-only data clobbered:
+///   - `content_late` multivector (KB-01 late-interaction MaxSim)
+///   - `path_sparse` + `tool_sparse` (KB-02 BM25 IDF)
+///   - Enriched payload fields populated by `enrich.rs` (intent, arc,
+///     outcome, topic, entities)
+///
+/// Skipping when `v3_count > 0` means: the typical "partial state"
+/// recovery path becomes the user running `memex scan --index` against
+/// the live corpus, which writes the full v3 shape from scratch — the
+/// right thing to do. They can also explicitly delete v3 to force
+/// re-migration if v2 is genuinely the only source of truth.
 pub async fn migrate_v2_to_v3_if_needed(client: &Qdrant) -> Result<Option<MigrationReport>> {
     let v2_exists = client
         .collection_exists(COLLECTION_V2)
@@ -291,8 +304,9 @@ pub async fn migrate_v2_to_v3_if_needed(client: &Qdrant) -> Result<Option<Migrat
         return Ok(None);
     }
     let v3_count = count_points(client, COLLECTION_V3).await.unwrap_or(0);
-    if v3_count >= v2_count {
-        // v3 already covers (or exceeds) v2 — typical post-`scan --index` state.
+    if v3_count > 0 {
+        // v3 has data — even partial. Refuse to overwrite v3-only fields.
+        // See safety-condition docstring above.
         return Ok(None);
     }
     let report = migrate_v2_to_v3(client).await?;
