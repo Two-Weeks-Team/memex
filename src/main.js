@@ -97,6 +97,8 @@ document.addEventListener("DOMContentLoaded", async () => {
   attachWow3Controls();
   attachHeatTrailHandlers();
   attachAgentFilterHandlers();
+  // WOW-5: register the self-contained Mix & Match picker (search + add).
+  attachMixPickerEvents();
   // P8 — `memex://<route>` deep links: register listener + handle launch URL.
   attachDeepLinkRoutes();
   // Kick off both pollers; the stack uses pure jsonl parsing so it succeeds
@@ -2098,6 +2100,16 @@ function projectColor(name) {
 function openMixModal() {
   renderMixDropzones();
   document.getElementById("mix-results").innerHTML = "";
+  // Clear last picker state — but seed it with the most recent lens query
+  // so the picker arrives pre-filled with sessions the user just looked at.
+  const pickerInput = document.getElementById("mix-picker-input");
+  const pickerResults = document.getElementById("mix-picker-results");
+  if (pickerInput) {
+    pickerInput.value = state.query || "";
+  }
+  if (pickerResults) {
+    pickerResults.innerHTML = "";
+  }
   // WOW-5: hydrate the target field with the focused stack card.
   const tgt = document.getElementById("mix-target");
   if (tgt && !tgt.value && state.stack[state.stackFocus]) {
@@ -2105,8 +2117,142 @@ function openMixModal() {
     state.mix.target = tgt.value;
   }
   document.getElementById("mix-modal").showModal();
+  // If the user already had a non-empty query, run it once automatically so
+  // the picker isn't empty on first open.
+  if (pickerInput && pickerInput.value.trim()) {
+    runMixPickerSearch();
+  }
   // Defer the canvas init until after the dialog has its final size.
   requestAnimationFrame(() => initHyperplane());
+  updateRunMixButton();
+}
+
+// UX FIX (D-13 review): self-contained picker so the modal doesn't depend on
+// stack cards that the modal backdrop blocks.
+//
+// runMixPickerSearch() — invoke lens_search or list_sessions to populate the
+// picker's result list. Each result row carries [+ pos] [− neg] buttons that
+// call addToMix() the same way the main-view stack-card buttons do.
+async function runMixPickerSearch() {
+  const input = document.getElementById("mix-picker-input");
+  const results = document.getElementById("mix-picker-results");
+  if (!input || !results) return;
+  const q = input.value.trim();
+  if (!q) {
+    results.innerHTML = '<p class="mix-picker-empty">Type a query above and press ↵, or paste a session_id.</p>';
+    return;
+  }
+  // If the query looks like a session_id UUID, treat it as a direct id pick.
+  const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if (uuidRe.test(q)) {
+    results.innerHTML = "";
+    renderMixPickerRow(
+      { session_id: q, project_name: "(by id)", ai_title: q, start_iso: "" },
+      results,
+    );
+    return;
+  }
+  // Otherwise: lens search against the live collection.
+  results.innerHTML = '<p class="mix-picker-empty">Searching…</p>';
+  let hits = [];
+  try {
+    const weights = lensWeightsForV2();
+    try {
+      const raw = await invoke("lens_search_v2", { query: q, weights, limit: 12 });
+      hits = (raw || []).map(normalizeLensResult);
+    } catch {
+      const legacy = { ...weights };
+      delete legacy.content_late;
+      delete legacy.diversity;
+      delete legacy.fusion;
+      const raw = await invoke("lens_search", { query: q, weights: legacy, limit: 12 });
+      hits = (raw || []).map(legacyHitToLensResult);
+    }
+  } catch (err) {
+    results.innerHTML = `<p class="mix-picker-empty">Search failed: ${escapeHtml(String(err))}</p>`;
+    return;
+  }
+  if (!hits.length) {
+    results.innerHTML = '<p class="mix-picker-empty">No matches.</p>';
+    return;
+  }
+  results.innerHTML = "";
+  for (const h of hits) {
+    renderMixPickerRow(h, results);
+  }
+}
+
+function renderMixPickerRow(hit, parent) {
+  const row = document.createElement("div");
+  row.className = "mix-picker-row";
+  const meta = document.createElement("div");
+  meta.className = "mix-picker-meta";
+  const project = hit.project_name || "(unknown project)";
+  const title = (hit.ai_title || "").trim() || "(untitled)";
+  const start = hit.start_iso ? hit.start_iso.slice(0, 16).replace("T", " ") : "";
+  meta.innerHTML = `
+    <span class="mix-picker-project">${escapeHtml(project)}</span>
+    <span class="mix-picker-title">${escapeHtml(title.slice(0, 80))}</span>
+    <span class="mix-picker-start">${escapeHtml(start)}</span>
+  `;
+  const actions = document.createElement("div");
+  actions.className = "mix-picker-actions";
+  const posBtn = document.createElement("button");
+  posBtn.type = "button";
+  posBtn.className = "btn ghost xs";
+  posBtn.textContent = "+ pos";
+  posBtn.title = "Add as positive anchor";
+  posBtn.addEventListener("click", () => {
+    addToMix("positive", hit.session_id);
+    posBtn.disabled = true;
+    posBtn.textContent = "✓ pos";
+  });
+  const negBtn = document.createElement("button");
+  negBtn.type = "button";
+  negBtn.className = "btn ghost xs";
+  negBtn.textContent = "− neg";
+  negBtn.title = "Add as negative (anti-context) anchor";
+  negBtn.addEventListener("click", () => {
+    addToMix("negative", hit.session_id);
+    negBtn.disabled = true;
+    negBtn.textContent = "✓ neg";
+  });
+  actions.append(posBtn, negBtn);
+  row.append(meta, actions);
+  parent.appendChild(row);
+}
+
+function attachMixPickerEvents() {
+  const input = document.getElementById("mix-picker-input");
+  if (!input) return;
+  let debounce = null;
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      runMixPickerSearch();
+    }
+  });
+  input.addEventListener("input", () => {
+    if (debounce) clearTimeout(debounce);
+    debounce = setTimeout(() => {
+      // Auto-search on quiet pause if the user typed at least 2 chars.
+      if (input.value.trim().length >= 2) {
+        runMixPickerSearch();
+      }
+    }, 350);
+  });
+}
+
+// Keeps the [Run discovery] button + hint message in sync with state.
+function updateRunMixButton() {
+  const btn = document.getElementById("btn-run-mix");
+  if (!btn) return;
+  const ready =
+    state.mix.positive.length > 0 || state.mix.negative.length > 0;
+  btn.disabled = !ready;
+  btn.title = ready
+    ? "Run Qdrant Discovery on your selections"
+    : "Add at least one positive OR negative session first";
 }
 
 function addToMix(side, sessionId) {
@@ -2114,11 +2260,19 @@ function addToMix(side, sessionId) {
     state.mix[side].push(sessionId);
   }
   renderMixDropzones();
+  updateRunMixButton();
 }
 
 function removeFromMix(side, sessionId) {
   state.mix[side] = state.mix[side].filter((s) => s !== sessionId);
   renderMixDropzones();
+  updateRunMixButton();
+  // Also flip the corresponding picker row's button back to its un-added
+  // state if it's still on screen — search again to refresh.
+  const input = document.getElementById("mix-picker-input");
+  if (input && input.value.trim()) {
+    runMixPickerSearch();
+  }
 }
 
 function renderMixDropzones() {
@@ -2128,7 +2282,10 @@ function renderMixDropzones() {
     if (!state.mix[side].length) {
       const hint = document.createElement("span");
       hint.className = "dropzone-hint";
-      hint.textContent = "click + pos / − neg on a card to add…";
+      hint.textContent =
+        side === "positive"
+          ? "search above OR click + pos on a card behind the modal…"
+          : "search above OR click − neg on a card behind the modal…";
       root.appendChild(hint);
       continue;
     }

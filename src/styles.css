@@ -151,6 +151,15 @@ body {
   background: #1a90ff;
 }
 
+.btn[disabled] {
+  opacity: 0.45;
+  cursor: not-allowed;
+  filter: saturate(0.6);
+}
+.btn[disabled]:hover {
+  background: var(--accent);  /* override the :hover lighten */
+}
+
 .btn.ghost {
   background: transparent;
 }
@@ -2079,6 +2088,124 @@ textarea:focus {
 .hp-key.hp-positive::before { background: oklch(78% 0.16 150); }
 .hp-key.hp-negative::before { background: oklch(72% 0.20 25); }
 .hp-key.hp-result::before { background: oklch(78% 0.16 80); }
+
+/* Self-contained Mix & Match picker (UX FIX D-13): search + result list +
+   per-row + pos / − neg buttons live INSIDE the modal so the user never
+   has to dismiss the dialog to add anchors. The corresponding HTML is
+   `<div class="mix-picker">` in index.html. */
+.mix-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 14px 0 6px;
+}
+
+.mix-picker-lbl {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: oklch(68% 0.01 260);
+}
+
+.mix-picker-input {
+  width: 100%;
+  background: oklch(18% 0.01 260);
+  border: 1px solid oklch(28% 0.01 260);
+  color: oklch(94% 0.01 260);
+  border-radius: 8px;
+  padding: 9px 12px;
+  font-size: 13.5px;
+  font-family: inherit;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.mix-picker-input:focus {
+  outline: none;
+  border-color: oklch(72% 0.14 220);
+  background: oklch(20% 0.01 260);
+}
+
+.mix-picker-results {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 220px;
+  overflow-y: auto;
+  background: oklch(15% 0.01 260);
+  border: 1px solid oklch(26% 0.01 260);
+  border-radius: 8px;
+  padding: 6px;
+}
+
+.mix-picker-results:empty {
+  display: none;
+}
+
+.mix-picker-empty {
+  color: oklch(60% 0.01 260);
+  font-size: 13px;
+  padding: 12px 8px;
+  margin: 0;
+  text-align: center;
+}
+
+.mix-picker-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: oklch(18% 0.01 260);
+  transition: background 0.12s ease;
+}
+.mix-picker-row:hover {
+  background: oklch(22% 0.01 260);
+}
+
+.mix-picker-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.mix-picker-project {
+  font-size: 11.5px;
+  color: oklch(72% 0.14 220);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.mix-picker-title {
+  font-size: 13px;
+  color: oklch(92% 0.01 260);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mix-picker-start {
+  font-size: 11px;
+  color: oklch(60% 0.01 260);
+  font-family: "IBM Plex Mono", "SF Mono", ui-monospace, monospace;
+}
+
+.mix-picker-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.mix-picker-actions .btn[disabled] {
+  opacity: 0.55;
+  cursor: default;
+  background: oklch(28% 0.05 145);
+  color: oklch(82% 0.08 145);
+}
 
 .mix-dropzones {
   display: grid;
