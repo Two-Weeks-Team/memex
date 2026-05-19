@@ -258,17 +258,22 @@ $ curl -s http://localhost:6333/collections/memex_sessions_v3 \
 ### CLI smoke (all 7 surfaces, exit 0)
 
 `bash scripts/demo/smoke-test.sh --json` against the 110-point live
-collection produces:
+collection produces a `.json` or `.txt` file per surface under
+`tests/e2e/` (extension auto-picked from the actual output shape).
+**Evidence files are NOT committed** — they contain real session UUIDs,
+user home paths, and project names (Codex P1 privacy review on PR #10).
+The reviewer regenerates them locally with the 4-command recipe in
+`tests/e2e/README.md`.
 
-| # | Surface | Command | Evidence file | Result |
+| # | Surface | Command | Output target | Empirical result |
 |---|---|---|---|---|
-| 1 | scan | `memex scan --limit 5` | `tests/e2e/scan.json` | 5 sessions parsed |
-| 2 | search | `memex search "edit"` | `tests/e2e/search.json` | dense KNN hits |
-| 3 | lens | `memex lens "edit auth.js"` | `tests/e2e/lens.json` | FormulaQuery hits |
+| 1 | scan | `memex scan --limit 5` | `tests/e2e/scan.txt` | 5 sessions parsed |
+| 2 | search | `memex search "edit"` | `tests/e2e/search.txt` | dense KNN hits (~1500 B) |
+| 3 | lens | `memex lens "edit auth.js"` | `tests/e2e/lens.txt` | FormulaQuery hits (~1600 B) |
 | 4 | topology | `memex topology --sample 30` | `tests/e2e/topology.json` | 30 nodes (MST) |
-| 5 | recall | `memex recall "cargo build error"` | `tests/e2e/recall.json` | proactive hits |
-| 6 | predict | `memex predict <SID> --neighbors 5` | `tests/e2e/predict.json` | next-action prediction |
-| 7 | mix | `memex mix --pos <SID_A> --neg <SID_B>` | `tests/e2e/mix.json` | Discovery hits |
+| 5 | recall | `memex recall "cargo build error"` | `tests/e2e/recall.txt` | proactive hits (~900 B) |
+| 6 | predict | `memex predict <SID> --neighbors 5` | `tests/e2e/predict.txt` | next-action prediction |
+| 7 | mix | `memex mix --pos <SID_A> --neg <SID_B>` | `tests/e2e/mix.txt` | Discovery hits (~1500 B) |
 
 Summary line: `✓ all 7 surfaces returned non-empty`. Exit code: `0`.
 
@@ -296,8 +301,12 @@ routes (`stack`, `mix`, `mixmatch`, `prediction`, `galaxy`, `search`,
 `bash scripts/demo/capture-screenshots.sh` issues `open memex://<route>`
 for each of the 5 routes and runs `screencapture` after a route-specific
 settle interval, producing `tests/e2e/screenshots/{route}.png`.
+**Screenshots are gitignored** per the same Codex P1 privacy fix as the
+JSON files — the captures show the contributor's real session titles
+and project names inside the Memex window. The route map below shows
+what each PNG demonstrates when regenerated:
 
-| Screenshot | Surface |
+| Screenshot path | Surface demonstrated |
 |---|---|
 | `tests/e2e/screenshots/timemachine.png` | Time Machine stack |
 | `tests/e2e/screenshots/topology.png` | Topology galaxy modal |
