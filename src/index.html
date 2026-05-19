@@ -186,9 +186,10 @@
       </header>
       <div class="mix-body">
         <p class="side-desc">
-          Drop sessions to the positive side (anchors) or negative side
-          (anti-context). The hyperplane points <em>away</em> from negatives,
-          <em>toward</em> positives. Results land on the positive side.
+          Tell Memex what you like (positive) and what to avoid (negative),
+          then it finds sessions that lean toward the positives and away
+          from the negatives. Add at least one positive OR one negative
+          to enable discovery.
         </p>
 
         <!-- WOW-5: 3D-feel hyperplane canvas. Vanilla 2D — no Three.js. -->
@@ -207,17 +208,41 @@
           </div>
         </div>
 
+        <!-- Self-contained session picker. UX FIX (D-13 review): the previous
+             modal had only two "drop zones" that listed selected items, but
+             the `+ pos` / `− neg` action buttons lived on stack cards in the
+             main view — which a `<dialog>.showModal()` backdrop blocks.
+             Users opened the modal and had no way to add anything from
+             inside. Now the modal has its own search input + results list
+             with per-row + pos / − neg buttons, so it's fully usable
+             standalone. The main-view buttons still work for users who
+             prefer to pre-stage selections before opening the modal. -->
+        <div class="mix-picker">
+          <label class="mix-picker-lbl" for="mix-picker-input">
+            <span>Find sessions to add (type a query, press ↵)</span>
+            <input
+              type="text"
+              id="mix-picker-input"
+              class="mix-picker-input"
+              placeholder='e.g. "auth refactor", "cargo build error", or paste a session_id'
+              autocomplete="off"
+              spellcheck="false"
+            />
+          </label>
+          <div id="mix-picker-results" class="mix-picker-results" role="listbox" aria-label="Search results"></div>
+        </div>
+
         <div class="mix-dropzones">
           <div class="dz-col">
             <label>Positive sessions</label>
             <div id="mix-positive" class="dropzone pos" data-side="positive">
-              <span class="dropzone-hint">click + pos on a card to add…</span>
+              <span class="dropzone-hint">search above OR click + pos on a card behind the modal…</span>
             </div>
           </div>
           <div class="dz-col">
             <label>Negative sessions</label>
             <div id="mix-negative" class="dropzone neg" data-side="negative">
-              <span class="dropzone-hint">click − neg on a card to add…</span>
+              <span class="dropzone-hint">search above OR click − neg on a card behind the modal…</span>
             </div>
           </div>
         </div>
