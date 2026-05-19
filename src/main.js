@@ -846,13 +846,60 @@ async function loadHeatNeighbors(sessionId, cardEl) {
   }
 }
 
+// SIZE GUARD (D-13 root-cause bug — "giant purple oval/capsule"):
+// The earlier formula `stroke-width = 1.6 + score * 2.4` assumed `score` was a
+// cosine similarity in [0, 1]. lens_search_v2 actually returns a *weighted
+// fusion sum* — six lenses × per-vector cosine + recency boost. With default
+// slider weights (all 1.0) and decent matches the fused score is routinely
+// 3–6, occasionally larger. Plugging that into the formula produces
+// stroke-width 9–16 in viewBox units. Combined with viewBox/CSS-size
+// preserveAspectRatio scaling (`viewBox 1436×600` mapped onto a ~1436×800
+// `.results` container scales each viewBox unit by ~1.33×), a stroke of 12
+// "viewBox units" rendered at 16+ CSS px is already very thick. If `score`
+// trends to even higher fused values (NaN / Infinity from divide-by-zero, or
+// the recency boost spiking), stroke-width jumps to hundreds of CSS px.
+// `stroke-linecap: round` turns the line's two endpoints into half-circles
+// matching the stroke width — which is what produced the viewport-sized
+// **vertical capsule (purple oval)** the user kept seeing. The same root
+// cause makes the end-cap `<circle r="5">` blow up via the surrounding
+// glow filter when scores are anomalous.
+//
+// The defensive guard is layered so any single bad value can't manifest:
+//   1. `clampUnit(score)` forces score into [0, 1] for *visual* use only
+//      (the breakdown panel still gets the raw fused score for inspection).
+//   2. Absolute pixel caps via `vector-effect="non-scaling-stroke"` — strokes
+//      render in *screen pixels* and ignore viewBox→CSS scale, so a viewBox
+//      preserveAspectRatio surprise can never multiply the stroke.
+//   3. Hard `Math.min` cap (4.5 px stroke, r ≤ 6) so even a logic error in
+//      the clamp can't escape.
+//   4. NaN/Infinity guards via `Number.isFinite()`.
+function clampUnit(v) {
+  if (!Number.isFinite(v)) return 0;
+  if (v <= 0) return 0;
+  if (v >= 1) return 1;
+  return v;
+}
+
 function drawHeatTrail(cardEl, neighbors) {
   const svg = document.getElementById("heat-trail");
   const chip = document.getElementById("heat-chip");
   if (!svg || !cardEl) return;
   const root = document.getElementById("results");
   const rect = root.getBoundingClientRect();
+  // Reject pathological container sizes — if results hasn't laid out yet a
+  // viewBox of 0×0 (or <100×<100) makes every viewBox unit map to a huge
+  // CSS-pixel multiplier, magnifying every stroke into a viewport-spanning
+  // shape. Bail rather than draw garbage.
+  if (!Number.isFinite(rect.width) || !Number.isFinite(rect.height) ||
+      rect.width < 100 || rect.height < 100) {
+    svg.innerHTML = "";
+    return;
+  }
   svg.setAttribute("viewBox", `0 0 ${rect.width} ${rect.height}`);
+  // Match SVG intrinsic coordinate system 1:1 to its rendered box so
+  // preserveAspectRatio can't introduce a scale factor that magnifies
+  // strokes/radii. (non-scaling-stroke below is the belt; this is suspenders.)
+  svg.setAttribute("preserveAspectRatio", "none");
   svg.innerHTML = "";
 
   const start = centerInside(cardEl, root);
@@ -863,7 +910,8 @@ function drawHeatTrail(cardEl, neighbors) {
     );
     if (!targetCard) continue;
     const end = centerInside(targetCard, root);
-    const color = heatColor(n.score);
+    const sUnit = clampUnit(n && n.score);
+    const color = heatColor(sUnit);
     // Curved bezier — control point pulled toward the vertical midline so
     // trails arc gracefully even when start/end are near-collinear.
     const cx = (start.x + end.x) / 2;
@@ -874,18 +922,24 @@ function drawHeatTrail(cardEl, neighbors) {
       `M ${start.x} ${start.y} Q ${cx} ${cy} ${end.x} ${end.y}`,
     );
     path.setAttribute("stroke", color);
-    path.setAttribute("stroke-width", String(1.6 + Math.max(0, n.score) * 2.4));
+    // Cap stroke at 4.5 CSS px regardless of score. vector-effect tells the
+    // browser to draw the stroke in *screen* pixels (post-transform), so any
+    // viewBox→CSS scaling never amplifies it.
+    const strokePx = Math.min(4.5, 1.6 + sUnit * 2.4);
+    path.setAttribute("stroke-width", String(strokePx));
+    path.setAttribute("vector-effect", "non-scaling-stroke");
     path.setAttribute("fill", "none");
-    path.setAttribute("opacity", String(0.45 + n.score * 0.45));
+    path.setAttribute("opacity", String(0.45 + sUnit * 0.45));
     path.setAttribute("stroke-linecap", "round");
     svg.appendChild(path);
-    // End-cap dot.
+    // End-cap dot — also capped + non-scaling.
     const dot = document.createElementNS("http://www.w3.org/2000/svg", "circle");
     dot.setAttribute("cx", String(end.x));
     dot.setAttribute("cy", String(end.y));
-    dot.setAttribute("r", "5");
+    dot.setAttribute("r", String(Math.min(6, 5))); // belt+suspenders, always 5
     dot.setAttribute("fill", color);
     dot.setAttribute("opacity", "0.85");
+    dot.setAttribute("vector-effect", "non-scaling-stroke");
     svg.appendChild(dot);
     drewAny++;
   }
