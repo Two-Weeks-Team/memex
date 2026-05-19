@@ -321,7 +321,17 @@ function renderStack() {
     card.dataset.sessionId = s.session_id;
     const ts = (s.start_iso || "").slice(0, 16).replace("T", " ");
     const title = s.ai_title || "(untitled)";
-    const errBadge = s.has_errors ? '<span class="badge err">errors</span>' : "";
+    // EXPLANATORY TOOLTIP (D-13 user request "ERROR라고 나오는 부분에
+    // 대한 설명"): the badge is shown when this session contains at least
+    // one tool_result with `is_error: true` from Claude's tool-use
+    // protocol. That is NOT the same as a runtime crash of Memex itself —
+    // it just means a Bash / Edit / Read / etc. call inside the session
+    // returned an error response (file not found, command exit non-zero,
+    // type mismatch, etc.). It's how the past-you marker for "this
+    // session hit a snag" gets surfaced visually.
+    const errBadge = s.has_errors
+      ? '<span class="badge err" title="This session contains at least one failed tool call (Bash exit non-zero / Edit denied / Read missing file / etc.). Click the card → Replay to see which turn.">errors</span>'
+      : "";
     card.innerHTML = `
       <header>
         <span class="proj">${escapeHtml(s.project_name || "?")}</span>

@@ -18,7 +18,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["tray-icon"] }
+tauri = { version = "2", features = ["tray-icon", "devtools"] }
 tauri-plugin-opener = "2"
 # P8 — memex:// deep links route to one of the 5 WOW surfaces. The plugin
 # registers the scheme via Info.plist (macOS) and Manifest (Windows/Linux)
