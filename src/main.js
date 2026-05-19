@@ -127,10 +127,17 @@ function dispatchDeepLink(rawUrl) {
   try {
     const u = new URL(rawUrl);
     if (u.protocol !== "memex:") return;
-    // memex://topology      → host="topology", pathname=""
-    // memex://mix-match     → host="mix-match", pathname=""
-    // memex:topology        → host="", pathname="topology" (rare; handle both)
-    route = (u.host || u.pathname.replace(/^\/+/, "")).trim().toLowerCase();
+    // ROBUSTNESS FIX (Gemini PR #10 review, main.js:133):
+    //   - Prefer `hostname` over `host` so a stray port like
+    //     `memex://topology:8080` doesn't end up as `topology:8080`.
+    //   - Trim leading AND trailing slashes from pathname fallback so
+    //     `memex:topology/` is treated the same as `memex:topology`.
+    // memex://topology      → hostname="topology", pathname=""
+    // memex://mix-match     → hostname="mix-match", pathname=""
+    // memex:topology        → hostname="", pathname="topology" (handled here)
+    route = (u.hostname || u.pathname.replace(/^\/+|\/+$/g, ""))
+      .trim()
+      .toLowerCase();
   } catch {
     return;
   }
@@ -156,9 +163,20 @@ function dispatchDeepLink(rawUrl) {
       break;
     case "predict":
     case "prediction":
-      // Predict needs an active session; auto-select the topmost card if
-      // none is active yet, then let the existing flow (selectSession) run.
-      {
+      // IDEMPOTENCY FIX (Gemini PR #10 review, main.js:167): Predict needs an
+      // active session, but the previous implementation ALWAYS clicked the
+      // first card — which forcibly stole the user's existing selection
+      // every time `memex://predict` was triggered (e.g., from a recurring
+      // notification deep-link). Respect `state.selected` if already set;
+      // only auto-select the topmost card when there is no active session.
+      if (state.selected) {
+        // Scroll the existing selection into view so the user knows where
+        // the predict surface is anchored.
+        const existing = document.querySelector(
+          `#results [data-session-id="${state.selected}"]`
+        );
+        existing?.scrollIntoView?.({ behavior: "smooth", block: "center" });
+      } else {
         const firstCard = document.querySelector(
           "#results .stack-card, #results .card"
         );

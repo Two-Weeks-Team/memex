@@ -86,16 +86,33 @@ capture_route() {
   local route="$1"
   local outfile="$OUTDIR/$route.png"
   step "Route: memex://$route"
+  # ROBUSTNESS FIX (Gemini PR #10 review, capture-screenshots.sh:93): the
+  # AppleScript `tell process "Memex"` is case-sensitive. On a dev build
+  # ran straight from `cargo run` (no `.app` bundle, e.g. CI matrix) the
+  # process name is the lowercase binary name `memex`, and the script
+  # silently swallowed the Escape keystroke. Resolve the actual process
+  # name via the running PID and feed it into the osascript so we work
+  # in both bundled and dev modes.
+  local proc_name="Memex"
+  local pid
+  pid=$(pgrep -i Memex 2>/dev/null | head -1 || true)
+  if [[ -n "$pid" ]]; then
+    local resolved
+    resolved=$(ps -p "$pid" -o comm= 2>/dev/null | xargs -I {} basename {} || true)
+    if [[ -n "$resolved" ]]; then
+      proc_name="$resolved"
+    fi
+  fi
   # Reset state between routes — press Escape to close any open dialog so
   # each screenshot captures the surface the deep link actually opens, not
   # the previous route's modal stacked underneath.
-  osascript -e 'tell application "System Events"
-    tell process "Memex"
+  osascript -e "tell application \"System Events\"
+    tell process \"$proc_name\"
       try
         key code 53 -- Escape closes <dialog>
       end try
     end tell
-  end tell' 2>/dev/null || true
+  end tell" 2>/dev/null || true
   sleep 0.5
   # `open` invokes LaunchServices which routes the URL scheme to the .app.
   # If the app was just launched, the cold-start `get_current` path fires
@@ -109,27 +126,29 @@ capture_route() {
   esac
   # Bring Memex window unambiguously to the absolute front. The combination
   # of `activate` + raising the System Events process window covers both
-  # the LaunchServices and tray-icon code paths.
-  osascript -e '
-tell application "Memex" to activate
-tell application "System Events"
-  set frontmost of process "Memex" to true
+  # the LaunchServices and tray-icon code paths. Uses the dynamically
+  # resolved process name (see proc_name above) so a lowercase dev build
+  # still works.
+  osascript -e "
+tell application \"Memex\" to activate
+tell application \"System Events\"
+  set frontmost of process \"$proc_name\" to true
 end tell
-' 2>/dev/null || true
+" 2>/dev/null || true
   sleep 0.8
   # Capture the Memex window's bounds directly via System Events, then
   # screencapture the rectangle. This avoids the `screencapture -l` API
   # which silently falls back to full-screen on macOS 14+.
   local bounds
-  bounds=$(osascript -e '
-tell application "System Events"
-  tell process "Memex"
+  bounds=$(osascript -e "
+tell application \"System Events\"
+  tell process \"$proc_name\"
     set p to position of window 1
     set s to size of window 1
-    return ((item 1 of p) as string) & "," & ((item 2 of p) as string) & "," & ((item 1 of s) as string) & "," & ((item 2 of s) as string)
+    return ((item 1 of p) as string) & \",\" & ((item 2 of p) as string) & \",\" & ((item 1 of s) as string) & \",\" & ((item 2 of s) as string)
   end tell
 end tell
-' 2>/dev/null || echo "")
+" 2>/dev/null || echo "")
   if [[ -n "$bounds" ]] && [[ "$bounds" == *","* ]]; then
     # screencapture -R x,y,w,h captures that region without the surrounding
     # workspace clutter. We don't care about retina scaling — screencapture

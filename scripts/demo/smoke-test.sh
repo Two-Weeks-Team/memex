@@ -100,12 +100,18 @@ check_collection() {
 }
 
 # ---- surface harness -----------------------------------------------------
-# Run a memex CLI surface, verify it returns a non-empty JSON array OR
-# stdout >= 1 line of substantive content. Writes JSON to evidence dir.
+# Run a memex CLI surface, verify it returns non-empty content. Writes the
+# raw stdout to a file under `$EVIDENCE_DIR` for later inspection.
+#
+# EXTENSION FIX (Gemini PR #10 review, smoke-test.sh:108): most CLI surfaces
+# (scan, search, lens, recall, predict, mix) emit a human-readable table
+# header + rows, not JSON. Writing those into `.json` files misled
+# downstream automation that tried to `jq` them. Pick the extension based
+# on what the surface actually returns: `.json` only when stdout starts
+# with `{` or `[` (topology, collection-info), `.txt` otherwise.
 run_surface() {
   local name="$1"; shift
   local desc="$1"; shift
-  local outfile="$EVIDENCE_DIR/$name.json"
   step "Surface: $name ($desc)"
   info "cmd: $MEMEX_BIN $*"
   local out
@@ -126,6 +132,14 @@ run_surface() {
   fi
   if [[ "$WRITE_JSON" == true ]]; then
     mkdir -p "$EVIDENCE_DIR"
+    # Sniff the first non-whitespace byte to pick the file extension.
+    local first
+    first=$(printf '%s' "$out" | sed -e 's/^[[:space:]]*//' | cut -c1)
+    local ext="txt"
+    if [[ "$first" == "{" || "$first" == "[" ]]; then
+      ext="json"
+    fi
+    local outfile="$EVIDENCE_DIR/$name.$ext"
     echo "$out" > "$outfile"
     ok "wrote $outfile (${len} bytes)"
   else
@@ -184,6 +198,11 @@ run_surface search "vector KNN" search "edit auth.js" || FAILED=$((FAILED+1))
 run_surface lens "FormulaQuery lens" lens "edit auth.js" || FAILED=$((FAILED+1))
 
 # 4) topology (MST graph)
+# STALE-OUTPUT FIX (Gemini PR #10 review, smoke-test.sh:187): remove any
+# leftover /tmp/topology.json from a previous run first, so a NEW failure
+# of `memex topology --out` doesn't silently re-use the prior good output
+# (the file-exists check below was happy to validate a stale snapshot).
+rm -f /tmp/topology.json
 run_surface topology "MST topology" topology --sample 30 --out /tmp/topology.json || FAILED=$((FAILED+1))
 if [[ -f /tmp/topology.json ]]; then
   nodes=$(jq '(.nodes // []) | length' /tmp/topology.json 2>/dev/null || echo 0)
