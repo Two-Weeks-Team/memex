@@ -81,6 +81,9 @@ const state = {
     // P2: short-lived cache so repeated polls of the same error_text don't
     // re-embed + re-search every 12 s.
     cache: new Map(), // error_text → { hits, ts }
+    // D-13: auto-hide timer so the banner doesn't sit on screen forever
+    // when the user doesn't click [Dismiss] / [Open replay].
+    autoHideTimer: null,
   },
 };
 
@@ -318,7 +321,17 @@ function renderStack() {
     card.dataset.sessionId = s.session_id;
     const ts = (s.start_iso || "").slice(0, 16).replace("T", " ");
     const title = s.ai_title || "(untitled)";
-    const errBadge = s.has_errors ? '<span class="badge err">errors</span>' : "";
+    // EXPLANATORY TOOLTIP (D-13 user request "ERROR라고 나오는 부분에
+    // 대한 설명"): the badge is shown when this session contains at least
+    // one tool_result with `is_error: true` from Claude's tool-use
+    // protocol. That is NOT the same as a runtime crash of Memex itself —
+    // it just means a Bash / Edit / Read / etc. call inside the session
+    // returned an error response (file not found, command exit non-zero,
+    // type mismatch, etc.). It's how the past-you marker for "this
+    // session hit a snag" gets surfaced visually.
+    const errBadge = s.has_errors
+      ? '<span class="badge err" title="This session contains at least one failed tool call (Bash exit non-zero / Edit denied / Read missing file / etc.). Click the card → Replay to see which turn.">errors</span>'
+      : "";
     card.innerHTML = `
       <header>
         <span class="proj">${escapeHtml(s.project_name || "?")}</span>
@@ -957,13 +970,22 @@ async function renderHeatChip(cardEl) {
     return;
   }
   chip.innerHTML = bits.join("");
-  // Position next to the card top-right.
+  // UX FIX (D-13 review): chip used to dock at the top-right of the focused
+  // card, which competed for attention with the [+ pos] / [− neg] buttons
+  // and disappeared off-screen on narrower windows. Move to a TOP-CENTER
+  // overlay above the card so the enrich fields read like a banner.
   const root = document.getElementById("results");
   const er = cardEl.getBoundingClientRect();
   const pr = root.getBoundingClientRect();
-  chip.style.left = `${er.right - pr.left - 20}px`;
-  chip.style.top = `${er.top - pr.top + 8}px`;
+  // Render first (hidden) so we can measure the chip's own width.
   chip.classList.remove("hidden");
+  const cw = chip.getBoundingClientRect().width;
+  const cardCenterX = er.left + er.width / 2;
+  chip.style.left = `${cardCenterX - pr.left - cw / 2}px`;
+  // Sit just above the card's top edge with a small visual gap. Clamp to
+  // 8px from the top of the results container so the chip never escapes.
+  const above = er.top - pr.top - chip.getBoundingClientRect().height - 6;
+  chip.style.top = `${Math.max(8, above)}px`;
 }
 
 function enrichField(payload, key) {
@@ -1392,7 +1414,32 @@ function cssSafeId(s) {
 
 // WOW-4: cinematic zoom from a grid thumbnail into the Replay modal. Uses the
 // View Transitions API where available; falls back to a 240ms opacity fade.
+//
+// LEAK FIX (empirical D-13 bug — user-reported huge purple oval on screen):
+// the `viewTransitionName` properties on the thumbnail and the Replay
+// header have to be CLEARED after the transition finishes. While they're
+// set, the browser keeps the `::view-transition` pseudo-element snapshots
+// alive in the rendering tree. If anything mutates the DOM mid-transition,
+// repeats the click, or if the Replay modal is closed before the
+// animation completes, the captured snapshot of the thumbnail (which
+// contains the gradient `.prediction-rank` circle) gets stuck as a giant
+// scaled-up overlay covering the main view. The fix is to await
+// `transition.finished` and unset both `viewTransitionName` properties so
+// the browser releases the snapshot pair. `viewTransitionName` is a
+// CSS-property-mapped DOM property; assigning `""` clears it.
 function cinematicZoom(sid, payload, cardEl) {
+  const cleanup = () => {
+    if (cardEl) {
+      try { cardEl.style.viewTransitionName = ""; } catch {}
+    }
+    const headerEl = document
+      .getElementById("replay-modal")
+      ?.querySelector("header");
+    if (headerEl) {
+      try { headerEl.style.viewTransitionName = ""; } catch {}
+      delete headerEl.dataset.transitionFor;
+    }
+  };
   // Tag the Replay modal with the same view-transition-name so the browser
   // pairs the start (thumbnail) with the end (replay header).
   const modal = document.getElementById("replay-modal");
@@ -1406,9 +1453,19 @@ function cinematicZoom(sid, payload, cardEl) {
   const doOpen = () => openReplay(sid, payload || { project_name: cardEl?.querySelector(".pt-proj")?.textContent });
 
   if (!REDUCED_MOTION.matches && document.startViewTransition) {
-    document.startViewTransition(() => {
+    const transition = document.startViewTransition(() => {
       doOpen();
     });
+    // `finished` resolves when the transition's animations complete (or
+    // settle after a skip). Either way we want the snapshot torn down, so
+    // run cleanup on both resolution and rejection.
+    if (transition && transition.finished && typeof transition.finished.then === "function") {
+      transition.finished.then(cleanup, cleanup);
+    } else {
+      // Older WebKit without a Promise on .finished — clean up after the
+      // browser's default 250ms transition window.
+      setTimeout(cleanup, 500);
+    }
   } else {
     // Reduced-motion fallback: 240ms opacity blend. The replay modal already
     // animates via <dialog> showModal so this just keeps the spec promise.
@@ -1420,6 +1477,9 @@ function cinematicZoom(sid, payload, cardEl) {
       }, 260);
     }
     doOpen();
+    // Even without View Transitions API we still set the
+    // viewTransitionName above; tear it down anyway.
+    setTimeout(cleanup, 500);
   }
 }
 
@@ -2999,6 +3059,24 @@ function showRecallBanner(ev, hits) {
   const detail = document.getElementById("recall-banner-detail");
   detail.textContent = `${ev.project_name || "?"} just hit: "${ev.error_text.slice(0, 120).replace(/\s+/g, " ")}" — ${hits.length} past session(s) may help`;
   banner.classList.remove("hidden");
+  // UX FIX (D-13 review): auto-hide the banner after 20 seconds. The user
+  // reported the banner sat on screen indefinitely showing an error from
+  // earlier in the session ("Exit code 3 jq: error..."), which was the
+  // proactive-recall mechanism working as designed but visually noisy.
+  // Auto-dismiss makes the banner feel ambient instead of modal-like, and
+  // also marks the error as dismissed so it doesn't immediately re-fire
+  // on the next 12s poll. The explicit [Dismiss] button still works for
+  // users who want to clear it sooner.
+  if (state.recall.autoHideTimer) {
+    clearTimeout(state.recall.autoHideTimer);
+  }
+  state.recall.autoHideTimer = setTimeout(() => {
+    if (state.recall.lastBannerError) {
+      state.recall.dismissedKeys.add(state.recall.lastBannerError.key);
+    }
+    banner.classList.add("hidden");
+    state.recall.autoHideTimer = null;
+  }, 20000);
 }
 
 function attachRecallBannerEvents() {
