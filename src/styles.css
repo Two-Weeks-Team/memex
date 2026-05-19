@@ -1588,7 +1588,29 @@ textarea:focus {
   filter: drop-shadow(0 0 8px rgba(160, 96, 255, 0.45));
 }
 
-/* Hover chip — surfaces enrich fields for the focused stack card. */
+/* Hover chip — surfaces enrich fields for the focused stack card.
+ *
+ * SIZE/COLOR BUG FIX (D-13 review — user-reported "giant purple oval"):
+ * the chip used to be a free-growing flex container with `backdrop-filter:
+ * saturate(140%) blur(10px)`. When an enrich field (`topic` for code
+ * sessions especially) held a long string like
+ * "memex · command-message>pf:bootstrap</command-message …", the chip
+ * stretched horizontally + the text wrapped vertically inside the bit,
+ * producing a viewport-sized translucent rectangle. macOS WKWebView's
+ * backdrop-filter then saturated the dark vignette background of the
+ * results area into a vivid purple, the chip's 18px border-radius
+ * rounded the result into an oval, and the user saw a "giant purple
+ * blob" with the chip text floating inside it.
+ *
+ * Three guards stop that from happening:
+ *   1. Hard cap chip width to `min(72ch, calc(100% - 32px))` so it
+ *      never exceeds ~720px / 90% of the results container.
+ *   2. Force bits to a single line (`white-space: nowrap`) + ellipsis
+ *      so any individual long string truncates instead of wrapping.
+ *   3. Remove backdrop-filter entirely. The chip already has a solid
+ *      semi-opaque dark bg + purple border — the filter only added the
+ *      offending saturate effect and didn't improve legibility.
+ */
 .heat-chip {
   position: absolute;
   display: flex;
@@ -1596,10 +1618,10 @@ textarea:focus {
   align-items: center;
   padding: 7px 11px;
   border-radius: 18px;
-  background: rgba(28, 28, 30, 0.86);
+  background: rgba(28, 28, 30, 0.92);
   border: 1px solid rgba(180, 96, 255, 0.45);
-  backdrop-filter: saturate(140%) blur(10px);
-  -webkit-backdrop-filter: saturate(140%) blur(10px);
+  max-width: min(72ch, calc(100% - 32px));
+  overflow: hidden;
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
   pointer-events: none;
   z-index: 95;
@@ -1625,6 +1647,14 @@ textarea:focus {
   font-family: var(--mono);
   font-size: 10px;
   letter-spacing: 0.2px;
+  /* GUARD: keep enrich text on a single line. Without this, a long
+   * `topic` like "memex · command-message>pf:bootstrap</command-message …"
+   * wraps inside the bit and inflates the chip's height into a giant
+   * oval (see .heat-chip docblock). */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 38ch;
 }
 
 .heat-chip .bit-arc { background: rgba(122, 191, 255, 0.18); color: #b3d6ff; border-color: rgba(122, 191, 255, 0.35); }
