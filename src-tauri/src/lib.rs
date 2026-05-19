@@ -11,6 +11,7 @@ pub mod insights_cache;
 pub mod lens;
 pub mod parse_cache;
 pub mod parser;
+pub mod payload;
 pub mod retrieval;
 pub mod schema;
 pub mod sec;

@@ -771,39 +771,25 @@ async fn populate_breakdowns(
 }
 
 // ---------------------------------------------------------------------------
-// Helpers
+// Helpers — payload extraction lifted into crate::payload (Gemini PR #4
+// + PR #6 reviews). Local thin wrappers preserve the lens.rs return-shape
+// contracts (Option vs Option-around-map) so callers don't move.
 // ---------------------------------------------------------------------------
 
+use crate::payload as payload_helpers;
+
 fn payload_bool(p: &HashMap<String, Value>, key: &str) -> Option<bool> {
-    p.get(key).and_then(|v| v.kind.as_ref()).and_then(|k| match k {
-        qdrant_client::qdrant::value::Kind::BoolValue(b) => Some(*b),
-        _ => None,
-    })
+    payload_helpers::payload_bool(p, key)
 }
 
 /// Best-effort conversion of a Qdrant payload map into a `serde_json::Value`
-/// so the frontend can show arbitrary keys. Only the common scalar kinds are
-/// preserved; nested structs / lists round-trip as JSON arrays/objects via
-/// recursion. Failures collapse to `Object(empty)`.
+/// so the frontend can show arbitrary keys. Nested `ListValue` / `StructValue`
+/// round-trip as JSON arrays / objects via recursion (RECURSION FIX,
+/// Gemini PR #6 review, lens.rs:719 — the previous implementation
+/// documented recursion in the doc-comment but actually collapsed nested
+/// kinds to `Null`).
 fn payload_to_json(p: HashMap<String, Value>) -> Option<serde_json::Value> {
-    use qdrant_client::qdrant::value::Kind;
-    let mut map = serde_json::Map::with_capacity(p.len());
-    for (k, v) in p.into_iter() {
-        if let Some(kind) = v.kind {
-            let jv = match kind {
-                Kind::NullValue(_) => serde_json::Value::Null,
-                Kind::BoolValue(b) => serde_json::Value::Bool(b),
-                Kind::IntegerValue(i) => serde_json::Value::Number(i.into()),
-                Kind::DoubleValue(d) => serde_json::Number::from_f64(d)
-                    .map(serde_json::Value::Number)
-                    .unwrap_or(serde_json::Value::Null),
-                Kind::StringValue(s) => serde_json::Value::String(s),
-                Kind::ListValue(_) | Kind::StructValue(_) => serde_json::Value::Null,
-            };
-            map.insert(k, jv);
-        }
-    }
-    Some(serde_json::Value::Object(map))
+    Some(payload_helpers::payload_to_json(p))
 }
 
 /// Token splitter — path-aware so `/Users/foo/bar.rs` yields
