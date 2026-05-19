@@ -1624,8 +1624,30 @@ pub async fn predict_next_actions(
             _ => None,
         })
         .context("active session payload is missing source_path")?;
+    // BUG FIX (empirical E2E discovery on main 2026-05-19): predict_next_actions
+    // was hardcoded to `parser::parse_session` (the Claude JSONL parser) for
+    // EVERY session, including Codex rollouts. The Claude parser silently
+    // succeeds with `turns.is_empty() == true` against Codex's
+    // `{timestamp,type,payload}` envelope, which collapsed predict's "active
+    // session has 0 turns" early-return path and returned "no predictions"
+    // for 100% of Codex sessions. Route via `source_agent` payload field —
+    // same heuristic as schema::infer_source_agent + the scan_root_routed
+    // canonical-path-and-content sniff. (Same routing bug also affects the
+    // per-neighbor parse below, fixed in step 3.)
+    let source_agent = payload
+        .get("source_agent")
+        .and_then(|v| v.kind.as_ref())
+        .and_then(|k| match k {
+            qdrant_client::qdrant::value::Kind::StringValue(s) => Some(s.clone()),
+            _ => None,
+        })
+        .unwrap_or_else(|| "claude_code".to_string());
     let validated = crate::sec::validate_session_path(StdPath::new(&source_path))?;
-    let active = crate::parser::parse_session(&validated)?;
+    let active = if source_agent == "codex" {
+        crate::codex_parser::parse_codex_session(&validated)?
+    } else {
+        crate::parser::parse_session(&validated)?
+    };
     if active.turns.is_empty() {
         return Ok(PredictionContext {
             source_session_id: session_id.to_string(),
@@ -1671,7 +1693,9 @@ pub async fn predict_next_actions(
         )
         .await?;
 
-    let mut neighbor_meta: Vec<(String, f32, String, String)> = Vec::new();
+    // Carry source_agent alongside the rest so we can route each neighbor's
+    // JSONL through the right parser (see source_agent fix in step 1 above).
+    let mut neighbor_meta: Vec<(String, f32, String, String, String)> = Vec::new();
     for p in res.result {
         let Some(sid) = payload_str(&p.payload, "session_id") else { continue };
         if sid == session_id {
@@ -1679,7 +1703,9 @@ pub async fn predict_next_actions(
         }
         let Some(src) = payload_str(&p.payload, "source_path") else { continue };
         let project = payload_str(&p.payload, "project_name").unwrap_or_default();
-        neighbor_meta.push((sid, p.score, src, project));
+        let agent =
+            payload_str(&p.payload, "source_agent").unwrap_or_else(|| "claude_code".to_string());
+        neighbor_meta.push((sid, p.score, src, project, agent));
         if neighbor_meta.len() as u64 >= neighbors {
             break;
         }
@@ -1699,17 +1725,25 @@ pub async fn predict_next_actions(
         .filter(|w| w.len() > 4)
         .collect();
 
-    for (nb_sid, sim_score, source, nb_project) in &neighbor_meta {
+    for (nb_sid, sim_score, source, nb_project, nb_agent) in &neighbor_meta {
         // SAFETY: neighbor source_path came from Qdrant payload — validate
         // it lives inside an allowed sandbox root before parsing the JSONL.
         let Ok(validated) = crate::sec::validate_session_path(StdPath::new(source)) else { continue };
         // P5 KG-02 — LRU memo keyed by (path, mtime). Cache hits avoid the
         // re-parse on repeat predict calls touching the same neighbours.
+        // BUG FIX (E2E discovery): route per neighbor's source_agent. Without
+        // this, Codex rollouts go through the Claude parser and return
+        // empty Sessions → predict skips them at `nb.turns.is_empty()`.
         let mtime = std::fs::metadata(&validated)
             .and_then(|m| m.modified())
             .unwrap_or(std::time::UNIX_EPOCH);
+        let nb_is_codex = nb_agent == "codex";
         let nb_arc = match PREDICT_PARSE_CACHE.get_or_parse(validated.clone(), mtime, |p| {
-            crate::parser::parse_session(p)
+            if nb_is_codex {
+                crate::codex_parser::parse_codex_session(p)
+            } else {
+                crate::parser::parse_session(p)
+            }
         }) {
             Ok(s) => s,
             Err(_) => continue,
