@@ -17,8 +17,21 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
+# Issue #5 — `devtools` enables WebKit Inspector in the WebView. It's on
+# by default so every normal developer command (`cargo build`,
+# `cargo run`, `npm run tauri dev`, `npm run tauri build`) keeps
+# Inspector available — no debugging friction.
+#
+# The only place Inspector is OFF is the *distribution build*:
+# `npm run tauri:dist` passes `--no-default-features`, producing a
+# `.dmg` that ships without Inspector. That's how `.dmg`s released to
+# users should be built (production hygiene + notarization-friendly).
+[features]
+default = ["devtools"]
+devtools = ["tauri/devtools"]
+
 [dependencies]
-tauri = { version = "2", features = ["tray-icon", "devtools"] }
+tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-opener = "2"
 # P8 — memex:// deep links route to one of the 5 WOW surfaces. The plugin
 # registers the scheme via Info.plist (macOS) and Manifest (Windows/Linux)
