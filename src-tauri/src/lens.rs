@@ -192,6 +192,14 @@ pub struct ScoreBreakdown {
 /// Recency decay scale in **seconds**. 30 days. exp_decay returns
 /// ~0.5 when |x − now| == scale, asymptotically 0 thereafter.
 pub const RECENCY_SCALE_SECONDS: f32 = 30.0 * 24.0 * 3600.0;
+/// Base timestamp for recency math (2024-01-01 00:00 UTC). Subtracted from
+/// both `payload.start_ts` and `now` inside the FormulaQuery so the
+/// resulting values fit comfortably in f32 precision (~16M for "1 year
+/// ago", far below the f32 7-digit mantissa floor). See lens_search_v2_on
+/// for the full explanation. Picking a fixed epoch (vs. e.g. the corpus's
+/// oldest session) keeps the formula deterministic across calls so cached
+/// query plans stay valid.
+pub const RECENCY_BASE_TS: f64 = 1_704_067_200.0; // 2024-01-01T00:00:00Z
 /// Static boost added when `has_errors == true`. Matches the spec value.
 pub const HAS_ERRORS_BOOST: f32 = 0.2;
 /// Per-prefetch candidate limit.
@@ -204,6 +212,11 @@ pub const MAX_LIMIT: u64 = 100;
 /// Returns `Err("empty query")` if `query_text` is whitespace-only, or
 /// `Err("no active lens")` when all six weights are ≤ 0. `limit` is clamped
 /// to `MAX_LIMIT`.
+///
+/// PERFORMANCE NOTE (Codex review on PR #6, lens.rs:318): by default the
+/// per-vector breakdown is **NOT** computed — the lens stays a true
+/// single-round-trip path. To populate `ScoreBreakdown.per_vector` for the
+/// WOW-3 contribution-bars surface, call [`lens_search_v2_with_breakdown`].
 pub async fn lens_search_v2(
     client: &Qdrant,
     embedder: &Embedder,
@@ -211,12 +224,28 @@ pub async fn lens_search_v2(
     weights: &LensWeights,
     limit: u64,
 ) -> Result<Vec<LensResult>> {
-    lens_search_v2_on(client, embedder, query_text, weights, limit, COLLECTION_V3).await
+    lens_search_v2_on(client, embedder, query_text, weights, limit, COLLECTION_V3, false).await
+}
+
+/// Same as [`lens_search_v2`] but additionally fans out per-vector queries
+/// to populate the WOW-3 contribution breakdown. Use only when the caller
+/// actually renders the breakdown — each active vector adds one Qdrant
+/// round-trip (executed in parallel via `futures::join_all`).
+pub async fn lens_search_v2_with_breakdown(
+    client: &Qdrant,
+    embedder: &Embedder,
+    query_text: &str,
+    weights: &LensWeights,
+    limit: u64,
+) -> Result<Vec<LensResult>> {
+    lens_search_v2_on(client, embedder, query_text, weights, limit, COLLECTION_V3, true).await
 }
 
 /// Same as [`lens_search_v2`] but accepts a custom collection name. Used by
 /// integration tests against throwaway collections so they don't trample the
-/// real `memex_sessions_v3` data.
+/// real `memex_sessions_v3` data. The `with_breakdown` flag controls whether
+/// the per-vector breakdown enrichment runs (opt-in; defaults to `false` in
+/// the public API).
 pub async fn lens_search_v2_on(
     client: &Qdrant,
     embedder: &Embedder,
@@ -224,6 +253,7 @@ pub async fn lens_search_v2_on(
     weights: &LensWeights,
     limit: u64,
     collection: &str,
+    with_breakdown: bool,
 ) -> Result<Vec<LensResult>> {
     if query_text.trim().is_empty() {
         return Err(anyhow!("empty query"));
@@ -309,13 +339,18 @@ pub async fn lens_search_v2_on(
         })
         .collect();
 
-    // Per-vector breakdown for WOW-3 (best-effort — failures don't break the
-    // primary result set).
-    if !results.is_empty() {
+    // Per-vector breakdown for WOW-3 (opt-in via `with_breakdown`; failures
+    // don't break the primary result set). PERFORMANCE NOTE: even when
+    // requested, the per-vector queries now reuse `qvec_dense` and
+    // `qvec_sparse` from the top-level call (Gemini review on PR #6 about
+    // `populate_breakdowns` re-embedding the query and running each
+    // per-vector probe sequentially — both fixed in `populate_breakdowns`
+    // proper).
+    if with_breakdown && !results.is_empty() {
         if let Err(e) = populate_breakdowns(
             client,
-            embedder,
-            query_text,
+            &qvec_dense,
+            &qvec_sparse,
             weights,
             &active_dense,
             &sparse_specs,
@@ -327,6 +362,11 @@ pub async fn lens_search_v2_on(
             eprintln!("[lens] breakdown enrichment skipped: {e:#}");
         }
     }
+    // Avoid unused-warning on embedder when breakdown is off — the legacy
+    // signature carries it for future expansion (e.g. on-the-fly query
+    // rewriting). Keep a no-op reference so removing the param later is a
+    // single-line change.
+    let _ = embedder;
 
     Ok(results)
 }
@@ -515,13 +555,38 @@ fn build_formula(
     //      the present moment. Without an explicit target=now, all reasonably
     //      recent timestamps land equidistant from epoch and produce the same
     //      decay value, defeating the recency boost entirely.
+    //   3. PRECISION FIX (Gemini review on PR #6, lens.rs:521): Qdrant binds
+    //      `Expression::constant(...)` as `f32`. Current Unix seconds is on
+    //      the order of 1.7e9, which is past f32's 7-digit mantissa — so
+    //      `f32(now_secs - start_ts) ≈ 0` for any sane session pair (the
+    //      precision floor is ~128-256 s at this magnitude). The previous
+    //      implementation passed `now_secs as f32` directly and the
+    //      `payload.start_ts` variable was also coerced to f32 server-side,
+    //      so every recent session collapsed to the same decay value and
+    //      the recency boost stopped differentiating sessions (this is the
+    //      root cause behind the `#[ignore = "P2-RECENCY-CALIBRATION"]`
+    //      integration test). The fix is to subtract a fixed epoch offset
+    //      (`RECENCY_BASE_TS`) from BOTH operands inside the formula so the
+    //      values we end up casting to f32 are in the ~10⁷-10⁸ range, well
+    //      within f32 precision.
     let now_secs = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs() as f64)
         .unwrap_or(0.0);
+    // SIMPLIFICATION (Gemini PR #11 review, lens.rs:586): `target` accepts
+    // any Expression, so we can pass the precomputed constant directly
+    // instead of wrapping it in a 2-term sum (`+ 0`) just to coerce it.
+    // The `var - base` rebase still needs `sum_with` because there's no
+    // single-arg subtract on the variable side.
+    let neg_base = Expression::constant(-(RECENCY_BASE_TS as f32));
+    let rebased_start_ts = Expression::sum_with([
+        Expression::variable("payload.start_ts"),
+        neg_base,
+    ]);
+    let rebased_now = Expression::constant((now_secs - RECENCY_BASE_TS) as f32);
     let recency = Expression::exp_decay(
-        DecayParamsExpressionBuilder::new(Expression::variable("payload.start_ts"))
-            .target(Expression::constant(now_secs as f32))
+        DecayParamsExpressionBuilder::new(rebased_start_ts)
+            .target(rebased_now)
             .scale(RECENCY_SCALE_SECONDS)
             .build(),
     );
@@ -574,28 +639,23 @@ fn build_rrf(_weights: &LensWeights, dense: &[DenseSpec], sparse: &[SparseSpec])
 /// the payload `start_ts` (so it stays self-consistent with the formula).
 async fn populate_breakdowns(
     client: &Qdrant,
-    _embedder: &Embedder,
-    _query_text: &str,
+    qvec_dense: &[f32],
+    qvec_sparse: &SparseVector,
     _weights: &LensWeights,
     dense: &[DenseSpec],
     sparse: &[SparseSpec],
     results: &mut [LensResult],
     collection: &str,
 ) -> Result<()> {
-    // We re-issue the prefetch queries individually with the SAME query
-    // vectors that the formula path used. Cheap because:
-    //   - PREFETCH_LIMIT (50) covers > our top-`limit` (≤100) → if the
-    //     session made the formula's top-N, it should also make the per-
-    //     vector top-50. Misses are filled with `0.0` so the bar collapses.
-    let qvec = match _embedder.embed(vec![_query_text.to_string()]) {
-        Ok(mut v) => v.pop().unwrap_or_default(),
-        Err(_) => Vec::new(),
-    };
-    if qvec.is_empty() {
+    // PERF FIX (Gemini review on PR #6, lens.rs:597 + lens.rs:686): reuse the
+    // top-level call's query embedding + sparse vector instead of re-running
+    // an ONNX inference + tokenizer pass. Also: fan all per-vector queries
+    // out in parallel via `futures::future::join_all` so the breakdown
+    // round-trip cost stays ~1× the slowest single probe rather than the
+    // sum of all probes (was O(n) sequential).
+    if qvec_dense.is_empty() {
         return Ok(());
     }
-    let qsparse = text_to_sparse(_query_text);
-
     let params = search_params_with_quantization();
     // Index sessions in the result set for O(1) lookup.
     let mut sid_to_idx: HashMap<String, usize> = HashMap::new();
@@ -604,6 +664,14 @@ async fn populate_breakdowns(
     }
 
     // Recency factor — compute locally from payload.start_ts.
+    // CORRECTNESS FIX (Gemini review on PR #6, lens.rs:619): the actual
+    // server-side decay is `Expression::exp_decay`, which Qdrant defines as
+    // a **linear** exponent: `f(x) = midpoint^(|x - target|/scale)` with
+    // `midpoint=0.5` (see RECENCY_SCALE_SECONDS comment + Qdrant 1.18 docs
+    // §FormulaQuery — exp_decay). The previous breakdown used `0.5^ratio²`
+    // (a gauss_decay shape) so the reported breakdown contribution didn't
+    // match what the server actually multiplied into the score. Match the
+    // shapes here.
     let now_ts: i64 = chrono::Utc::now().timestamp();
     for r in results.iter_mut() {
         let start_ts: i64 = r
@@ -613,17 +681,17 @@ async fn populate_breakdowns(
             .and_then(|v| v.as_i64())
             .unwrap_or(0);
         let dt = (now_ts - start_ts).abs() as f32;
-        // Same shape as Qdrant exp_decay with target=0, scale=30d, midpoint=0.5.
-        // f(x) = 0.5 ^ ((|x - target| / scale)^2)  — Qdrant's exp_decay.
         let ratio = dt / RECENCY_SCALE_SECONDS;
-        r.score_breakdown.recency_factor = 0.5_f32.powf(ratio * ratio);
+        r.score_breakdown.recency_factor = 0.5_f32.powf(ratio);
     }
 
+    // Build the per-vector request futures up front, then `join_all` them.
+    let mut dense_futures = Vec::with_capacity(dense.len());
     for spec in dense {
         let q: Query = if spec.name == "content_late" {
-            Query::new_nearest(VectorInput::new_multi(vec![qvec.clone()]))
+            Query::new_nearest(VectorInput::new_multi(vec![qvec_dense.to_vec()]))
         } else {
-            Query::new_nearest(VectorInput::new_dense(qvec.clone()))
+            Query::new_nearest(VectorInput::new_dense(qvec_dense.to_vec()))
         };
         let mut req = QueryPointsBuilder::new(collection.to_string())
             .query(q)
@@ -634,53 +702,67 @@ async fn populate_breakdowns(
         if spec.has_errors_filter {
             req = req.filter(Filter::must([Condition::matches("has_errors", true)]));
         }
-        match client.query(req).await {
-            Ok(resp) => {
-                for p in resp.result {
-                    if let Some(sid) = payload_str(&p.payload, "session_id") {
-                        if let Some(&i) = sid_to_idx.get(&sid) {
-                            results[i]
-                                .score_breakdown
-                                .per_vector
-                                .insert(spec.name.to_string(), p.score);
-                        }
-                    }
-                }
-            }
-            Err(e) => {
-                eprintln!("[lens] breakdown query failed for {}: {e:#}", spec.name);
-            }
-        }
+        let name = spec.name.to_string();
+        let client_ref = client; // captured by reference via the async block
+        dense_futures.push(async move {
+            let resp = client_ref.query(req).await;
+            (name, resp)
+        });
     }
-
+    let mut sparse_futures = Vec::with_capacity(sparse.len());
     for spec in sparse {
-        if qsparse.indices.is_empty() {
+        if qvec_sparse.indices.is_empty() {
             continue;
         }
         let q = Query::new_nearest(VectorInput::new_sparse(
-            qsparse.indices.clone(),
-            qsparse.values.clone(),
+            qvec_sparse.indices.clone(),
+            qvec_sparse.values.clone(),
         ));
         let req = QueryPointsBuilder::new(collection.to_string())
             .query(q)
             .using(spec.name.to_string())
             .limit(PREFETCH_LIMIT * 2)
             .with_payload(true);
-        match client.query(req).await {
+        let name = spec.name.to_string();
+        let client_ref = client;
+        sparse_futures.push(async move {
+            let resp = client_ref.query(req).await;
+            (name, resp)
+        });
+    }
+
+    let dense_results = futures::future::join_all(dense_futures).await;
+    let sparse_results = futures::future::join_all(sparse_futures).await;
+
+    for (name, resp) in dense_results {
+        match resp {
             Ok(resp) => {
                 for p in resp.result {
                     if let Some(sid) = payload_str(&p.payload, "session_id") {
                         if let Some(&i) = sid_to_idx.get(&sid) {
-                            results[i]
-                                .score_breakdown
-                                .per_vector
-                                .insert(spec.name.to_string(), p.score);
+                            results[i].score_breakdown.per_vector.insert(name.clone(), p.score);
                         }
                     }
                 }
             }
             Err(e) => {
-                eprintln!("[lens] sparse breakdown query failed for {}: {e:#}", spec.name);
+                eprintln!("[lens] breakdown query failed for {name}: {e:#}");
+            }
+        }
+    }
+    for (name, resp) in sparse_results {
+        match resp {
+            Ok(resp) => {
+                for p in resp.result {
+                    if let Some(sid) = payload_str(&p.payload, "session_id") {
+                        if let Some(&i) = sid_to_idx.get(&sid) {
+                            results[i].score_breakdown.per_vector.insert(name.clone(), p.score);
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("[lens] sparse breakdown query failed for {name}: {e:#}");
             }
         }
     }
@@ -689,39 +771,25 @@ async fn populate_breakdowns(
 }
 
 // ---------------------------------------------------------------------------
-// Helpers
+// Helpers — payload extraction lifted into crate::payload (Gemini PR #4
+// + PR #6 reviews). Local thin wrappers preserve the lens.rs return-shape
+// contracts (Option vs Option-around-map) so callers don't move.
 // ---------------------------------------------------------------------------
 
+use crate::payload as payload_helpers;
+
 fn payload_bool(p: &HashMap<String, Value>, key: &str) -> Option<bool> {
-    p.get(key).and_then(|v| v.kind.as_ref()).and_then(|k| match k {
-        qdrant_client::qdrant::value::Kind::BoolValue(b) => Some(*b),
-        _ => None,
-    })
+    payload_helpers::payload_bool(p, key)
 }
 
 /// Best-effort conversion of a Qdrant payload map into a `serde_json::Value`
-/// so the frontend can show arbitrary keys. Only the common scalar kinds are
-/// preserved; nested structs / lists round-trip as JSON arrays/objects via
-/// recursion. Failures collapse to `Object(empty)`.
+/// so the frontend can show arbitrary keys. Nested `ListValue` / `StructValue`
+/// round-trip as JSON arrays / objects via recursion (RECURSION FIX,
+/// Gemini PR #6 review, lens.rs:719 — the previous implementation
+/// documented recursion in the doc-comment but actually collapsed nested
+/// kinds to `Null`).
 fn payload_to_json(p: HashMap<String, Value>) -> Option<serde_json::Value> {
-    use qdrant_client::qdrant::value::Kind;
-    let mut map = serde_json::Map::with_capacity(p.len());
-    for (k, v) in p.into_iter() {
-        if let Some(kind) = v.kind {
-            let jv = match kind {
-                Kind::NullValue(_) => serde_json::Value::Null,
-                Kind::BoolValue(b) => serde_json::Value::Bool(b),
-                Kind::IntegerValue(i) => serde_json::Value::Number(i.into()),
-                Kind::DoubleValue(d) => serde_json::Number::from_f64(d)
-                    .map(serde_json::Value::Number)
-                    .unwrap_or(serde_json::Value::Null),
-                Kind::StringValue(s) => serde_json::Value::String(s),
-                Kind::ListValue(_) | Kind::StructValue(_) => serde_json::Value::Null,
-            };
-            map.insert(k, jv);
-        }
-    }
-    Some(serde_json::Value::Object(map))
+    Some(payload_helpers::payload_to_json(p))
 }
 
 /// Token splitter — path-aware so `/Users/foo/bar.rs` yields
@@ -741,16 +809,31 @@ fn tokenize_for_sparse(text: &str) -> Vec<String> {
 
 /// Deterministic 32-bit hash for a token, suitable for sparse-vector indices.
 ///
-/// FxHash would be ideal but adds a dep — we use stdlib `DefaultHasher` here.
-/// IDF on the server side dampens any natural collision skew.
+/// We use **FNV-1a** (Fowler-Noll-Vo 32-bit). This is dead-simple, no-dep,
+/// and — critically — its bytes-in/bytes-out behavior is fixed by the FNV
+/// spec, so it is portable across Rust compiler versions, target architectures,
+/// and host endianness. The original code used `std::collections::hash_map::DefaultHasher`,
+/// whose output is **explicitly not stable** across stdlib versions (Rust
+/// changelog notes for SipHash and the eventual replacement). That meant a
+/// toolchain upgrade could silently invalidate every sparse-vector index in
+/// the live `memex_sessions_v3` collection, returning empty/wrong results
+/// until a full reindex. FNV-1a eliminates that drift permanently.
+///
+/// IDF on the server side dampens any natural collision skew, and 31 bits
+/// of output space gives ~2 billion buckets — plenty for the token
+/// vocabularies we ever see (Bash, Edit, Read, … + path segments).
 fn hash_token(tok: &str) -> u32 {
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
-    let mut h = DefaultHasher::new();
-    tok.hash(&mut h);
-    // Map the 64-bit hash into 31 bits (avoid the sign bit collision with
-    // wire-protocol uint32 representations on some platforms).
-    (h.finish() as u32) & 0x7FFF_FFFF
+    // FNV-1a 32-bit constants (RFC-style; identical to the public reference).
+    const FNV_OFFSET: u32 = 0x811c9dc5;
+    const FNV_PRIME: u32 = 0x01000193;
+    let mut h: u32 = FNV_OFFSET;
+    for b in tok.as_bytes() {
+        h ^= *b as u32;
+        h = h.wrapping_mul(FNV_PRIME);
+    }
+    // Map into 31 bits — avoid the sign bit collision with wire-protocol
+    // uint32 representations on some platforms.
+    h & 0x7FFF_FFFF
 }
 
 /// Convert a `LensResult` into the legacy `SearchHit` shape consumed by the

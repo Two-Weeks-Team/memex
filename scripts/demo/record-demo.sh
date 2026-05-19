@@ -39,10 +39,17 @@ info() { printf "  ${D}%s${X}\n" "$1"; }
 preflight() {
   step "Pre-flight (Qdrant · fastembed · corpus)"
 
-  if ! command -v docker >/dev/null 2>&1; then
-    err "docker not in PATH"
-    return 1
-  fi
+  # ROBUSTNESS (Gemini PR #8 review, record-demo.sh:45): check ALL the
+  # commands we actually use, not just docker. The Qdrant version probe
+  # below (line ~63) needs curl + python3, and if either is missing we'd
+  # silently get a "?" version and skip the check. Fail fast with a clear
+  # message instead.
+  for cmd in docker curl python3; do
+    if ! command -v "$cmd" >/dev/null 2>&1; then
+      err "$cmd not in PATH"
+      return 1
+    fi
+  done
 
   if docker ps --filter 'name=memex-qdrant' --format '{{.Status}}' | grep -q '^Up'; then
     ok "Qdrant container memex-qdrant Up"
@@ -89,8 +96,16 @@ preflight() {
     warn "~/.codex/sessions missing — KH-01 multi-agent demo will be Claude-only"
   fi
 
-  local dmg
-  dmg=$(find src-tauri/target/release/bundle/dmg -name "Memex_*.dmg" 2>/dev/null | head -1)
+  # ROBUSTNESS (Codex PR #8 review, record-demo.sh:93): with `set -euo
+  # pipefail`, a missing target/release/bundle/dmg directory makes the
+  # `find` pipe exit non-zero and aborts the entire script before we can
+  # print the "no DMG bundle" warning. Guard the existence of the parent
+  # directory first; on a fresh checkout (no tauri build yet) we now emit
+  # the warning and continue rather than aborting --dry-run.
+  local dmg=""
+  if [[ -d src-tauri/target/release/bundle/dmg ]]; then
+    dmg=$(find src-tauri/target/release/bundle/dmg -name "Memex_*.dmg" 2>/dev/null | head -1 || true)
+  fi
   if [[ -n "$dmg" ]]; then
     ok "DMG built: $dmg ($(du -h "$dmg" | cut -f1))"
   else
@@ -154,8 +169,11 @@ cue_track() {
       sleep 0.2
     done
     printf "${G}▶${X} %s\n" "${cues[$i]}"
-    # bell at climax
-    if (( target == 102 )); then printf "\a"; fi
+    # Bell at start (1:42 = 102s) AND end (1:54 = 114s) of the 12s
+    # climax silence. Gemini PR #8 review: the operator needs the second
+    # bell to know when to resume Act III action (Recall banner slide-in)
+    # without watching the clock while OBS is recording.
+    if (( target == 102 || target == 114 )); then printf "\a"; fi
   done
 
   printf "${B}─── recording window closed (3:00 elapsed) ───${X}\n"

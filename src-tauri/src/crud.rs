@@ -101,7 +101,12 @@ pub async fn dual_get_session_payload(
     };
 
     // 1) Try v3 (only if it exists, so a fresh DB doesn't error on lookup).
-    if client.collection_exists(COLLECTION_V3).await.unwrap_or(false) {
+    // CORRECTNESS FIX (Codex/Gemini review on PR #3, crud.rs:104+): the
+    // previous `unwrap_or(false)` collapsed transient Qdrant errors
+    // (connectivity, auth, server panic) to "collection does not exist",
+    // which is silently the wrong answer — we'd return partial / `None`
+    // data instead of surfacing the outage. Propagate the error with `?`.
+    if client.collection_exists(COLLECTION_V3).await? {
         let res = client
             .get_points(GetPointsBuilder::new(COLLECTION_V3, vec![pid.clone()]).with_payload(true))
             .await?;
@@ -109,12 +114,8 @@ pub async fn dual_get_session_payload(
             return Ok(Some(p.payload));
         }
     }
-    // 2) Fall back to v2.
-    if client
-        .collection_exists(COLLECTION_V2)
-        .await
-        .unwrap_or(false)
-    {
+    // 2) Fall back to v2 (propagate errors per the same rationale above).
+    if client.collection_exists(COLLECTION_V2).await? {
         let res = client
             .get_points(GetPointsBuilder::new(COLLECTION_V2, vec![pid]).with_payload(true))
             .await?;
@@ -138,7 +139,12 @@ pub async fn dual_get_points(
     let mut by_id: HashMap<String, RetrievedPoint> = HashMap::new();
     let mut missing: Vec<PointId> = point_ids.clone();
 
-    if client.collection_exists(COLLECTION_V3).await.unwrap_or(false) {
+    // CORRECTNESS FIX (Codex/Gemini review on PR #3, crud.rs:104+): the
+    // previous `unwrap_or(false)` collapsed transient Qdrant errors
+    // (connectivity, auth, server panic) to "collection does not exist",
+    // which is silently the wrong answer — we'd return partial / `None`
+    // data instead of surfacing the outage. Propagate the error with `?`.
+    if client.collection_exists(COLLECTION_V3).await? {
         let v3 = client
             .get_points(
                 GetPointsBuilder::new(COLLECTION_V3, point_ids.clone()).with_payload(true),
@@ -157,10 +163,7 @@ pub async fn dual_get_points(
     }
 
     if !missing.is_empty()
-        && client
-            .collection_exists(COLLECTION_V2)
-            .await
-            .unwrap_or(false)
+        && client.collection_exists(COLLECTION_V2).await?
     {
         let v2 = client
             .get_points(GetPointsBuilder::new(COLLECTION_V2, missing).with_payload(true))
@@ -264,6 +267,50 @@ pub struct MigrationReport {
 /// accepted by Qdrant (the vector slot just stays empty for that point).
 pub async fn migrate_v2_to_v3(client: &Qdrant) -> Result<MigrationReport> {
     migrate_named(client, COLLECTION_V2, COLLECTION_V3).await
+}
+
+/// Auto-migration wrapper used by `AppState::qdrant()` on startup. Returns:
+/// - `Ok(None)` when no migration is needed
+/// - `Ok(Some(report))` when a migration ran
+/// - `Err(_)` on transient Qdrant failure (caller logs + swallows)
+///
+/// SAFETY CONDITION (Codex P1 review on PR #11, crud.rs:298): we ONLY
+/// migrate when v3 is **completely empty**. The previous condition
+/// (`v3_count >= v2_count`) was too permissive — if v3 was partially
+/// populated by an aborted earlier scan (count between 1 and v2_count - 1)
+/// we'd still run migrate_v2_to_v3, which scrolls v2 and upserts every
+/// point carrying ONLY the dense vectors stored in v2. Overlapping
+/// point_ids in v3 would have their v3-only data clobbered:
+///   - `content_late` multivector (KB-01 late-interaction MaxSim)
+///   - `path_sparse` + `tool_sparse` (KB-02 BM25 IDF)
+///   - Enriched payload fields populated by `enrich.rs` (intent, arc,
+///     outcome, topic, entities)
+///
+/// Skipping when `v3_count > 0` means: the typical "partial state"
+/// recovery path becomes the user running `memex scan --index` against
+/// the live corpus, which writes the full v3 shape from scratch — the
+/// right thing to do. They can also explicitly delete v3 to force
+/// re-migration if v2 is genuinely the only source of truth.
+pub async fn migrate_v2_to_v3_if_needed(client: &Qdrant) -> Result<Option<MigrationReport>> {
+    let v2_exists = client
+        .collection_exists(COLLECTION_V2)
+        .await
+        .with_context(|| format!("collection_exists({COLLECTION_V2}) probe"))?;
+    if !v2_exists {
+        return Ok(None);
+    }
+    let v2_count = count_points(client, COLLECTION_V2).await.unwrap_or(0);
+    if v2_count == 0 {
+        return Ok(None);
+    }
+    let v3_count = count_points(client, COLLECTION_V3).await.unwrap_or(0);
+    if v3_count > 0 {
+        // v3 has data — even partial. Refuse to overwrite v3-only fields.
+        // See safety-condition docstring above.
+        return Ok(None);
+    }
+    let report = migrate_v2_to_v3(client).await?;
+    Ok(Some(report))
 }
 
 /// Test hook — migrate between arbitrary named collections.

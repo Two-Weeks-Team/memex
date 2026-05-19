@@ -243,7 +243,7 @@ async fn it_lens_formula_returns_top_k_with_breakdown() {
 
     let mut w = LensWeights::default();
     w.content_late = 0.0; // single-row multivec score is unstable for this test
-    let res = lens::lens_search_v2_on(&cli, embedder(), "rust lib indexer", &w, 5, &name)
+    let res = lens::lens_search_v2_on(&cli, embedder(), "rust lib indexer", &w, 5, &name, true)
         .await
         .expect("lens_search_v2_on");
     assert!(!res.is_empty(), "formula returned 0 hits");
@@ -294,7 +294,7 @@ async fn it_lens_formula_has_errors_filter_on_error_pf() {
         diversity: None,
         fusion: FusionMode::Formula,
     };
-    let res = lens::lens_search_v2_on(&cli, embedder(), "lib rs error", &w, 5, &name)
+    let res = lens::lens_search_v2_on(&cli, embedder(), "lib rs error", &w, 5, &name, true)
         .await
         .expect("lens_search_v2_on err filter");
     // The error prefetch is filtered to has_errors=true, so only "err-dirty"
@@ -310,19 +310,18 @@ async fn it_lens_formula_has_errors_filter_on_error_pf() {
 // 3. KA-01 — exp_decay on start_ts gives more-recent sessions a bonus.
 // ---------------------------------------------------------------------------
 
-// TODO P2-RECENCY-CALIBRATION: Qdrant 1.18 exp_decay with `payload.start_ts`
-// + `target=now()` + `scale=30d` is returning ~1.0 for both old and recent
-// sessions in synthetic tests, defeating the recency boost. The formula
-// shape compiles and runs server-side (no errors), but the decay value
-// doesn't differentiate. Needs:
-//   1. Empirical sweep of midpoint/scale/exponent to find the right curve
-//   2. Possibly switch from exp_decay to lin_decay or gauss_decay
-//   3. Live-corpus validation (vs synthetic timestamps) where real session
-//      `start_ts` values are spread across months
-// Marked `#[ignore]` to unblock D-13 critical path; recency boost is a
-// quality refinement, not a functional gate.
+// P2-RECENCY-CALIBRATION resolution attempt (Gemini PR #6 review): the
+// previous TODO blamed exp_decay calibration, but the root cause is
+// f32 precision loss when `Expression::constant(now_secs)` and
+// `payload.start_ts` (~1.7e9 Unix seconds today) collide with f32's
+// 7-digit mantissa. lens.rs::build_formula now subtracts `RECENCY_BASE_TS`
+// (2024-01-01) from both operands before passing them to the formula
+// so the deltas stay in the precision-safe ~10⁷ range. The test
+// remains `#[ignore]` until we re-run against the live corpus
+// (D-13 critical path constraint); flip back to active when wiring up
+// the demo if you want a regression gate.
 #[tokio::test]
-#[ignore = "P2-RECENCY-CALIBRATION: exp_decay tuning, see TODO above"]
+#[ignore = "P2-RECENCY-CALIBRATION: f32-precision rebase landed; re-enable after live-corpus verification"]
 async fn it_lens_formula_recency_boosts_recent_session() {
     if skip_if_no_qdrant() {
         return;
@@ -354,7 +353,7 @@ async fn it_lens_formula_recency_boosts_recent_session() {
         diversity: None,
         fusion: FusionMode::Formula,
     };
-    let res = lens::lens_search_v2_on(&cli, embedder(), "src lib", &w, 5, &name)
+    let res = lens::lens_search_v2_on(&cli, embedder(), "src lib", &w, 5, &name, true)
         .await
         .expect("lens_search_v2_on recency");
     let top = res.first().expect("at least one result");
@@ -397,7 +396,7 @@ async fn it_lens_rrf_returns_results() {
         diversity: None,
         fusion: FusionMode::Rrf, // ← KA-05
     };
-    let res = lens::lens_search_v2_on(&cli, embedder(), "src lib", &w, 5, &name)
+    let res = lens::lens_search_v2_on(&cli, embedder(), "src lib", &w, 5, &name, true)
         .await
         .expect("lens_search_v2_on RRF");
     assert!(!res.is_empty(), "RRF returned 0 hits");
@@ -442,7 +441,7 @@ async fn it_lens_mmr_diversifies_content() {
         diversity: Some(0.9),
         fusion: FusionMode::Formula,
     };
-    let res = lens::lens_search_v2_on(&cli, embedder(), "src lib code", &w, 4, &name)
+    let res = lens::lens_search_v2_on(&cli, embedder(), "src lib code", &w, 4, &name, true)
         .await
         .expect("lens_search_v2_on MMR");
     let sids: Vec<&str> = res.iter().map(|r| r.session_id.as_str()).collect();
@@ -456,7 +455,7 @@ async fn it_lens_mmr_diversifies_content() {
     // skipped if Qdrant ranks deterministically tied scores in a way that
     // happens to surface the outlier — that's fine for the MMR claim above.)
     w.diversity = None;
-    let _baseline = lens::lens_search_v2_on(&cli, embedder(), "src lib code", &w, 4, &name)
+    let _baseline = lens::lens_search_v2_on(&cli, embedder(), "src lib code", &w, 4, &name, true)
         .await
         .expect("lens_search_v2_on baseline");
 
@@ -514,7 +513,7 @@ async fn it_lens_sparse_path_token_match() {
         diversity: None,
         fusion: FusionMode::Formula,
     };
-    let res = lens::lens_search_v2_on(&cli, embedder(), "indexer", &w, 5, &name)
+    let res = lens::lens_search_v2_on(&cli, embedder(), "indexer", &w, 5, &name, true)
         .await
         .expect("lens_search_v2_on sparse");
     let top = res.first().expect("at least one result");
@@ -540,7 +539,7 @@ async fn it_lens_empty_query_errors() {
 
     // empty query → Err("empty query")
     let w = LensWeights::default();
-    let err = lens::lens_search_v2_on(&cli, embedder(), "   ", &w, 5, &name)
+    let err = lens::lens_search_v2_on(&cli, embedder(), "   ", &w, 5, &name, true)
         .await
         .expect_err("expected empty-query error");
     assert!(err.to_string().contains("empty query"), "wrong err: {err}");
@@ -556,7 +555,7 @@ async fn it_lens_empty_query_errors() {
         diversity: None,
         fusion: FusionMode::Formula,
     };
-    let err = lens::lens_search_v2_on(&cli, embedder(), "non-empty", &w_zero, 5, &name)
+    let err = lens::lens_search_v2_on(&cli, embedder(), "non-empty", &w_zero, 5, &name, true)
         .await
         .expect_err("expected no-active-lens error");
     assert!(err.to_string().contains("no active lens"), "wrong err: {err}");

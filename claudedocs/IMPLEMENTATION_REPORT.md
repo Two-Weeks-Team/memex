@@ -159,7 +159,7 @@ Highlights:
 ## Demo readiness (P7)
 
 ### Code/script artifacts (this PR)
-- `claudedocs/phases/phase-7-demo-production/video-script.md` — 18-shot, 180s, climax silence at 1:42–1:58
+- `claudedocs/phases/phase-7-demo-production/video-script.md` — 18-shot, 180s, climax silence at 1:42–1:54 (12s, matching AC-7.1.2)
 - `scripts/demo/record-demo.sh` — pre-flight + cue track + ffmpeg post-process (`--dry-run` / `--cues` / `--post FILE.mov`)
 - `claudedocs/IMPLEMENTATION_REPORT.md` — this document
 

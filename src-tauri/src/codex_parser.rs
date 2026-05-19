@@ -58,7 +58,6 @@
 //! transform that `parser.rs::project_name_from_cwd` does — that lives in
 //! the *filename* of Claude session directories, not in Codex payloads.
 
-use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
@@ -93,7 +92,12 @@ pub fn parse_codex_session(path: &Path) -> Result<Session> {
     // function_call_id -> (tool_name, input)  — populated from function_call
     // lines so we can pair the subsequent function_call_output with its
     // originator.
-    let mut pending_calls: HashMap<String, (String, Value)> = HashMap::new();
+    // QUALITY FIX (Gemini review on PR #5, codex_parser.rs:96): the previous
+    // `pending_calls` HashMap was populated on `function_call` and cleared on
+    // `function_call_output` but its contents were never read — the
+    // attach-to-owning-assistant logic in `handle_function_call_output` looks
+    // directly at `session.turns` (now fixed in this PR to scan ALL assistant
+    // turns, not just the last one — see B7). Removed entirely.
     // session_meta seen flag — exactly one allowed; missing → Err.
     let mut meta_seen = false;
     // user_msg / assistant_msg counts.
@@ -146,7 +150,7 @@ pub fn parse_codex_session(path: &Path) -> Result<Session> {
                     );
                 }
                 let s = session.as_mut().unwrap();
-                handle_response_item(s, &obj, line_ts, &mut pending_calls, &mut counts);
+                handle_response_item(s, &obj, line_ts, &mut counts);
             }
             // event_msg, turn_context, etc. — not lifted into Turn/ToolCall.
             // We still let their timestamps influence start/end bounds (handled
@@ -287,7 +291,6 @@ fn handle_response_item(
     session: &mut Session,
     obj: &Value,
     line_ts: Option<DateTime<Utc>>,
-    pending_calls: &mut HashMap<String, (String, Value)>,
     counts: &mut EventCounts,
 ) {
     let payload = match obj.get("payload") {
@@ -349,7 +352,6 @@ fn handle_response_item(
                 .and_then(Value::as_str)
                 .and_then(|s| serde_json::from_str::<Value>(s).ok())
                 .unwrap_or(Value::Null);
-            pending_calls.insert(call_id.clone(), (name.clone(), input.clone()));
 
             // Attach to the most recent assistant Turn — create a stub Turn
             // if none exists yet (rare but defensive).
@@ -402,15 +404,24 @@ fn handle_response_item(
             // immediately following the assistant Turn that owns the call.
             // This keeps the existing `parser::Turn` invariants (results on
             // user-role turns) without requiring lookahead.
+            // CORRECTNESS FIX (Codex review on PR #5, codex_parser.rs:411):
+            // search the FULL assistant-turn list for the owner of this
+            // call_id rather than only the most recent assistant turn. The
+            // previous implementation silently dropped tool results when
+            // Codex emitted any assistant turn between the original call
+            // and its output (interleaved tool flows, chained model passes,
+            // etc.), corrupting downstream error flags + tool-result-derived
+            // signals.
             let assistant_idx = session
                 .turns
                 .iter()
-                .rposition(|t| t.role == TurnRole::Assistant);
-            let owns_call =
-                assistant_idx.map(|i| session.turns[i].tool_calls.iter().any(|tc| tc.id == call_id));
-            if owns_call == Some(true) {
-                // Look for a User Turn after the assistant; create one if missing.
-                let assistant_i = assistant_idx.unwrap();
+                .rposition(|t| {
+                    t.role == TurnRole::Assistant
+                        && t.tool_calls.iter().any(|tc| tc.id == call_id)
+                });
+            if let Some(assistant_i) = assistant_idx {
+                let owns_call = Some(true);
+                let _ = owns_call; // preserve original control-flow shape
                 let user_idx_after = session
                     .turns
                     .iter()
@@ -443,8 +454,6 @@ fn handle_response_item(
                     is_error,
                 });
             }
-            // Drop the pending entry; we won't need it again.
-            pending_calls.remove(&call_id);
         }
         // "reasoning" / encrypted thinking — not lifted into Turns.
         _ => {}
