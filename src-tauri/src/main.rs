@@ -6,6 +6,7 @@ use std::process::ExitCode;
 
 const CLI_SUBCOMMANDS: &[&str] = &[
     "scan", "search", "lens", "mix", "topology", "recall", "predict", "snapshot",
+    "mcp", "install-mcp",
     "help", "--help", "-h",
 ];
 
@@ -25,6 +26,20 @@ fn main() -> ExitCode {
     if !is_cli_invocation() {
         if let Ok(home) = env::var("HOME") {
             let _ = env::set_current_dir(&home);
+        }
+    }
+
+    // fastembed → onnxruntime defaults to using every available CPU core,
+    // which on a fresh-corpus warm-up (1 900+ legacy transcripts) pegs
+    // every core at 100 % and turns the fan into a jet engine. Cap the
+    // intra-op thread pool so the user's machine stays usable. The user
+    // can override via `OMP_NUM_THREADS=...` if they want the old behavior.
+    for var in ["OMP_NUM_THREADS", "ORT_INTRA_OP_NUM_THREADS", "ORT_NUM_THREADS"] {
+        if env::var_os(var).is_none() {
+            // SAFETY: called before any threads are spawned (main thread,
+            // before Tauri runtime / fastembed init). Modifying the env
+            // here is the only reliable way to influence the C++ runtime.
+            unsafe { env::set_var(var, "2") };
         }
     }
 

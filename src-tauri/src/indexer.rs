@@ -116,11 +116,11 @@ fn default_fastembed_cache_dir() -> std::path::PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
     #[cfg(target_os = "macos")]
     {
-        return PathBuf::from(home)
+        PathBuf::from(home)
             .join("Library")
             .join("Caches")
             .join("dev.sgwannabe.memex")
-            .join("fastembed");
+            .join("fastembed")
     }
     #[cfg(not(target_os = "macos"))]
     {
@@ -1460,8 +1460,7 @@ fn compute_insights(
             project_b: Some(pb.clone()),
             similarity: sim,
             message: format!(
-                "‘{}’ and ‘{}’ have semantically similar sessions (avg sim {:.2}) but no bridge in the MST — a potential unmade connection.",
-                pa, pb, sim
+                "‘{pa}’ and ‘{pb}’ have semantically similar sessions (avg sim {sim:.2}) but no bridge in the MST — a potential unmade connection."
             ),
         });
     }

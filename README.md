@@ -33,6 +33,51 @@
 
 ---
 
+## 🗄️ Why Memex exists — your AI memory survives Anthropic's silent migrations
+
+Claude Code rewrites its own session storage every few months **without
+announcing it** and ships auto-updates that silently delete the old files.
+On a typical user's machine right now:
+
+| | path | files |
+|---|---|---|
+| **Legacy** (pre-v2.1.114, ~Apr 2026) | `~/.claude/transcripts/ses_*.jsonl` | thousands of older sessions, no longer written to |
+| **Modern** | `~/.claude/projects/<encoded-cwd>/<uuid>.jsonl` | last 30-ish days only |
+| **Prompt history** (survives migrations) | `~/.claude/history.jsonl` | every prompt you ever typed |
+
+Anthropic announced **none** of this. Search the official
+[CHANGELOG.md](https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md)
+for "transcripts directory" or "migration" and you get zero hits. Meanwhile
+GitHub is full of OPEN data-loss reports —
+[#41591](https://github.com/anthropics/claude-code/issues/41591) (520 sessions
+silently deleted by 2.1.87 auto-update),
+[#54907](https://github.com/anthropics/claude-code/issues/54907) (all sessions
+lost across the 2.1.114 → 2.1.123 upgrade),
+[#48782](https://github.com/anthropics/claude-code/issues/48782) (160 jsonls
+× 60 702 messages gone),
+[#41458](https://github.com/anthropics/claude-code/issues/41458)
+(`cleanupPeriodDays: 99999` ignored, 490 sessions deleted anyway),
+[#23710](https://github.com/anthropics/claude-code/issues/23710),
+[#59248](https://github.com/anthropics/claude-code/issues/59248), …
+
+**What Memex does about it:**
+
+1. **Reads both legacy and modern jsonl paths** — `parser::parse_transcript_session`
+   handles the older `{type, timestamp, content}` schema, so your last
+   1 000–2 000 transcripts join the modern corpus on the same Qdrant point space.
+2. **Uses `~/.claude/history.jsonl` as the timeline base layer** —
+   24 000+ prompts across 6–12 months survive every Claude Code migration.
+   The dashboard's heatmap is drawn from this, with indexed sessions overlaid.
+3. **One-click Qdrant snapshot** — once you've indexed, your corpus is
+   yours. Future Anthropic cleanups can't touch the points sitting in
+   `qdrant_storage/`.
+
+Memex's reason to exist isn't "vector search on top of Claude Code". It's
+**"vector search on top of a corpus you actually own — preserved against
+Anthropic's silent migrations."**
+
+---
+
 ## 🛑 Why Memex isn't a chatbot
 
 Qdrant Vector Space Day 2026's prompt is unusually direct:
@@ -111,6 +156,68 @@ Ordered as you encounter them in the app (visual / spatial first, search last):
 Plus: **📦 Snapshot** export/import via Qdrant's HTTP snapshot API — your entire indexed memory in one portable file.
 
 ColBERT v2 inline citations are on the roadmap; [`fastembed-rs`](https://github.com/Anush008/fastembed-rs) 5.x doesn't yet ship the model.
+
+---
+
+## 🧠 MCP integration — Memex as a memory layer for any AI agent
+
+Memex ships its own [**Model Context Protocol**](https://modelcontextprotocol.io) server (stdio JSON-RPC, hand-rolled, zero external runtime). Once you `claude mcp add memex …` once, every Claude Code session — and any other MCP-aware client (Codex, Cursor, …) — can call into your local session corpus mid-conversation. No new network calls, no third-party SaaS.
+
+```bash
+# one-time wiring — point Claude Code at the same memex binary you already run
+claude mcp add memex /path/to/memex/src-tauri/target/release/memex mcp
+
+claude mcp list
+#  memex: /…/memex mcp - ✓ Connected
+```
+
+…or print the exact command for your machine:
+
+```bash
+memex install-mcp           # echoes the `claude mcp add …` line
+memex install-mcp --run     # actually runs it
+```
+
+The server exposes **9 tools** mapping directly to the same Qdrant primitives that power the desktop UI:
+
+| Tool | What it does |
+|---|---|
+| `find_similar_sessions(query, limit?, weights?)` | Five-vector Lens search over your past sessions. Per-vector contribution scores in the response. |
+| `find_similar_error(error_text, limit?)` | Targeted neighbor search on the `error` named vector, filtered to `has_errors=true`. Returns sessions that *also* hit a similar error — typically the ones that resolved it. |
+| `predict_next_action(session_id, last_n_turns?, horizon?, neighbors?)` | "What would past-you do next?" — neighbor walk + tool-call aggregation, returns ranked `(tool, example_input, source_session, turn_index)` with `frequency × similarity`. |
+| `mix_similar_sessions(positive[], negative[], limit?)` | Qdrant Discovery API — sessions near the positives, away from the negatives. |
+| `get_session_summary(session_id)` | Metadata payload: project, branch, ai_title, start/end, turn counts, has_errors. |
+| `get_session_turn(session_id, turn_index)` | A single turn, re-parsed from source jsonl — full text + tool calls + tool results. |
+| `list_recent_sessions(limit?)` | Most-recent-first walk of `~/.claude/projects` — works even before Qdrant is fully warm. |
+| `analyze_corpus_topology(sample?, per_point?)` | MST of session content vectors, per-project auto-labels, cross-project bridges, and gap insights. |
+| `snapshot_export(path)` | Server-side snapshot of the entire collection to a portable `.snapshot` file. |
+
+Example transcript inside a Claude Code session, with Memex wired up:
+
+```text
+> I'm hitting the same WAL Kind(WouldBlock) again. Have I dealt with this before?
+
+⏺ memex - find_similar_error (MCP)
+  ⎿  3 past sessions found:
+       1. project-redesign · 2026-04-12 · sim 0.91 · "fix wal contention in indexer"
+       2. memex          · 2026-03-30 · sim 0.84 · "Phase 6 polling + recall"
+       3. ckm-rails      · 2026-02-04 · sim 0.71 · "concurrent migration retries"
+
+⏺ memex - get_session_turn { session_id: "…redesign…", turn_index: 487 }
+  ⎿  …shows the exact fix you applied last time…
+
+> Nice. Apply the same fix here.
+```
+
+Behind the scenes Memex stays 100 % local — no LLM calls inside the server, no telemetry. The MCP surface is a *typed handle* on the Qdrant index your desktop app is already using; the daemon never speaks to anything outside `localhost:6334`.
+
+> **Auto-index daemon + macOS notifications:** while the app is open, a 60 s
+> background watcher catches any new session jsonl, embeds it, and upserts it
+> into Qdrant. If a fresh `tool_result.is_error` matches a *different* past
+> session above the 0.65 similarity threshold, a macOS notification pops:
+> *"Memex · I've seen this error before · &lt;project&gt; · turn #N"*.
+> Clicking it brings the app to focus and auto-opens the past session's
+> replay so you can scrub through how you fixed it last time.
 
 ---
 

@@ -22,6 +22,7 @@
         />
       </div>
       <div class="topbar-actions">
+        <button id="btn-dashboard" type="button" class="btn">Dashboard</button>
         <button id="btn-topology" type="button" class="btn">Topology</button>
         <button id="btn-mix" type="button" class="btn">Mix &amp; Match</button>
         <button id="btn-snapshot" type="button" class="btn">Snapshot</button>
@@ -107,6 +108,9 @@
           role="status"
           aria-live="polite"
         ></div>
+        <!-- Upstream: Time Machine rail — stack-mode timeline UI. Sibling of
+             the SVG overlay; positioned by .time-rail rules in styles.css. -->
+        <aside class="time-rail" id="timeRail" aria-label="Time Machine rail"></aside>
         <div class="empty" id="results-empty">
           Start typing to search across <span id="results-count">your</span> sessions.
         </div>

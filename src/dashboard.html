@@ -1,0 +1,515 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Memex Dashboard</title>
+<link rel="stylesheet" href="/styles.css" />
+<style>
+/* ============================================================
+   Dashboard-only styles. Reuses Memex token vars from styles.css.
+   ============================================================ */
+
+body { overflow-x: hidden; }
+
+.dash-page {
+  min-height: 100vh;
+  display: flex; flex-direction: column;
+  background: var(--bg-window);
+  color: var(--text-primary);
+}
+
+.dash-top {
+  flex: 0 0 auto;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 22px;
+  border-bottom: 1px solid var(--line, rgba(255,255,255,.08));
+  background: var(--bg-window);
+}
+.dash-top .brand-row {
+  display: flex; align-items: baseline; gap: 10px;
+}
+.dash-top .brand-row .b { font-weight: 700; font-size: 15px; letter-spacing: -.01em; }
+.dash-top .brand-row .sub { font-size: 11.5px; color: var(--text-muted, rgba(255,255,255,.4)); font-family: var(--mono); }
+.dash-top .ops { display: flex; gap: 8px; align-items: center; }
+.dash-top .ops .chip-tab {
+  font-size: 12px; padding: 5px 10px; border-radius: 999px;
+  border: 1px solid var(--line-2, rgba(255,255,255,.14));
+  background: transparent;
+  color: var(--text-secondary, rgba(255,255,255,.62));
+  cursor: pointer; font-family: var(--mono);
+}
+.dash-top .ops .chip-tab.active {
+  background: var(--accent, #1a90ff); color: white;
+  border-color: var(--accent, #1a90ff);
+}
+.dash-top .ops .chip-tab:hover:not(.active) { background: rgba(255,255,255,.04); }
+
+.dash-top .back {
+  text-decoration: none; color: var(--text-secondary);
+  font-size: 12.5px; padding: 5px 10px; border-radius: 6px;
+  border: 1px solid var(--line-2, rgba(255,255,255,.14));
+  font-family: var(--mono);
+}
+.dash-top .back:hover { background: rgba(255,255,255,.04); color: var(--text-primary); }
+
+/* ---------- main scroll area ---------- */
+.dash-main {
+  flex: 1 1 auto; overflow-y: auto;
+  padding: 22px;
+  display: flex; flex-direction: column; gap: 16px;
+  /* keep content visually centered up to a reasonable max width */
+  max-width: 1480px; width: 100%; margin: 0 auto;
+}
+
+/* ---------- KPI tiles ---------- */
+.kpi-row {
+  display: grid; gap: 12px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+@media (max-width: 900px) {
+  .kpi-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+.kpi {
+  border: 1px solid var(--line, rgba(255,255,255,.07));
+  background: var(--bg-surface, #2c2c2e);
+  border-radius: 12px; padding: 14px 16px;
+  min-width: 0;
+}
+.kpi .label {
+  font-size: 11px; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--text-muted, rgba(255,255,255,.4)); font-weight: 500;
+}
+.kpi .value {
+  font-size: 26px; font-weight: 600; font-family: var(--mono);
+  margin-top: 4px; letter-spacing: -.02em;
+}
+.kpi .delta { font-size: 11.5px; font-family: var(--mono); margin-top: 4px; }
+.kpi .delta.up { color: #6bd96b; }
+.kpi .delta.down { color: #ff6b8a; }
+.kpi .delta.flat { color: var(--text-muted, rgba(255,255,255,.4)); }
+
+/* ---------- card primitive ---------- */
+.card {
+  border: 1px solid var(--line, rgba(255,255,255,.07));
+  background: var(--bg-surface, #2c2c2e);
+  border-radius: 12px; padding: 16px 18px;
+  min-width: 0;
+}
+.card.compact { padding: 14px 16px; }
+.card-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: 12px; margin-bottom: 12px;
+}
+.card-head .title { font-size: 13.5px; font-weight: 600; letter-spacing: -.005em; }
+.card-head .why {
+  font-size: 11px; color: var(--text-muted, rgba(255,255,255,.4));
+  font-style: italic; line-height: 1.4; text-align: right;
+  max-width: 60%;
+}
+
+/* ---------- Activity heatmap ---------- */
+.heatmap-card { }
+.heatmap-wrap {
+  overflow-x: auto;
+  padding-bottom: 8px;
+}
+.heatmap {
+  display: grid;
+  grid-template-rows: repeat(7, 11px);
+  grid-auto-flow: column;
+  grid-auto-columns: 11px;
+  gap: 3px;
+  width: max-content;
+}
+.hcell {
+  border-radius: 2px;
+  background: rgba(255,255,255,.04);
+  transition: outline .15s;
+}
+.hcell.l1 { background: rgba(116,224,193,.22); }
+.hcell.l2 { background: rgba(116,224,193,.45); }
+.hcell.l3 { background: rgba(116,224,193,.7); }
+.hcell.l4 { background: rgba(116,224,193,.95); }
+.hcell:hover { outline: 2px solid var(--accent, #1a90ff); cursor: pointer; }
+.heat-legend {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 11px; color: var(--text-muted); margin-top: 6px;
+  font-family: var(--mono); flex-wrap: wrap;
+}
+.heat-legend .swatch { display: inline-block; width: 11px; height: 11px; border-radius: 2px; }
+.heat-tooltip {
+  position: fixed; pointer-events: none; z-index: 30;
+  background: rgba(0,0,0,.92); color: var(--text-primary);
+  font-size: 11px; font-family: var(--mono);
+  padding: 6px 9px; border-radius: 6px;
+  border: 1px solid var(--line-2, rgba(255,255,255,.14));
+  display: none; max-width: 260px;
+}
+
+/* ---------- Multi-card grids (responsive) ---------- */
+.row-2 {
+  display: grid; gap: 14px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.row-3 {
+  display: grid; gap: 14px;
+  grid-template-columns: 1.05fr .95fr 1.1fr;
+}
+@media (max-width: 1100px) {
+  .row-2 { grid-template-columns: 1fr; }
+  .row-3 { grid-template-columns: 1fr; }
+}
+@media (min-width: 1101px) and (max-width: 1380px) {
+  .row-3 { grid-template-columns: 1fr 1fr; }
+  .row-3 > :last-child { grid-column: span 2; }
+}
+
+/* ---------- Project bars ---------- */
+.proj-row {
+  display: grid; grid-template-columns: 140px 1fr 90px;
+  gap: 10px; align-items: center; font-size: 12.5px;
+  padding: 4px 0;
+}
+.proj-row .pname { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.proj-row .pname .pn-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.proj-row .pd { flex: 0 0 7px; width: 7px; height: 7px; border-radius: 50%; }
+.proj-bar {
+  position: relative; height: 8px; border-radius: 4px;
+  background: var(--bg-surface-hi, rgba(255,255,255,.06));
+  overflow: hidden;
+}
+.proj-bar > span {
+  position: absolute; left: 0; top: 0; bottom: 0;
+  border-radius: 4px;
+  transition: width .35s ease;
+}
+.proj-meta {
+  font-family: var(--mono); font-size: 11px;
+  color: var(--text-muted); text-align: right;
+}
+
+/* ---------- Tool Pareto ---------- */
+.tool-row {
+  display: grid; grid-template-columns: 80px 1fr 60px;
+  gap: 10px; align-items: center; font-size: 12.5px; margin-bottom: 6px;
+}
+.tool-row .tname { font-family: var(--mono); font-size: 12px; }
+.tool-bar {
+  height: 6px; border-radius: 3px;
+  background: var(--bg-surface-hi, rgba(255,255,255,.06));
+  overflow: hidden; position: relative;
+}
+.tool-bar > span {
+  position: absolute; left: 0; top: 0; bottom: 0;
+  border-radius: 3px;
+  background: linear-gradient(90deg, var(--accent, #1a90ff), #2b6bb8);
+  transition: width .35s ease;
+}
+.tool-row .tcount {
+  font-family: var(--mono); font-size: 11px;
+  color: var(--text-muted); text-align: right;
+}
+
+/* ---------- Error catalog ---------- */
+.err-row {
+  display: grid; grid-template-columns: 1fr auto auto;
+  gap: 10px; align-items: center;
+  padding: 9px 10px; border-radius: 7px;
+  border: 1px solid var(--line);
+  background: rgba(0,0,0,.18);
+  margin-bottom: 6px;
+}
+.err-row .etxt {
+  font-family: var(--mono); font-size: 12px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.err-row .meta { font-size: 11px; color: var(--text-muted); font-family: var(--mono); }
+.err-row .status {
+  padding: 1px 7px; border-radius: 999px; font-size: 10.5px; font-family: var(--mono);
+}
+.err-row .status.unsolved { background: rgba(255,107,138,.12); color: #ff6b8a; border: 1px solid rgba(255,107,138,.25); }
+.err-row .status.recurring { background: rgba(255,184,107,.12); color: #ffb86b; border: 1px solid rgba(255,184,107,.25); }
+.err-row .status.resolved { background: rgba(107,217,107,.12); color: #6bd96b; border: 1px solid rgba(107,217,107,.25); }
+
+/* ---------- Recall queue ---------- */
+.recall-row {
+  padding: 11px 12px; border-radius: 8px;
+  border: 1px solid rgba(116,224,193,.22);
+  background: rgba(116,224,193,.04);
+  margin-bottom: 8px;
+}
+.recall-row .rhead {
+  display: flex; align-items: baseline; justify-content: space-between;
+  margin-bottom: 4px; font-size: 11px; color: rgb(116,224,193);
+  font-family: var(--mono); flex-wrap: wrap; gap: 6px;
+}
+.recall-row .rtxt { font-size: 12.5px; margin-bottom: 6px; line-height: 1.45; }
+.recall-row .ractions { display: flex; gap: 6px; flex-wrap: wrap; }
+.recall-row .ractions .btn-mini {
+  font-size: 11px; padding: 3px 9px; border-radius: 4px;
+  background: var(--bg-surface-hi, rgba(255,255,255,.06));
+  border: 1px solid var(--line-2, rgba(255,255,255,.14));
+  color: var(--text-secondary); cursor: pointer;
+  font-family: var(--mono);
+}
+.recall-row .ractions .btn-mini:hover { background: rgba(255,255,255,.08); }
+.recall-row .ractions .btn-mini.primary {
+  background: rgba(116,224,193,.92); border-color: rgba(116,224,193,.92); color: #002418;
+}
+
+/* ---------- Skill graph (SVG) ---------- */
+.skill-graph { display: flex; flex-direction: column; align-items: center; }
+.skill-graph svg { width: 100%; height: 220px; max-width: 420px; }
+.skill-graph .legend {
+  display: flex; gap: 12px; font-size: 11px;
+  color: var(--text-muted); justify-content: center;
+  margin-top: 4px; font-family: var(--mono);
+}
+
+/* ---------- Week stats ---------- */
+.weekstat-list { display: flex; flex-direction: column; gap: 8px; }
+.weekstat {
+  display: grid; grid-template-columns: 1fr auto;
+  align-items: center; padding: 8px 10px; border-radius: 6px;
+  background: rgba(0,0,0,.18); border: 1px solid var(--line);
+}
+.weekstat .lbl { font-size: 12px; color: var(--text-secondary); }
+.weekstat .num { font-family: var(--mono); font-size: 12.5px; }
+.weekstat .num.up { color: #6bd96b; }
+.weekstat .num.down { color: #ff6b8a; }
+
+/* ---------- Today brief ---------- */
+.brief-line { font-size: 13px; line-height: 1.55; color: var(--text-secondary); margin: 4px 0; }
+.brief-line strong { color: var(--text-primary); font-weight: 600; }
+.brief-pick {
+  padding: 10px 12px; border-radius: 8px;
+  background: rgba(0,0,0,.18); border: 1px solid var(--line);
+  margin-top: 10px;
+}
+.brief-pick .hd {
+  font-size: 11px; color: var(--text-muted);
+  text-transform: uppercase; letter-spacing: .07em; margin-bottom: 4px;
+}
+.brief-pick .body { font-size: 12.5px; }
+.brief-pick .body .tk { color: #ffb86b; font-family: var(--mono); }
+
+/* ---------- archaeo card (data preservation messaging) ---------- */
+.archaeo-card {
+  border-color: rgba(116,224,193,.28);
+  background: linear-gradient(180deg, rgba(116,224,193,.04), var(--bg-surface, #2c2c2e));
+}
+.archaeo-grid {
+  display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 12px;
+}
+@media (max-width: 900px) { .archaeo-grid { grid-template-columns: repeat(2, 1fr); } }
+.archaeo-stat {
+  border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px;
+  background: rgba(0,0,0,.18);
+}
+.archaeo-stat .lbl { font-size: 10.5px; text-transform: uppercase; letter-spacing: .07em; color: var(--text-muted); font-weight: 500; }
+.archaeo-stat .val { font-family: var(--mono); font-size: 17px; font-weight: 600; margin-top: 3px; }
+.archaeo-stat .sub { font-size: 10.5px; color: var(--text-muted); margin-top: 2px; font-family: var(--mono); }
+.archaeo-note {
+  margin-top: 12px; padding: 10px 12px;
+  border: 1px dashed rgba(255,184,107,.4);
+  background: rgba(255,184,107,.05);
+  border-radius: 8px;
+  font-size: 11.5px; color: var(--text-secondary); line-height: 1.55;
+}
+.archaeo-note strong { color: var(--text-primary); }
+.archaeo-actions { margin-top: 10px; display: flex; gap: 8px; align-items: center; }
+.archaeo-actions .btn-mini {
+  font-size: 11px; padding: 5px 12px; border-radius: 6px;
+  background: rgba(116,224,193,.18); border: 1px solid rgba(116,224,193,.4);
+  color: rgb(150,240,210); cursor: pointer; font-family: var(--mono);
+}
+.archaeo-actions .btn-mini:hover { background: rgba(116,224,193,.28); }
+
+/* ---------- heatmap base layer (history.jsonl) ---------- */
+.hcell.b1 { background: rgba(120,160,255,.18); }
+.hcell.b2 { background: rgba(120,160,255,.32); }
+.hcell.b3 { background: rgba(120,160,255,.52); }
+.hcell.b4 { background: rgba(120,160,255,.74); }
+.hcell.has-session {
+  /* indexed sessions overlay green over the blue base */
+  outline: 1px solid rgba(116,224,193,.55);
+  outline-offset: -1px;
+}
+
+/* ---------- empty / loading states ---------- */
+.muted { color: var(--text-muted); font-size: 12px; }
+.skeleton {
+  background: linear-gradient(90deg, rgba(255,255,255,.04), rgba(255,255,255,.08), rgba(255,255,255,.04));
+  background-size: 200% 100%;
+  animation: shimmer 1.4s linear infinite;
+  border-radius: 4px;
+}
+@keyframes shimmer {
+  0% { background-position: 100% 0; }
+  100% { background-position: -100% 0; }
+}
+</style>
+</head>
+
+<body>
+<div class="dash-page">
+
+  <!-- top bar -->
+  <header class="dash-top">
+    <div class="brand-row">
+      <a class="back" href="index.html">← Back</a>
+      <span class="b">memex / dashboard</span>
+      <span class="sub" id="dashAsOf">…</span>
+    </div>
+    <div class="ops">
+      <span class="chip-tab" data-range="7">7d</span>
+      <span class="chip-tab" data-range="30">30d</span>
+      <span class="chip-tab active" data-range="90">90d</span>
+      <span class="chip-tab" data-range="all">all-time</span>
+    </div>
+  </header>
+
+  <!-- main scroll -->
+  <main class="dash-main">
+
+    <!-- KPI tiles -->
+    <section class="kpi-row">
+      <div class="kpi">
+        <div class="label">Sessions indexed</div>
+        <div class="value" id="kpiSessions">—</div>
+        <div class="delta flat" id="kpiSessionsDelta">scanning…</div>
+      </div>
+      <div class="kpi">
+        <div class="label">Total turns</div>
+        <div class="value" id="kpiTurns">—</div>
+        <div class="delta flat" id="kpiTurnsDelta">—</div>
+      </div>
+      <div class="kpi">
+        <div class="label">Tool calls</div>
+        <div class="value" id="kpiTools">—</div>
+        <div class="delta flat" id="kpiToolsDelta">—</div>
+      </div>
+      <div class="kpi">
+        <div class="label">Active days · streak</div>
+        <div class="value" id="kpiActive">—</div>
+        <div class="delta flat" id="kpiStreak">—</div>
+      </div>
+    </section>
+
+    <!-- Data archaeology — Memex 가치 명제 표현 -->
+    <section class="card archaeo-card" id="archaeoCard">
+      <div class="card-head">
+        <div class="title">📦 Memex가 보호하는 데이터</div>
+        <div class="why">Anthropic이 silent migration / cleanup해도 Memex Qdrant 안에 남습니다.</div>
+      </div>
+      <div id="archaeoBody" class="muted">집계 중…</div>
+    </section>
+
+    <!-- Activity Heatmap -->
+    <section class="card heatmap-card">
+      <div class="card-head">
+        <div class="title">활동 히트맵 — 지난 365 일</div>
+        <div class="why">"내가 언제 일했는지 / 언제 비었는지" 한 눈에. 칸 호버 → 그날 세션 수 + prompt 수.</div>
+      </div>
+      <div class="heatmap-wrap">
+        <div class="heatmap" id="heatmap"></div>
+      </div>
+      <div class="heat-legend">
+        <span class="swatch" style="background: rgba(120,160,255,.4); border:1px solid rgba(120,160,255,.6);"></span>
+        <span>prompts (history.jsonl, 8 mo)</span>
+        <span style="margin-left:14px;" class="swatch" style="background: rgba(116,224,193,.7); border:1px solid rgba(116,224,193,.9);"></span>
+        <span>indexed sessions (Qdrant)</span>
+        <span style="margin-left:auto" id="heatTotal">—</span>
+      </div>
+    </section>
+
+    <!-- Two-col: Project & Tools -->
+    <section class="row-2">
+      <div class="card">
+        <div class="card-head">
+          <div class="title">프로젝트 분포</div>
+          <div class="why">"이번 분기 내가 가장 매달린 프로젝트". 카운트 기준 ↓.</div>
+        </div>
+        <div id="projectBars">
+          <div class="muted">집계 중…</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-head">
+          <div class="title">도구 사용 — Pareto</div>
+          <div class="why">"내 워크플로의 진짜 모양". 무엇이 핵심 도구, 무엇이 가끔.</div>
+        </div>
+        <div id="toolBars">
+          <div class="muted">집계 중… (현재는 세션별 총 tool count 합계 기준 placeholder)</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Two-col: Errors & Recall -->
+    <section class="row-2">
+      <div class="card">
+        <div class="card-head">
+          <div class="title">에러 카탈로그</div>
+          <div class="why">"이번 분기 나를 막은 항목". 클릭 → 해당 세션 Replay.</div>
+        </div>
+        <div id="errorList">
+          <div class="muted">스캔 중…</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-head">
+          <div class="title">Recall queue — 과거의 내가 도와줄 수 있음</div>
+          <div class="why">최근 본 에러 중 cross-session 매치 ≥ 0.65 항목.</div>
+        </div>
+        <div id="recallList">
+          <div class="muted">tail_recent_errors + recall 폴링 중…</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Bottom 3-col: Skill graph / Week stats / Today's brief -->
+    <section class="row-3">
+      <div class="card">
+        <div class="card-head">
+          <div class="title">도구 동시-사용 그래프</div>
+          <div class="why">"내 워크플로 패턴". 함께 자주 쓰이는 도구가 가까이.</div>
+        </div>
+        <div class="skill-graph">
+          <svg viewBox="0 0 360 220" id="skillGraph"></svg>
+          <div class="legend">
+            <span>● size = use freq</span>
+            <span>— line = co-occurrence</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <div class="title">이번 주 vs 지난 주</div>
+          <div class="why">"내 페이스 가속/감속".</div>
+        </div>
+        <div class="weekstat-list" id="weekStats">
+          <div class="muted">집계 중…</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <div class="title">Today's brief</div>
+          <div class="why">"어제 어디서 끝났고, 무엇을 이어갈지". Predict 1회.</div>
+        </div>
+        <div id="todayBrief">
+          <p class="brief-line muted">최근 세션 + 예측 계산 중…</p>
+        </div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<div class="heat-tooltip" id="heatTip"></div>
+
+<script src="/dashboard.js" type="module"></script>
+</body>
+</html>

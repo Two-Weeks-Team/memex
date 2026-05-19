@@ -1,0 +1,3 @@
+{"type":"user","timestamp":"2026-03-01T09:00:00.000Z","content":"build it"}
+{"type":"tool_use","timestamp":"2026-03-01T09:00:01.000Z","tool_name":"Bash","tool_input":{"command":"cargo build"}}
+{"type":"tool_result","timestamp":"2026-03-01T09:00:02.000Z","tool_name":"Bash","tool_input":{"command":"cargo build"},"tool_output":"Error: failed to compile\nTraceback at line 79"}

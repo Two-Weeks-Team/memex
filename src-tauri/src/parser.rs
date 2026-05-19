@@ -364,6 +364,289 @@ pub fn scan_dir(root: &Path) -> Result<Vec<Session>> {
     Ok(sessions)
 }
 
+/// Walk the legacy `~/.claude/transcripts/` directory — flat dir of
+/// `ses_<token>.jsonl` files written by Claude Code prior to the silent
+/// migration to `~/.claude/projects/` around v2.1.114 (April 2026).
+/// Schema is minimal (type ∈ {user, tool_use, tool_result}, no sessionId
+/// or cwd inside the file). Memex preserves these so the user's older
+/// 2–4 months of corpus survives Anthropic's path/format change.
+pub fn scan_transcripts_dir(root: &Path) -> Result<Vec<Session>> {
+    if !root.exists() {
+        // Not an error — many users won't have transcripts/ (clean installs).
+        return Ok(Vec::new());
+    }
+    let mut sessions = Vec::new();
+    for entry in WalkDir::new(root)
+        .max_depth(1)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().is_file())
+    {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
+            continue;
+        }
+        let file_stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+        if !file_stem.starts_with("ses_") {
+            // Defensive: only treat ses_* as transcripts; the dir might
+            // contain other artifacts in older versions.
+            continue;
+        }
+        if let Ok(s) = parse_transcript_session(path) {
+            sessions.push(s);
+        }
+    }
+    Ok(sessions)
+}
+
+/// Aggregate per-day prompt count from `~/.claude/history.jsonl`. Claude
+/// Code records every user prompt here regardless of which session-storage
+/// format is active; the file survives the `transcripts/` → `projects/`
+/// migration intact, so it is the single source of truth for the user's
+/// *full* timeline (often 8+ months back, even when session jsonls only
+/// go 30 days back due to silent cleanup). Returned in YYYY-MM-DD keys so
+/// the frontend can drop straight into the activity heatmap.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PromptHistoryStats {
+    /// First seen prompt timestamp (epoch ms). None if file is empty.
+    pub earliest_ms: Option<i64>,
+    pub latest_ms: Option<i64>,
+    pub total_prompts: usize,
+    /// Per-day buckets — date string (YYYY-MM-DD UTC) → count.
+    pub by_day: std::collections::HashMap<String, usize>,
+    /// Distinct projects encountered.
+    pub project_count: usize,
+}
+
+/// Parse `~/.claude/history.jsonl` and return per-day prompt counts.
+/// Tolerant: malformed lines are skipped silently so the file's incremental
+/// append-only growth doesn't break the dashboard.
+pub fn read_prompt_history_stats(path: &Path) -> Result<PromptHistoryStats> {
+    use std::collections::HashMap;
+    use std::collections::HashSet;
+
+    let file = match File::open(path) {
+        Ok(f) => f,
+        // No history.jsonl yet (clean install) — return empty rather than error.
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(PromptHistoryStats {
+                earliest_ms: None,
+                latest_ms: None,
+                total_prompts: 0,
+                by_day: HashMap::new(),
+                project_count: 0,
+            });
+        }
+        Err(e) => {
+            return Err(anyhow!("opening history.jsonl: {e}"));
+        }
+    };
+    let reader = BufReader::new(file);
+
+    let mut by_day: HashMap<String, usize> = HashMap::new();
+    let mut projects: HashSet<String> = HashSet::new();
+    let mut earliest: Option<i64> = None;
+    let mut latest: Option<i64> = None;
+    let mut total: usize = 0;
+
+    for line in reader.lines().map_while(|r| r.ok()) {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let Ok(obj) = serde_json::from_str::<Value>(line) else { continue };
+        // timestamp is epoch ms (number or string), tolerate both
+        let ts_ms: Option<i64> = obj
+            .get("timestamp")
+            .and_then(|v| v.as_i64().or_else(|| v.as_str().and_then(|s| s.parse().ok())));
+        let Some(ts_ms) = ts_ms else { continue };
+        if ts_ms <= 0 {
+            continue;
+        }
+        total += 1;
+        earliest = Some(earliest.map_or(ts_ms, |e| e.min(ts_ms)));
+        latest = Some(latest.map_or(ts_ms, |e| e.max(ts_ms)));
+
+        // Bucket by the user's *local* day so the heatmap aligns with how
+        // they actually experienced the work (a Korean user working at
+        // 02:00 local should see that activity on the local day, not on
+        // the previous UTC day). Memex always runs on the user's machine
+        // so chrono::Local matches what the frontend sees with
+        // `Date.toLocaleDateString("en-CA")`.
+        if let Some(dt_utc) = chrono::DateTime::<Utc>::from_timestamp(ts_ms / 1000, 0) {
+            let dt_local = dt_utc.with_timezone(&chrono::Local);
+            let key = dt_local.format("%Y-%m-%d").to_string();
+            *by_day.entry(key).or_insert(0) += 1;
+        }
+        if let Some(p) = obj.get("project").and_then(Value::as_str) {
+            if !p.is_empty() {
+                projects.insert(p.to_string());
+            }
+        }
+    }
+
+    Ok(PromptHistoryStats {
+        earliest_ms: earliest,
+        latest_ms: latest,
+        total_prompts: total,
+        by_day,
+        project_count: projects.len(),
+    })
+}
+
+/// Parse a single legacy transcript `ses_*.jsonl` into the same `Session`
+/// shape the rest of the indexer/UI expects. We collapse consecutive
+/// `tool_use`/`tool_result` events into a single Assistant turn so the
+/// Replay engine + tool-Pareto stats stay consistent with the newer schema.
+pub fn parse_transcript_session(path: &Path) -> Result<Session> {
+    let file = File::open(path)
+        .with_context(|| format!("opening transcript jsonl: {}", path.display()))?;
+    let reader = BufReader::new(file);
+
+    let session_id = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("unknown")
+        .to_string();
+
+    let mut session = Session {
+        session_id: session_id.clone(),
+        source_path: path.to_path_buf(),
+        project_path: None,
+        // Tag this corpus visibly so the UI can distinguish legacy from new.
+        project_name: Some("(legacy transcript)".to_string()),
+        git_branch: None,
+        claude_version: None,
+        ai_title: None,
+        start_time: None,
+        end_time: None,
+        turns: Vec::new(),
+        event_counts: EventCounts::default(),
+    };
+
+    let mut current_assistant: Option<Turn> = None;
+    let mut turn_seq: usize = 0;
+
+    for (lineno, line_res) in reader.lines().enumerate() {
+        let line = line_res
+            .with_context(|| format!("reading transcript line {} of {}", lineno + 1, path.display()))?;
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let obj: Value = match serde_json::from_str(line) {
+            Ok(o) => o,
+            Err(_) => continue, // tolerant — skip malformed lines
+        };
+
+        let ts = obj
+            .get("timestamp")
+            .and_then(Value::as_str)
+            .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
+            .map(|dt| dt.with_timezone(&Utc));
+        if let Some(dt) = ts {
+            session.start_time = Some(match session.start_time {
+                Some(s) if s <= dt => s,
+                _ => dt,
+            });
+            session.end_time = Some(match session.end_time {
+                Some(e) if e >= dt => e,
+                _ => dt,
+            });
+        }
+
+        let t = obj.get("type").and_then(Value::as_str).unwrap_or("");
+        match t {
+            "user" => {
+                // Close any open assistant turn first so ordering is preserved.
+                if let Some(at) = current_assistant.take() {
+                    session.turns.push(at);
+                }
+                let content = obj
+                    .get("content")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string();
+                session.turns.push(Turn {
+                    uuid: format!("{session_id}-u{turn_seq}"),
+                    parent_uuid: None,
+                    timestamp: ts,
+                    role: TurnRole::User,
+                    is_sidechain: false,
+                    text: content,
+                    tool_calls: Vec::new(),
+                    tool_results: Vec::new(),
+                });
+                session.event_counts.user += 1;
+                turn_seq += 1;
+            }
+            "tool_use" => {
+                let name = obj
+                    .get("tool_name")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string();
+                let input = obj.get("tool_input").cloned().unwrap_or(Value::Null);
+                let tc = ToolCall {
+                    id: format!("{session_id}-tu{turn_seq}"),
+                    name,
+                    input,
+                };
+                let turn = current_assistant.get_or_insert_with(|| Turn {
+                    uuid: format!("{session_id}-a{turn_seq}"),
+                    parent_uuid: None,
+                    timestamp: ts,
+                    role: TurnRole::Assistant,
+                    is_sidechain: false,
+                    text: String::new(),
+                    tool_calls: Vec::new(),
+                    tool_results: Vec::new(),
+                });
+                turn.tool_calls.push(tc);
+                session.event_counts.assistant += 1;
+            }
+            "tool_result" => {
+                let output = obj
+                    .get("tool_output")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string();
+                // Legacy transcripts don't carry is_error flags — heuristic.
+                let lower = output.to_ascii_lowercase();
+                let is_error = lower.contains("error:")
+                    || lower.contains("traceback")
+                    || lower.contains("panic")
+                    || lower.contains("command failed");
+                let tr = ToolResult {
+                    tool_use_id: format!("{session_id}-tu{turn_seq}"),
+                    content: output,
+                    is_error,
+                };
+                let turn = current_assistant.get_or_insert_with(|| Turn {
+                    uuid: format!("{session_id}-a{turn_seq}"),
+                    parent_uuid: None,
+                    timestamp: ts,
+                    role: TurnRole::Assistant,
+                    is_sidechain: false,
+                    text: String::new(),
+                    tool_calls: Vec::new(),
+                    tool_results: Vec::new(),
+                });
+                turn.tool_results.push(tr);
+                session.event_counts.other += 1;
+            }
+            _ => {
+                session.event_counts.other += 1;
+            }
+        }
+    }
+    if let Some(at) = current_assistant.take() {
+        session.turns.push(at);
+    }
+
+    Ok(session)
+}
+
 /// Quick per-session summary line for CLI output.
 pub fn summary_line(s: &Session) -> String {
     let project = s.project_name.as_deref().unwrap_or("?");

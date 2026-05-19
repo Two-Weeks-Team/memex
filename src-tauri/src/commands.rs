@@ -306,6 +306,19 @@ pub async fn snapshot_export(path: PathBuf) -> Result<String, String> {
     Ok(name)
 }
 
+/// Convenience wrapper called from the dashboard's "data archaeology" card —
+/// drops a snapshot into the user's home dir with an ISO-timestamped name
+/// so the user doesn't have to type a path. Returns "<name> → <abs_path>"
+/// so the UI can echo where the file landed.
+#[tauri::command]
+pub async fn snapshot_export_default() -> Result<String, String> {
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+    let ts = chrono::Utc::now().format("%Y-%m-%dT%H-%M-%S").to_string();
+    let path = PathBuf::from(&home).join(format!("memex-snapshot-{ts}.snapshot"));
+    let name = indexer::snapshot_export(&path).await.map_err(stringify)?;
+    Ok(format!("{name} → {}", path.display()))
+}
+
 /// Imports a snapshot from the sandboxed snapshot directory after envelope
 /// verification. Returns an empty string on clean import (envelope `Ok`) and a
 /// human-readable warning on the three non-fatal outcomes (legacy / schema
@@ -359,12 +372,13 @@ pub async fn collection_info(
     }))
 }
 
-/// Lightweight scan/refresh — re-reads BOTH `~/.claude/projects` and
-/// `~/.codex/sessions` (P5 KH-01 multi-agent), indexes anything new. Returns
-/// how many sessions are now in the collection.
+/// Lightweight scan/refresh — re-reads `~/.claude/projects` (modern),
+/// `~/.codex/sessions` (P5 KH-01 multi-agent), AND `~/.claude/transcripts`
+/// (legacy, pre-v2.1.114) and indexes anything new. Returns how many sessions
+/// are now in the collection.
 ///
 /// If `path` is provided, only that single root is scanned (overrides the
-/// dual-root default). Useful for tests and CLI tools.
+/// multi-root default). Useful for tests and CLI tools.
 #[tauri::command]
 pub async fn refresh_index(
     state: State<'_, AppStateArc>,
@@ -375,9 +389,17 @@ pub async fn refresh_index(
     // tokio worker froze the UI on large corpora. Offload to the blocking
     // pool so the webview stays responsive. The dispatcher must allocate
     // the closure inputs by `clone()` so the spawned task owns them.
+    //
+    // MERGE NOTE (full-sync): single-root path also pulls legacy
+    // `~/.claude/transcripts/` so users with the legacy dir still benefit
+    // from the upstream migration even when they override `path`.
     let sessions = tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<parser::Session>> {
         if let Some(root) = path {
-            scan_root_routed(&root)
+            let mut s = scan_root_routed(&root)?;
+            if let Ok(legacy) = parser::scan_transcripts_dir(&default_transcripts_root()) {
+                s.extend(legacy);
+            }
+            Ok(s)
         } else {
             scan_all_roots()
         }
@@ -419,11 +441,22 @@ fn scan_all_roots() -> anyhow::Result<Vec<parser::Session>> {
             Err(e) => eprintln!("[memex] codex root scan: {e:#}"),
         }
     }
+    // MERGE NOTE (full-sync): also fold in legacy `~/.claude/transcripts/`
+    // so the upstream migration's older corpus (Anthropic stopped writing
+    // here at v2.1.114) survives the multi-agent merge.
+    let transcripts_root = default_transcripts_root();
+    if transcripts_root.exists() {
+        match parser::scan_transcripts_dir(&transcripts_root) {
+            Ok(mut s) => all.append(&mut s),
+            Err(e) => eprintln!("[memex] legacy transcripts scan: {e:#}"),
+        }
+    }
     if all.is_empty() {
         anyhow::bail!(
-            "no sessions found — neither {} nor {} contained parseable rollouts",
+            "no sessions found — neither {} nor {} nor {} contained parseable rollouts",
             claude_root.display(),
-            codex_root.display()
+            codex_root.display(),
+            transcripts_root.display(),
         );
     }
     Ok(all)
@@ -491,6 +524,88 @@ fn default_projects_root() -> PathBuf {
     }
 }
 
+/// Legacy `~/.claude/transcripts/` directory — flat dir of `ses_*.jsonl`
+/// files written by Claude Code before the silent rollout to
+/// `~/.claude/projects/` around v2.1.114. Returning this alongside the
+/// modern root is how Memex preserves the user's older 2–4 months of
+/// corpus that Anthropic stopped writing into.
+fn default_transcripts_root() -> PathBuf {
+    if let Ok(home) = std::env::var("HOME") {
+        let mut p = PathBuf::from(home);
+        p.push(".claude");
+        p.push("transcripts");
+        p
+    } else {
+        PathBuf::from(".claude/transcripts")
+    }
+}
+
+/// Unified scan over both the modern `projects/` tree and the legacy
+/// `transcripts/` flat dir. Each root is tolerated independently so a
+/// user who has only one of them (e.g. transcripts copied over from
+/// another machine, or a fresh install where projects/ hasn't been
+/// created yet) still gets a working dashboard. Only when BOTH roots
+/// fail do we propagate the error.
+///
+/// MERGE NOTE (full-sync): superseded by `scan_all_roots` which also
+/// includes Codex (`~/.codex/sessions`). Kept as a documented two-root
+/// alternative and as an integration point for future tooling.
+#[allow(dead_code)]
+fn scan_all_sources() -> anyhow::Result<Vec<parser::Session>> {
+    let projects_result = parser::scan_dir(&default_projects_root());
+    let legacy_result = parser::scan_transcripts_dir(&default_transcripts_root());
+
+    let mut out: Vec<parser::Session> = Vec::new();
+    let projects_err = match projects_result {
+        Ok(s) => {
+            out.extend(s);
+            None
+        }
+        Err(e) => Some(e),
+    };
+    // scan_transcripts_dir is already tolerant of a missing dir (returns
+    // Ok(empty)); a real parse failure is the only way we land here.
+    if let Ok(legacy) = legacy_result {
+        out.extend(legacy);
+    }
+
+    if out.is_empty() {
+        if let Some(e) = projects_err {
+            return Err(e);
+        }
+    }
+    Ok(out)
+}
+
+fn default_history_path() -> PathBuf {
+    if let Ok(home) = std::env::var("HOME") {
+        let mut p = PathBuf::from(home);
+        p.push(".claude");
+        p.push("history.jsonl");
+        p
+    } else {
+        PathBuf::from(".claude/history.jsonl")
+    }
+}
+
+/// Read `~/.claude/history.jsonl` and return per-day prompt counts plus
+/// the corpus span. Used as the *base layer* for the dashboard activity
+/// heatmap so the timeline reflects the user's full 6–12 month working
+/// history (history.jsonl survives the silent cleanup that wipes session
+/// jsonls).
+#[tauri::command]
+pub async fn prompt_history_stats(
+    path: Option<PathBuf>,
+) -> Result<parser::PromptHistoryStats, String> {
+    let p = path.unwrap_or_else(default_history_path);
+    // Move the (potentially slow) ~25 k-line read off the IPC worker.
+    let p2 = p.clone();
+    tokio::task::spawn_blocking(move || parser::read_prompt_history_stats(&p2))
+        .await
+        .map_err(|e| format!("history stats task panicked: {e}"))?
+        .map_err(stringify)
+}
+
 /// Lightweight session summary returned by `list_sessions` — no embeddings,
 /// no Qdrant calls. Used by the Time Machine stack on app boot so the user
 /// always sees something even before they type a query, and even if Qdrant
@@ -539,21 +654,40 @@ impl From<parser::Session> for SessionSummary {
     }
 }
 
-/// List sessions in BOTH `~/.claude/projects` and `~/.codex/sessions`
-/// (P5 KH-01) sorted most-recent first. Pure parser walk — independent of
+/// List sessions across `~/.claude/projects/` (modern), `~/.codex/sessions`
+/// (P5 KH-01 multi-agent), AND `~/.claude/transcripts/` (legacy, pre-v2.1.114
+/// flat dir) sorted most-recent first. Pure parser walk — independent of
 /// Qdrant. Powers the Time Machine stack on app boot.
 ///
-/// If `path` is provided, only that root is scanned.
+/// If `path` is provided, only that root is scanned (legacy transcripts still
+/// folded in so the user keeps their full history).
 #[tauri::command]
 pub async fn list_sessions(
     path: Option<PathBuf>,
     limit: Option<usize>,
 ) -> Result<Vec<SessionSummary>, String> {
-    let mut sessions = if let Some(root) = path {
-        scan_root_routed(&root).map_err(stringify)?
-    } else {
-        scan_all_roots().map_err(stringify)?
-    };
+    // ~2 000 jsonl walks worth of file IO + JSON parsing — move it off
+    // the tokio worker so other IPC requests (prompt_history_stats,
+    // recall, …) aren't parked while we boot the dashboard.
+    //
+    // MERGE NOTE (full-sync): single-root path also pulls legacy
+    // `~/.claude/transcripts/` so the upstream migration's full corpus
+    // survives even when callers pin a specific root.
+    let sessions = tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<parser::Session>> {
+        if let Some(root) = path {
+            let mut s = scan_root_routed(&root)?;
+            if let Ok(legacy) = parser::scan_transcripts_dir(&default_transcripts_root()) {
+                s.extend(legacy);
+            }
+            Ok(s)
+        } else {
+            scan_all_roots()
+        }
+    })
+    .await
+    .map_err(|e| format!("list_sessions scan task panicked: {e}"))?
+    .map_err(stringify)?;
+    let mut sessions = sessions;
     sessions.sort_by(|a, b| b.start_time.cmp(&a.start_time));
     let limit = limit.unwrap_or(60).min(sessions.len());
     Ok(sessions

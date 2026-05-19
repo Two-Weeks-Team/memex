@@ -1,0 +1,4 @@
+{"type":"user","timestamp":"2026-02-12T13:56:58.762Z","content":"hello"}
+{"type":"tool_use","timestamp":"2026-02-12T13:57:00.000Z","tool_name":"Bash","tool_input":{"command":"ls"}}
+{"type":"tool_result","timestamp":"2026-02-12T13:57:01.000Z","tool_name":"Bash","tool_input":{"command":"ls"},"tool_output":"file.txt\n"}
+{"type":"user","timestamp":"2026-02-12T13:57:05.000Z","content":"ok"}

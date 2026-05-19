@@ -105,6 +105,16 @@ pub enum Command {
         #[command(subcommand)]
         op: SnapshotOp,
     },
+    /// Start the Model Context Protocol server over stdio. Any MCP-aware
+    /// agent (Claude Code, Codex, Cursor, …) can register Memex via:
+    ///   claude mcp add memex /path/to/memex mcp
+    Mcp,
+    /// Print the `claude mcp add` command for this binary (and optionally run it).
+    InstallMcp {
+        /// Also execute the command instead of just printing.
+        #[arg(long)]
+        run: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -147,7 +157,36 @@ pub fn run(args: Vec<String>) -> Result<()> {
             neighbors,
         } => cmd_predict(session_id, last_n, horizon, neighbors),
         Command::Snapshot { op } => cmd_snapshot(op),
+        Command::Mcp => cmd_mcp(),
+        Command::InstallMcp { run } => cmd_install_mcp(run),
     }
+}
+
+fn cmd_mcp() -> Result<()> {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+    rt.block_on(async {
+        crate::mcp::run().await
+    })
+}
+
+fn cmd_install_mcp(run: bool) -> Result<()> {
+    let exe = std::env::current_exe()?;
+    let path = exe.canonicalize().unwrap_or(exe);
+    println!("# Register Memex with Claude Code:");
+    println!("claude mcp add memex {} mcp", path.display());
+    println!();
+    println!("# Then verify:");
+    println!("claude mcp list   # should show 'memex ✓'");
+    if run {
+        let out = std::process::Command::new("claude")
+            .args(["mcp", "add", "memex", path.to_str().unwrap_or(""), "mcp"])
+            .output()?;
+        std::io::Write::write_all(&mut std::io::stdout(), &out.stdout)?;
+        std::io::Write::write_all(&mut std::io::stderr(), &out.stderr)?;
+    }
+    Ok(())
 }
 
 fn cmd_scan(

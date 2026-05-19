@@ -2,7 +2,10 @@
 
 use std::path::PathBuf;
 
-use memex_lib::parser::{parse_session, scan_dir, TurnRole};
+use memex_lib::parser::{
+    parse_session, parse_transcript_session, read_prompt_history_stats, scan_dir,
+    scan_transcripts_dir, TurnRole,
+};
 
 fn fixture(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -135,4 +138,117 @@ fn scan_skips_subagents_dir() {
         "subagents/ traces must be skipped at scan time"
     );
     assert_eq!(sessions[0].session_id, "sa1");
+}
+
+// ----- legacy `~/.claude/transcripts/` schema (rollout before v2.1.114) -----
+
+fn transcripts_fixture(name: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures_transcripts")
+        .join(name)
+}
+
+#[test]
+fn parse_transcript_minimal_user_and_tool() {
+    let s = parse_transcript_session(&transcripts_fixture("ses_minimal.jsonl")).unwrap();
+    assert_eq!(s.session_id, "ses_minimal", "session_id from file stem");
+    assert_eq!(s.project_name.as_deref(), Some("(legacy transcript)"));
+    assert!(s.project_path.is_none());
+
+    // user → assistant (tool_use + tool_result) → user
+    assert_eq!(s.event_counts.user, 2);
+    assert_eq!(s.turns.len(), 3, "two user turns + one assistant turn");
+
+    assert_eq!(s.turns[0].role, TurnRole::User);
+    assert_eq!(s.turns[0].text, "hello");
+
+    assert_eq!(s.turns[1].role, TurnRole::Assistant);
+    assert_eq!(s.turns[1].tool_calls.len(), 1);
+    assert_eq!(s.turns[1].tool_calls[0].name, "Bash");
+    assert_eq!(s.turns[1].tool_results.len(), 1);
+    assert!(s.turns[1].tool_results[0].content.contains("file.txt"));
+    assert!(!s.turns[1].tool_results[0].is_error, "no error keywords in output");
+
+    assert_eq!(s.turns[2].role, TurnRole::User);
+    assert_eq!(s.turns[2].text, "ok");
+
+    let start = s.start_time.unwrap();
+    let end = s.end_time.unwrap();
+    assert_eq!(start.to_rfc3339(), "2026-02-12T13:56:58.762+00:00");
+    assert_eq!(end.to_rfc3339(), "2026-02-12T13:57:05+00:00");
+}
+
+#[test]
+fn parse_transcript_detects_error_heuristic() {
+    let s = parse_transcript_session(&transcripts_fixture("ses_with_error.jsonl")).unwrap();
+    assert_eq!(s.turns.len(), 2);
+    let assistant = s
+        .turns
+        .iter()
+        .find(|t| t.role == TurnRole::Assistant)
+        .expect("assistant turn");
+    assert_eq!(assistant.tool_results.len(), 1);
+    assert!(
+        assistant.tool_results[0].is_error,
+        "tool_output containing 'Error:' / 'Traceback' should set is_error"
+    );
+}
+
+#[test]
+fn scan_transcripts_dir_picks_up_ses_files() {
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures_transcripts");
+    let mut sessions = scan_transcripts_dir(&dir).expect("transcripts scan");
+    sessions.sort_by(|a, b| a.session_id.cmp(&b.session_id));
+    assert_eq!(sessions.len(), 2);
+    assert_eq!(sessions[0].session_id, "ses_minimal");
+    assert_eq!(sessions[1].session_id, "ses_with_error");
+    for s in &sessions {
+        assert_eq!(s.project_name.as_deref(), Some("(legacy transcript)"));
+    }
+}
+
+#[test]
+fn scan_transcripts_missing_root_returns_empty() {
+    // Clean installs won't have ~/.claude/transcripts/ at all — must not error.
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/no-such-dir-zzzzz");
+    let sessions = scan_transcripts_dir(&dir).expect("missing root should be Ok([])");
+    assert!(sessions.is_empty());
+}
+
+// ----- ~/.claude/history.jsonl — the prompt timeline base layer -----
+
+#[test]
+fn prompt_history_aggregates_by_day_and_counts_projects() {
+    let p = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures_history/history.jsonl");
+    let stats = read_prompt_history_stats(&p).expect("should parse");
+
+    // 6 valid lines + 2 malformed (skipped silently)
+    assert_eq!(stats.total_prompts, 6, "malformed lines must be skipped, not error");
+
+    // 3 distinct projects in the fixture
+    assert_eq!(stats.project_count, 3);
+
+    // Day buckets must be non-empty
+    let total_in_buckets: usize = stats.by_day.values().sum();
+    assert_eq!(total_in_buckets, stats.total_prompts);
+
+    // Earliest/latest match the fixture's timestamps
+    assert_eq!(stats.earliest_ms, Some(1_759_230_433_797));
+    assert_eq!(stats.latest_ms, Some(1_759_489_600_000));
+}
+
+#[test]
+fn prompt_history_missing_file_returns_empty_stats() {
+    // A clean install has no ~/.claude/history.jsonl yet — must not error.
+    let p = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures_history/does-not-exist.jsonl");
+    let stats = read_prompt_history_stats(&p).expect("missing file is Ok(empty)");
+    assert_eq!(stats.total_prompts, 0);
+    assert!(stats.by_day.is_empty());
+    assert_eq!(stats.earliest_ms, None);
+    assert_eq!(stats.latest_ms, None);
+    assert_eq!(stats.project_count, 0);
 }

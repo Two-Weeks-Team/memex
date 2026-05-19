@@ -143,6 +143,56 @@
     .btn.primary:hover { background: #1a90ff; }
     .btn .arrow { font-size: 14px; opacity: 0.8; }
 
+    /* --- MCP badge under the hero CTAs ---------------------------- */
+    .mcp-badge {
+      margin: 22px auto 0;
+      max-width: 720px;
+      text-align: left;
+      border: 1px solid rgba(120, 220, 180, 0.32);
+      background: rgba(120, 220, 180, 0.06);
+      border-radius: 12px;
+      padding: 12px 16px;
+      color: var(--fg-2);
+      font-size: 13.5px;
+    }
+    .mcp-badge[open] { background: rgba(120, 220, 180, 0.10); }
+    .mcp-badge summary {
+      cursor: pointer;
+      list-style: none;
+      display: flex; align-items: center; gap: 10px;
+      font-weight: 500;
+    }
+    .mcp-badge summary::-webkit-details-marker { display: none; }
+    .mcp-badge summary strong { color: rgb(150, 240, 210); font-weight: 600; }
+    .mcp-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: rgb(120, 220, 180);
+      box-shadow: 0 0 0 4px rgba(120, 220, 180, 0.18);
+      flex: 0 0 8px;
+    }
+    .mcp-badge .mcp-cmd { margin-top: 12px; }
+    .mcp-badge pre {
+      background: rgba(0, 0, 0, 0.32);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 12px;
+      font-size: 12.5px;
+      overflow-x: auto;
+      color: var(--fg);
+    }
+    .mcp-badge code { font-family: var(--mono, ui-monospace, SFMono-Regular, monospace); }
+    .mcp-badge .mcp-tools {
+      margin: 10px 0 0;
+      font-size: 12.5px;
+      line-height: 1.55;
+      color: var(--fg-2);
+    }
+    .mcp-badge .mcp-tools code {
+      background: rgba(255, 255, 255, 0.06);
+      padding: 1px 6px;
+      border-radius: 4px;
+    }
+
     /* --- hero screenshots strip ------------------------------------ */
     .shots {
       margin: 56px auto 0;
@@ -406,18 +456,25 @@
 
   <section class="hero">
     <div class="wrap">
-      <div class="eyebrow">🛑 Think Outside the Bot · zero LLM at runtime</div>
-      <h1>Your AI session history<br>as a navigable spatial memory.</h1>
+      <div class="eyebrow">🗄️ Anthropic이 잊어도 Memex는 기억합니다</div>
+      <h1>Your AI session history<br>survives Anthropic's silent migrations.</h1>
       <p class="tagline">
-        Memex turns every Claude&nbsp;Code session you've ever run
-        into a <strong style="color:var(--fg)">non-chatbot</strong> desktop UI
-        powered by six Qdrant primitives.
+        Claude Code rewrites its session storage every few months
+        <strong style="color:var(--fg)">without announcement</strong> and
+        auto-updates silently delete the old files
+        (<a href="https://github.com/anthropics/claude-code/issues/41591" target="_blank" rel="noopener">#41591</a> ·
+        <a href="https://github.com/anthropics/claude-code/issues/54907" target="_blank" rel="noopener">#54907</a> ·
+        <a href="https://github.com/anthropics/claude-code/issues/48782" target="_blank" rel="noopener">#48782</a>).
+        Memex reads both the legacy <code>~/.claude/transcripts/</code>
+        and modern <code>~/.claude/projects/</code> paths, indexes them
+        into a local Qdrant you own, and gives you a snapshot button.
       </p>
       <p class="lede">
         <em>Vannevar Bush imagined the original
         <a href="https://en.wikipedia.org/wiki/Memex" target="_blank" rel="noopener">Memex</a>
         in 1945 — a personal knowledge machine built on associative trails,
-        not search boxes.</em> Eighty years later this is its desktop reincarnation.
+        not search boxes.</em> Eighty years later this is its desktop reincarnation —
+        wrapped in a non-chatbot UI powered by six Qdrant primitives.
       </p>
       <div class="cta">
         <a class="btn primary" href="https://github.com/sgwannabe/memex" target="_blank" rel="noopener">
@@ -430,6 +487,33 @@
           See predict in action <span class="arrow">→</span>
         </a>
       </div>
+
+      <details class="mcp-badge">
+        <summary>
+          <span class="mcp-dot"></span>
+          <strong>Works as an MCP server</strong>
+          — connect any AI agent (Claude Code, Codex, Cursor) to your local memex
+        </summary>
+        <div class="mcp-cmd">
+          <pre><code># one-time wiring — any MCP-aware AI agent can now call Memex tools
+claude mcp add memex /path/to/memex/src-tauri/target/release/memex mcp
+
+# or let Memex print the exact line for your machine
+memex install-mcp --run</code></pre>
+          <p class="mcp-tools">
+            9 tools exposed: <code>find_similar_sessions</code> ·
+            <code>find_similar_error</code> ·
+            <code>predict_next_action</code> ·
+            <code>mix_similar_sessions</code> ·
+            <code>get_session_summary</code> ·
+            <code>get_session_turn</code> ·
+            <code>list_recent_sessions</code> ·
+            <code>analyze_corpus_topology</code> ·
+            <code>snapshot_export</code>.
+            All stay 100 % local — no telemetry, no LLM call inside the server.
+          </p>
+        </div>
+      </details>
 
       <div class="shots">
         <div class="shot">

@@ -1,0 +1,8 @@
+{"display":"hello","pastedContents":[],"timestamp":1759230433797,"project":"/Users/u/proj-a"}
+{"display":"build it","pastedContents":[],"timestamp":1759230500000,"project":"/Users/u/proj-a"}
+{"display":"next prompt","pastedContents":[],"timestamp":1759316833000,"project":"/Users/u/proj-b"}
+{"display":"on the same day","pastedContents":[],"timestamp":1759350000000,"project":"/Users/u/proj-b"}
+{"display":"latest","pastedContents":[],"timestamp":1759403200000,"project":"/Users/u/proj-c","sessionId":"abc"}
+{"display":"malformed line follows"
+malformed json line that should be tolerated and skipped
+{"display":"after malformed","pastedContents":[],"timestamp":1759489600000,"project":"/Users/u/proj-a"}

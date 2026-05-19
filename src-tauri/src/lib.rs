@@ -9,6 +9,7 @@ pub mod eval_ndcg;
 pub mod indexer;
 pub mod insights_cache;
 pub mod lens;
+pub mod mcp;
 pub mod parse_cache;
 pub mod parser;
 pub mod payload;
@@ -16,8 +17,11 @@ pub mod retrieval;
 pub mod schema;
 pub mod sec;
 pub mod snapshot;
+pub mod watcher;
 
+use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
 use tauri::{
     menu::{Menu, MenuItem},
@@ -39,13 +43,34 @@ pub fn run() {
         // and dispatches to the matching tab. macOS uses `Info.plist`
         // `CFBundleURLTypes` (configured via tauri.conf.json `plugins`).
         .plugin(tauri_plugin_deep_link::init())
+        .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             // AppState is managed eagerly with EMPTY lazy slots. Qdrant and
             // fastembed init lazily on the first command that needs them, so
             // the window can open instantly and the app self-heals if the
             // user starts Qdrant after launching Memex.
-            app.manage::<AppStateArc>(Arc::new(AppState::new()));
+            let app_state: AppStateArc = Arc::new(AppState::new());
+            app.manage::<AppStateArc>(app_state.clone());
             eprintln!("[memex] AppState registered (qdrant + embedder will init on first use)");
+
+            // Background auto-index daemon. Walks ~/.claude/projects every
+            // 60 s, re-indexes any session whose mtime advanced. Emits
+            // `index-updated` so the frontend can flash a chip.
+            let watch_root = default_projects_root();
+            // Floor at 1 s so a misconfigured env var (e.g. =0) can't turn
+            // the watcher into a CPU-pegging busy loop.
+            const MIN_WATCH_PERIOD_SECS: u64 = 1;
+            let raw_period = std::env::var("MEMEX_WATCHER_PERIOD_SECS")
+                .ok()
+                .and_then(|s| s.parse::<u64>().ok())
+                .unwrap_or(60);
+            let watch_period = Duration::from_secs(raw_period.max(MIN_WATCH_PERIOD_SECS));
+            watcher::start_watcher(
+                app_state.clone(),
+                app.handle().clone(),
+                watch_root,
+                watch_period,
+            );
 
             // Tray icon — minimal Open / Snapshot / Quit menu.
             let open_item = MenuItem::with_id(app, "open", "Open Memex", true, None::<&str>)?;
@@ -90,6 +115,7 @@ pub fn run() {
             commands::get_session,
             commands::get_session_turns,
             commands::snapshot_export,
+            commands::snapshot_export_default,
             commands::snapshot_import,
             commands::collection_info,
             commands::refresh_index,
@@ -103,7 +129,19 @@ pub fn run() {
             commands::relevance_feedback,
             // P2 KA-01/02/05 — FormulaQuery-backed lens with score breakdown
             commands::lens_search_v2,
+            commands::prompt_history_stats,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+fn default_projects_root() -> PathBuf {
+    if let Ok(home) = std::env::var("HOME") {
+        let mut p = PathBuf::from(home);
+        p.push(".claude");
+        p.push("projects");
+        p
+    } else {
+        PathBuf::from(".claude/projects")
+    }
 }
