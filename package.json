@@ -4,7 +4,8 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "tauri:dist": "tauri build -- --no-default-features"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2"
