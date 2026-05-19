@@ -58,6 +58,42 @@ impl AppState {
         indexer::ensure_collection(&client)
             .await
             .context("connected to Qdrant but failed to ensure the collection schema")?;
+        // P3 KG-03 — v3 collection lives alongside v2. Idempotent.
+        crate::crud::ensure_collection_v3(&client)
+            .await
+            .context("failed to ensure v3 collection schema")?;
+
+        // FUNCTIONAL FIX (Codex review on PR #3, commands.rs:64): on upgrade
+        // from a Memex install that only ever wrote v2, the v3 collection is
+        // empty at startup, so every search/topology/recall returns nothing
+        // until the user manually triggers `scan --index`. Auto-trigger the
+        // v2→v3 carry-forward as a background task so the UI stays
+        // responsive (the migration is paginated, but on a large v2 it may
+        // take minutes). The task is best-effort — failures are logged but
+        // don't block the app from running.
+        let client_for_bg = client.clone();
+        tokio::spawn(async move {
+            match crate::crud::migrate_v2_to_v3_if_needed(&client_for_bg).await {
+                Ok(Some(report)) => {
+                    eprintln!(
+                        "[memex] v2→v3 migration done: {} new points (v2 had {}, v3 was empty), {} skipped, took {}ms",
+                        report.migrated, report.v2_count, report.v2_count.saturating_sub(report.migrated), report.elapsed_ms,
+                    );
+                }
+                Ok(None) => {
+                    // Either v2 is empty or v3 already has data — no-op.
+                }
+                Err(e) => {
+                    // LOG FIX (Gemini PR #11 review, commands.rs:87): Err
+                    // means migration *failed* mid-flight (connectivity,
+                    // auth, server panic) — NOT a routine skip. The
+                    // Ok(None) arm above is the actual no-op case. Word
+                    // accordingly so a postmortem can grep for "failed".
+                    eprintln!("[memex] v2→v3 migration failed: {e:#}");
+                }
+            }
+        });
+
         *guard = Some(client.clone());
         Ok(client)
     }
@@ -192,8 +228,9 @@ pub async fn get_session_turns(
             _ => None,
         })
         .ok_or_else(|| "session payload missing source_path".to_string())?;
-    let session = parser::parse_session(std::path::Path::new(&source))
+    let validated = crate::sec::validate_session_path(std::path::Path::new(&source))
         .map_err(stringify)?;
+    let session = parser::parse_session(&validated).map_err(stringify)?;
     serde_json::to_value(&session).map_err(stringify)
 }
 
@@ -245,7 +282,28 @@ pub async fn predict_next_actions(
 
 #[tauri::command]
 pub async fn snapshot_export(path: PathBuf) -> Result<String, String> {
-    indexer::snapshot_export(&path).await.map_err(stringify)
+    let sb = crate::snapshot::SnapshotSandbox::from_env().map_err(stringify)?;
+    let canonical = sb
+        .validate_path(&path, crate::snapshot::SnapshotOp::Export)
+        .map_err(stringify)?;
+    let name = indexer::snapshot_export(&canonical).await.map_err(stringify)?;
+    // ATOMICITY FIX (CodeRabbit PR #2 review, commands.rs:254): if signing
+    // fails we'd leave an unsigned snapshot in the sandbox that subsequent
+    // exports refuse to overwrite (sandbox `Export` op rejects existing
+    // files) AND that imports happily accept as "legacy unsigned" — both
+    // wrong outcomes. Delete the unsigned bytes on sign failure so the user
+    // can re-run export cleanly, and surface the sign error to them.
+    if let Err(sign_err) = crate::snapshot::SignedEnvelope::sign(&canonical) {
+        let cleanup = std::fs::remove_file(&canonical);
+        return Err(format!(
+            "snapshot signing failed: {sign_err:#}; rollback {}",
+            match cleanup {
+                Ok(()) => "ok".to_string(),
+                Err(e) => format!("ALSO FAILED: {e}"),
+            }
+        ));
+    }
+    Ok(name)
 }
 
 /// Convenience wrapper called from the dashboard's "data archaeology" card —
@@ -261,9 +319,37 @@ pub async fn snapshot_export_default() -> Result<String, String> {
     Ok(format!("{name} → {}", path.display()))
 }
 
+/// Imports a snapshot from the sandboxed snapshot directory after envelope
+/// verification. Returns an empty string on clean import (envelope `Ok`) and a
+/// human-readable warning on the three non-fatal outcomes (legacy / schema
+/// drift / Qdrant minor drift). Tampered or major-version-incompatible
+/// snapshots are rejected with `Err`. Audit MED-1.
 #[tauri::command]
-pub async fn snapshot_import(path: PathBuf) -> Result<(), String> {
-    indexer::snapshot_import(&path).await.map_err(stringify)
+pub async fn snapshot_import(path: PathBuf) -> Result<String, String> {
+    let sb = crate::snapshot::SnapshotSandbox::from_env().map_err(stringify)?;
+    let canonical = sb
+        .validate_path(&path, crate::snapshot::SnapshotOp::Import)
+        .map_err(stringify)?;
+    let warning = match crate::snapshot::SignedEnvelope::verify(&canonical).map_err(stringify)? {
+        crate::snapshot::VerifyOutcome::Ok => String::new(),
+        crate::snapshot::VerifyOutcome::LegacyNoSignature => {
+            let msg = "snapshot has no signature — legacy import allowed".to_string();
+            eprintln!("[memex] {msg}");
+            msg
+        }
+        crate::snapshot::VerifyOutcome::WarnSchemaMismatch { expected, found } => {
+            let msg = format!("snapshot schema {found} differs from current {expected} — proceeding");
+            eprintln!("[memex] {msg}");
+            msg
+        }
+        crate::snapshot::VerifyOutcome::WarnQdrantMinor { expected, found } => {
+            let msg = format!("snapshot qdrant {found} differs from current {expected} — proceeding");
+            eprintln!("[memex] {msg}");
+            msg
+        }
+    };
+    indexer::snapshot_import(&canonical).await.map_err(stringify)?;
+    Ok(warning)
 }
 
 /// Returns a quick collection-level health summary for the splash screen.
@@ -286,34 +372,46 @@ pub async fn collection_info(
     }))
 }
 
-/// Lightweight scan/refresh — re-reads BOTH `~/.claude/projects` (modern)
-/// and `~/.claude/transcripts` (legacy, pre-v2.1.114) and indexes anything
-/// new. Returns how many sessions are now in the collection.
+/// Lightweight scan/refresh — re-reads `~/.claude/projects` (modern),
+/// `~/.codex/sessions` (P5 KH-01 multi-agent), AND `~/.claude/transcripts`
+/// (legacy, pre-v2.1.114) and indexes anything new. Returns how many sessions
+/// are now in the collection.
+///
+/// If `path` is provided, only that single root is scanned (overrides the
+/// multi-root default). Useful for tests and CLI tools.
 #[tauri::command]
 pub async fn refresh_index(
     state: State<'_, AppStateArc>,
     path: Option<PathBuf>,
 ) -> Result<serde_json::Value, String> {
-    // Sync IO offload — see list_sessions for rationale.
+    // PERFORMANCE FIX (Gemini PR #5 review, commands.rs:332): the directory
+    // walk + JSONL parse is synchronous and CPU-bound — running it on the
+    // tokio worker froze the UI on large corpora. Offload to the blocking
+    // pool so the webview stays responsive. The dispatcher must allocate
+    // the closure inputs by `clone()` so the spawned task owns them.
+    //
+    // MERGE NOTE (full-sync): single-root path also pulls legacy
+    // `~/.claude/transcripts/` so users with the legacy dir still benefit
+    // from the upstream migration even when they override `path`.
     let sessions = tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<parser::Session>> {
         if let Some(root) = path {
-            let mut s = parser::scan_dir(&root)?;
+            let mut s = scan_root_routed(&root)?;
             if let Ok(legacy) = parser::scan_transcripts_dir(&default_transcripts_root()) {
                 s.extend(legacy);
             }
             Ok(s)
         } else {
-            scan_all_sources()
+            scan_all_roots()
         }
     })
     .await
-    .map_err(|e| format!("refresh_index scan task panicked: {e}"))?
+    .map_err(|e| format!("refresh_index parse task panicked: {e}"))?
     .map_err(stringify)?;
     let total = sessions.len();
     let qdrant = state.qdrant().await.map_err(stringify)?;
     let embedder = state.embedder().await.map_err(stringify)?;
     indexer::ensure_collection(&qdrant).await.map_err(stringify)?;
-    let report = indexer::bulk_index(&qdrant, &embedder, &sessions)
+    let report = indexer::bulk_index_arc(&qdrant, embedder, &sessions)
         .await
         .map_err(stringify)?;
     Ok(serde_json::json!({
@@ -322,6 +420,97 @@ pub async fn refresh_index(
         "errors": report.errors,
         "total_scanned": total,
     }))
+}
+
+/// Scan both `~/.claude/projects` AND `~/.codex/sessions` and return a unified
+/// `Vec<Session>`. Missing roots are tolerated — if only one agent is
+/// installed, we still get a usable corpus.
+fn scan_all_roots() -> anyhow::Result<Vec<parser::Session>> {
+    let mut all: Vec<parser::Session> = Vec::new();
+    let claude_root = default_projects_root();
+    if claude_root.exists() {
+        match parser::scan_dir(&claude_root) {
+            Ok(mut s) => all.append(&mut s),
+            Err(e) => eprintln!("[memex] claude root scan: {e:#}"),
+        }
+    }
+    let codex_root = default_codex_root();
+    if codex_root.exists() {
+        match crate::codex_parser::scan_codex_dir(&codex_root) {
+            Ok(mut s) => all.append(&mut s),
+            Err(e) => eprintln!("[memex] codex root scan: {e:#}"),
+        }
+    }
+    // MERGE NOTE (full-sync): also fold in legacy `~/.claude/transcripts/`
+    // so the upstream migration's older corpus (Anthropic stopped writing
+    // here at v2.1.114) survives the multi-agent merge.
+    let transcripts_root = default_transcripts_root();
+    if transcripts_root.exists() {
+        match parser::scan_transcripts_dir(&transcripts_root) {
+            Ok(mut s) => all.append(&mut s),
+            Err(e) => eprintln!("[memex] legacy transcripts scan: {e:#}"),
+        }
+    }
+    if all.is_empty() {
+        anyhow::bail!(
+            "no sessions found — neither {} nor {} nor {} contained parseable rollouts",
+            claude_root.display(),
+            codex_root.display(),
+            transcripts_root.display(),
+        );
+    }
+    Ok(all)
+}
+
+/// Route a single explicit root to the right parser.
+///
+/// ROBUSTNESS FIX (Codex PR #5 review, commands.rs:383): the previous
+/// implementation matched on the literal substring `/.codex/sessions`,
+/// which silently fell back to the Claude parser whenever the user
+/// pointed Memex at the same data via:
+///   - a symlink (e.g. `~/codex_data -> ~/.codex/sessions`)
+///   - an alternate mount path
+///   - a different letter case (HFS+ case-insensitive volumes)
+///
+/// The Claude parser then accepts Codex JSONL but extracts almost no fields
+/// from the alien schema, so refresh_index/list_sessions silently pollute
+/// the index with empty sessions instead of surfacing a parse error. Fix:
+/// canonicalize first and also peek at the first rollout filename pattern
+/// to detect Codex content regardless of how the user reached the path.
+fn scan_root_routed(root: &std::path::Path) -> anyhow::Result<Vec<parser::Session>> {
+    // 1) Canonical path string — resolves symlinks, normalises case on HFS+.
+    let canonical = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    let s_lower = canonical.to_string_lossy().to_lowercase();
+    if s_lower.contains("/.codex/sessions") || s_lower.ends_with(".codex/sessions") {
+        return crate::codex_parser::scan_codex_dir(&canonical);
+    }
+    // 2) Content sniff — look at the first rollout-shaped file. Codex
+    //    sessions follow the `rollout-*.jsonl` convention, while Claude's
+    //    are typically `<uuid>.jsonl`. We only need to check ONE file to
+    //    pick the right parser.
+    let first_rollout = walkdir::WalkDir::new(&canonical)
+        .max_depth(4)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .find(|e| {
+            let name = e.file_name().to_string_lossy().to_lowercase();
+            name.starts_with("rollout-") && name.ends_with(".jsonl")
+        });
+    if first_rollout.is_some() {
+        return crate::codex_parser::scan_codex_dir(&canonical);
+    }
+    parser::scan_dir(&canonical)
+}
+
+fn default_codex_root() -> PathBuf {
+    if let Ok(home) = std::env::var("HOME") {
+        let mut p = PathBuf::from(home);
+        p.push(".codex");
+        p.push("sessions");
+        p
+    } else {
+        PathBuf::from(".codex/sessions")
+    }
 }
 
 fn default_projects_root() -> PathBuf {
@@ -357,6 +546,11 @@ fn default_transcripts_root() -> PathBuf {
 /// another machine, or a fresh install where projects/ hasn't been
 /// created yet) still gets a working dashboard. Only when BOTH roots
 /// fail do we propagate the error.
+///
+/// MERGE NOTE (full-sync): superseded by `scan_all_roots` which also
+/// includes Codex (`~/.codex/sessions`). Kept as a documented two-root
+/// alternative and as an integration point for future tooling.
+#[allow(dead_code)]
 fn scan_all_sources() -> anyhow::Result<Vec<parser::Session>> {
     let projects_result = parser::scan_dir(&default_projects_root());
     let legacy_result = parser::scan_transcripts_dir(&default_transcripts_root());
@@ -460,10 +654,13 @@ impl From<parser::Session> for SessionSummary {
     }
 }
 
-/// List sessions across BOTH the modern `~/.claude/projects/` tree and the
-/// legacy `~/.claude/transcripts/` flat dir, sorted most-recent first. Pure
-/// parser walk — independent of Qdrant. Powers the Time Machine stack on
-/// app boot.
+/// List sessions across `~/.claude/projects/` (modern), `~/.codex/sessions`
+/// (P5 KH-01 multi-agent), AND `~/.claude/transcripts/` (legacy, pre-v2.1.114
+/// flat dir) sorted most-recent first. Pure parser walk — independent of
+/// Qdrant. Powers the Time Machine stack on app boot.
+///
+/// If `path` is provided, only that root is scanned (legacy transcripts still
+/// folded in so the user keeps their full history).
 #[tauri::command]
 pub async fn list_sessions(
     path: Option<PathBuf>,
@@ -472,15 +669,19 @@ pub async fn list_sessions(
     // ~2 000 jsonl walks worth of file IO + JSON parsing — move it off
     // the tokio worker so other IPC requests (prompt_history_stats,
     // recall, …) aren't parked while we boot the dashboard.
+    //
+    // MERGE NOTE (full-sync): single-root path also pulls legacy
+    // `~/.claude/transcripts/` so the upstream migration's full corpus
+    // survives even when callers pin a specific root.
     let sessions = tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<parser::Session>> {
         if let Some(root) = path {
-            let mut s = parser::scan_dir(&root)?;
+            let mut s = scan_root_routed(&root)?;
             if let Ok(legacy) = parser::scan_transcripts_dir(&default_transcripts_root()) {
                 s.extend(legacy);
             }
             Ok(s)
         } else {
-            scan_all_sources()
+            scan_all_roots()
         }
     })
     .await
@@ -583,18 +784,41 @@ pub async fn tail_recent_errors(
             if latest_err.is_some() {
                 break;
             }
+            // ROOT-CAUSE FIX (D-13 user complaint about noisy recall banner
+            // for jq syntax errors): only structured tool_result errors
+            // surface to the banner. The previous code ALSO matched any
+            // text line containing "error:" / "traceback" / "panic" —
+            // including stderr passthrough from one-off shell commands
+            // ("jq: error: syntax error", "rg: no match", "cat: file not
+            // found"), which are seldom actionable as a recall hint and
+            // simply add noise. Structured tool_results with `is_error:
+            // true` come from Claude's tool-use protocol and have already
+            // been validated as a real failure by the tool runtime; those
+            // ARE worth surfacing.
             if let Some(err) = turn.tool_results.iter().rev().find(|r| r.is_error) {
                 let head: String = err.content.chars().take(800).collect();
+                // Filter out shell-stderr passthrough that wraps trivial
+                // CLI quoting issues. These are non-actionable noise —
+                // they reflect a typo, not a recurring bug.
+                let lower = head.to_ascii_lowercase();
+                let is_shell_stderr_noise = lower.starts_with("exit code")
+                    || lower.contains("syntax error")
+                    || lower.contains("command not found")
+                    || lower.contains("no such file or directory")
+                    || lower.contains("unbound variable")
+                    || lower.contains("parse error");
+                if is_shell_stderr_noise {
+                    // Skip silently — keep looking through older turns for
+                    // a real (non-shell-noise) tool error.
+                    continue;
+                }
                 latest_err = Some(head);
                 break;
             }
-            for line in turn.text.lines().rev() {
-                let lower = line.to_ascii_lowercase();
-                if lower.contains("error:") || lower.contains("traceback") || lower.contains("panic") {
-                    latest_err = Some(line.trim().to_string());
-                    break;
-                }
-            }
+            // INTENTIONALLY: no body-text regex. Plain `error:` in user
+            // prose ("I'm getting an error: …") is the user asking a
+            // question, not the runtime encountering one — surfacing
+            // recall banners for those was confusing.
         }
 
         let entry_err = latest_err.map(|err| RecentError {
@@ -621,4 +845,113 @@ pub async fn tail_recent_errors(
         }
     }
     Ok(out)
+}
+
+// ===========================================================================
+// P4 advanced retrieval commands
+// ===========================================================================
+
+/// KB-03 — Mix & Match with explicit context pairs (Discovery API). The
+/// legacy `mix_match(positive, negative, limit)` command stays in place for
+/// backward compatibility; this new command exposes the pair-based shape.
+#[tauri::command]
+pub async fn mix_match_with_pairs(
+    state: State<'_, AppStateArc>,
+    target_session_id: String,
+    pairs: Vec<crate::retrieval::ContextPair>,
+    limit: Option<u64>,
+) -> Result<Vec<crate::indexer::SearchHit>, String> {
+    let qdrant = state.qdrant().await.map_err(stringify)?;
+    crate::retrieval::mix_match_with_pairs(
+        &qdrant,
+        &target_session_id,
+        &pairs,
+        limit.unwrap_or(20),
+    )
+    .await
+    .map_err(stringify)
+}
+
+/// KB-05 — Scroll v3 with order_by. Backward-compat: when `order_by` is
+/// `None`, defaults to `start_ts_dt desc` so existing UI flows that rely on
+/// "most recent first" semantics still work.
+#[tauri::command]
+pub async fn list_sessions_ordered(
+    state: State<'_, AppStateArc>,
+    order_by: Option<crate::retrieval::OrderBySpec>,
+    limit: Option<u32>,
+) -> Result<Vec<crate::retrieval::SessionMeta>, String> {
+    let qdrant = state.qdrant().await.map_err(stringify)?;
+    crate::retrieval::list_sessions_ordered(&qdrant, order_by, None, limit.unwrap_or(60))
+        .await
+        .map_err(stringify)
+}
+
+/// KA-03 — Lens search with optional group_by. When `group_by` is `None` the
+/// response carries only `flat` hits (backward-compat). When provided, the
+/// response also carries the `groups` projection.
+#[tauri::command]
+pub async fn lens_search_grouped(
+    state: State<'_, AppStateArc>,
+    query: String,
+    group_by: Option<crate::retrieval::GroupBy>,
+    limit: Option<u64>,
+) -> Result<crate::retrieval::LensSearchResponse, String> {
+    let qdrant = state.qdrant().await.map_err(stringify)?;
+    let embedder = state.embedder().await.map_err(stringify)?;
+    crate::retrieval::lens_search_grouped(
+        &qdrant,
+        &embedder,
+        &query,
+        group_by,
+        limit.unwrap_or(20),
+    )
+    .await
+    .map_err(stringify)
+}
+
+/// KA-04 — RelevanceFeedback re-ranking. Caller supplies the previous query
+/// text (re-embedded server-side so the IPC stays narrow) and the
+/// positive/negative session IDs for binary feedback.
+#[tauri::command]
+pub async fn relevance_feedback(
+    state: State<'_, AppStateArc>,
+    previous_query: String,
+    positive_ids: Vec<String>,
+    negative_ids: Vec<String>,
+    limit: Option<u64>,
+) -> Result<Vec<crate::indexer::SearchHit>, String> {
+    let qdrant = state.qdrant().await.map_err(stringify)?;
+    let embedder = state.embedder().await.map_err(stringify)?;
+    crate::retrieval::relevance_feedback(
+        &qdrant,
+        &embedder,
+        &positive_ids,
+        &negative_ids,
+        &previous_query,
+        limit.unwrap_or(20),
+    )
+    .await
+    .map_err(stringify)
+}
+
+/// P2 KA-01/02/05 + KB-02 — FormulaQuery-backed lens with per-vector score
+/// breakdown. The richer `LensResult` shape replaces `SearchHit` for callers
+/// (e.g. WOW-3 inspector) that want contribution bars, recency factor, and
+/// has_errors boost. The legacy `lens_search` command still works and now
+/// internally routes through the same FormulaQuery path.
+#[tauri::command]
+pub async fn lens_search_v2(
+    state: State<'_, AppStateArc>,
+    query: String,
+    weights: Option<crate::lens::LensWeights>,
+    limit: Option<u64>,
+) -> Result<Vec<crate::lens::LensResult>, String> {
+    let weights = weights.unwrap_or_default();
+    let limit = limit.unwrap_or(20);
+    let qdrant = state.qdrant().await.map_err(stringify)?;
+    let embedder = state.embedder().await.map_err(stringify)?;
+    crate::lens::lens_search_v2(&qdrant, &embedder, &query, &weights, limit)
+        .await
+        .map_err(stringify)
 }

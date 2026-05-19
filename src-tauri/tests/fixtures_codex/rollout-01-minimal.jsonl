@@ -1,0 +1,4 @@
+{"timestamp":"2026-05-18T07:00:00.000Z","type":"session_meta","payload":{"id":"019e39e6-aaaa-bbbb-cccc-000000000001","timestamp":"2026-05-18T07:00:00.000Z","cwd":"/Users/test/projects/demo","originator":"Codex CLI","cli_version":"0.131.0-alpha.9","source":"cli","model_provider":"openai"}}
+{"timestamp":"2026-05-18T07:00:01.000Z","type":"event_msg","payload":{"type":"task_started","turn_id":"t1","started_at":1779087600}}
+{"timestamp":"2026-05-18T07:00:02.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"What does the parser do?"}]}}
+{"timestamp":"2026-05-18T07:00:03.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"It reads JSONL session files and lifts them into Session structs."}]}}

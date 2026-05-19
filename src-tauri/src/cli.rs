@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 
-use crate::{indexer, parser};
+use crate::{codex_parser, crud, indexer, parser};
 
 #[derive(Debug, Parser)]
 #[command(name = "memex", version, about = "Time Machine for AI session JSONL")]
@@ -17,11 +17,14 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub enum Command {
-    /// Walk a `~/.claude/projects` root and print a one-line summary per session.
+    /// Walk session roots (Claude + Codex) and print a one-line summary per session.
     Scan {
-        /// Path to scan. Defaults to `~/.claude/projects`.
+        /// Path to scan. If unset, scans BOTH `~/.claude/projects` and `~/.codex/sessions`.
         #[arg(long)]
         path: Option<PathBuf>,
+        /// Filter by agent (P5 KH-01). `claude`, `codex`, or `all` (default).
+        #[arg(long, default_value = "all")]
+        agent: String,
         /// Also index parsed sessions into Qdrant (creates collection if needed).
         #[arg(long)]
         index: bool,
@@ -125,7 +128,7 @@ pub enum SnapshotOp {
 pub fn run(args: Vec<String>) -> Result<()> {
     let cli = Cli::try_parse_from(args)?;
     match cli.command {
-        Command::Scan { path, index, limit } => cmd_scan(path, index, limit),
+        Command::Scan { path, agent, index, limit } => cmd_scan(path, agent, index, limit),
         Command::Search { query, limit } => cmd_search(query, limit),
         Command::Lens {
             query,
@@ -186,10 +189,18 @@ fn cmd_install_mcp(run: bool) -> Result<()> {
     Ok(())
 }
 
-fn cmd_scan(path: Option<PathBuf>, index: bool, limit: Option<usize>) -> Result<()> {
-    let root = path.unwrap_or_else(default_projects_root);
-    eprintln!("scanning {}", root.display());
-    let mut sessions = parser::scan_dir(&root)?;
+fn cmd_scan(
+    path: Option<PathBuf>,
+    agent: String,
+    index: bool,
+    limit: Option<usize>,
+) -> Result<()> {
+    let mut sessions: Vec<parser::Session> = if let Some(p) = path {
+        eprintln!("scanning {} (single root)", p.display());
+        scan_root_routed(&p)?
+    } else {
+        scan_by_agent(&agent)?
+    };
     sessions.sort_by(|a, b| b.start_time.cmp(&a.start_time));
 
     let total = sessions.len();
@@ -222,14 +233,21 @@ fn cmd_scan(path: Option<PathBuf>, index: bool, limit: Option<usize>) -> Result<
             .context("building tokio runtime")?;
         rt.block_on(async {
             let client = indexer::connect().await?;
+            // P3 KG-03 dual-write: write path is v3, so v3 must exist.
+            // The legacy v2 (`memex_sessions`) ensure stays for read-fallback
+            // (KC-01b dual-read in retrieval.rs).
+            crud::ensure_collection_v3(&client)
+                .await
+                .context("ensuring v3 collection before bulk index")?;
             indexer::ensure_collection(&client).await?;
-            let embedder = indexer::Embedder::new()?;
-            let report = indexer::bulk_index(&client, &embedder, &sessions).await?;
+            let embedder = std::sync::Arc::new(indexer::Embedder::new()?);
+            // P5 — Arc-based bulk index uses embed_pool batching.
+            let report = indexer::bulk_index_arc(&client, embedder, &sessions).await?;
             eprintln!(
                 "\nindexed {}/{} session(s) into '{}' ({} duplicate sessionId(s) skipped, {} error(s))",
                 report.indexed,
                 total,
-                indexer::COLLECTION,
+                crate::schema::COLLECTION_V3,
                 report.duplicates_skipped,
                 report.errors,
             );
@@ -237,6 +255,71 @@ fn cmd_scan(path: Option<PathBuf>, index: bool, limit: Option<usize>) -> Result<
         })?;
     }
     Ok(())
+}
+
+/// Dispatch `scan` by `--agent` flag. `claude` → Claude only;
+/// `codex` → Codex only; anything else (default `all`) → both.
+fn scan_by_agent(agent: &str) -> Result<Vec<parser::Session>> {
+    let agent = agent.to_lowercase();
+    match agent.as_str() {
+        "claude" | "claude_code" => {
+            let root = default_projects_root();
+            eprintln!("scanning {} (claude only)", root.display());
+            Ok(parser::scan_dir(&root)?)
+        }
+        "codex" => {
+            let root = default_codex_root();
+            eprintln!("scanning {} (codex only)", root.display());
+            Ok(codex_parser::scan_codex_dir(&root)?)
+        }
+        _ => {
+            let claude = default_projects_root();
+            let codex = default_codex_root();
+            eprintln!(
+                "scanning {} + {} (all agents)",
+                claude.display(),
+                codex.display()
+            );
+            let mut all: Vec<parser::Session> = Vec::new();
+            if claude.exists() {
+                match parser::scan_dir(&claude) {
+                    Ok(mut s) => all.append(&mut s),
+                    Err(e) => eprintln!("  claude: {e:#}"),
+                }
+            }
+            if codex.exists() {
+                match codex_parser::scan_codex_dir(&codex) {
+                    Ok(mut s) => all.append(&mut s),
+                    Err(e) => eprintln!("  codex: {e:#}"),
+                }
+            }
+            if all.is_empty() {
+                anyhow::bail!("no sessions parsed under either root");
+            }
+            Ok(all)
+        }
+    }
+}
+
+/// Route a single explicit root by substring match on the path.
+fn scan_root_routed(root: &std::path::Path) -> Result<Vec<parser::Session>> {
+    let s = root.to_string_lossy();
+    if s.contains("/.codex/sessions") {
+        Ok(codex_parser::scan_codex_dir(root)?)
+    } else {
+        Ok(parser::scan_dir(root)?)
+    }
+}
+
+fn default_codex_root() -> PathBuf {
+    if let Ok(home) = std::env::var("HOME") {
+        let mut p = PathBuf::from(home);
+        p.push(".codex");
+        p.push("sessions");
+        p
+    } else {
+        PathBuf::from(".codex/sessions")
+    }
 }
 
 fn cmd_search(query: String, limit: u64) -> Result<()> {
@@ -290,6 +373,7 @@ fn cmd_lens(
         path,
         error,
         code,
+        content_late: 0.0,
     };
     let rt = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
     rt.block_on(async {

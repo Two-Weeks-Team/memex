@@ -1,0 +1,61 @@
+{"timestamp": "2026-05-18T10:00:00.000Z", "type": "session_meta", "payload": {"id": "019e39e6-aaaa-bbbb-cccc-000000000004", "timestamp": "2026-05-18T10:00:00.000Z", "cwd": "/Users/test/projects/demo", "originator": "Codex CLI", "cli_version": "0.131.0-alpha.9"}}
+{"timestamp": "2026-05-18T10:01:00.000Z", "type": "response_item", "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "user message 0"}]}}
+{"timestamp": "2026-05-18T10:02:00.000Z", "type": "response_item", "payload": {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "assistant reply 0"}]}}
+{"timestamp": "2026-05-18T10:03:00.000Z", "type": "response_item", "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "user message 1"}]}}
+{"timestamp": "2026-05-18T10:04:00.000Z", "type": "response_item", "payload": {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "assistant reply 1"}]}}
+{"timestamp": "2026-05-18T10:05:00.000Z", "type": "response_item", "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "user message 2"}]}}
+{"timestamp": "2026-05-18T10:06:00.000Z", "type": "response_item", "payload": {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "assistant reply 2"}]}}
+{"timestamp": "2026-05-18T10:07:00.000Z", "type": "response_item", "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "user message 3"}]}}
+{"timestamp": "2026-05-18T10:08:00.000Z", "type": "response_item", "payload": {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "assistant reply 3"}]}}
+{"timestamp": "2026-05-18T10:09:00.000Z", "type": "response_item", "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "user message 4"}]}}
+{"timestamp": "2026-05-18T10:10:00.000Z", "type": "response_item", "payload": {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "assistant reply 4"}]}}
+{"timestamp": "2026-05-18T10:11:00.000Z", "type": "response_item", "payload": {"type": "function_call", "name": "exec_command", "arguments": "{\"cmd\": \"echo step4\"}", "call_id": "call_long_4"}}
+{"timestamp": "2026-05-18T10:12:00.000Z", "type": "response_item", "payload": {"type": "function_call_output", "call_id": "call_long_4", "output": "step4\nProcess exited with code 0"}}
+{"timestamp": "2026-05-18T10:13:00.000Z", "type": "response_item", "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "user message 5"}]}}
+{"timestamp": "2026-05-18T10:14:00.000Z", "type": "response_item", "payload": {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "assistant reply 5"}]}}
+{"timestamp": "2026-05-18T10:15:00.000Z", "type": "response_item", "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "user message 6"}]}}
+{"timestamp": "2026-05-18T10:16:00.000Z", "type": "response_item", "payload": {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "assistant reply 6"}]}}
+{"timestamp": "2026-05-18T10:17:00.000Z", "type": "response_item", "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "user message 7"}]}}
+{"timestamp": "2026-05-18T10:18:00.000Z", "type": "response_item", "payload": {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "assistant reply 7"}]}}
+{"timestamp": "2026-05-18T10:19:00.000Z", "type": "response_item", "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "user message 8"}]}}
+{"timestamp": "2026-05-18T10:20:00.000Z", "type": "response_item", "payload": {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "assistant reply 8"}]}}
+{"timestamp": "2026-05-18T10:21:00.000Z", "type": "response_item", "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "user message 9"}]}}
+{"timestamp": "2026-05-18T10:22:00.000Z", "type": "response_item", "payload": {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "assistant reply 9"}]}}
+{"timestamp": "2026-05-18T10:23:00.000Z", "type": "response_item", "payload": {"type": "function_call", "name": "exec_command", "arguments": "{\"cmd\": \"echo step9\"}", "call_id": "call_long_9"}}
+{"timestamp": "2026-05-18T10:24:00.000Z", "type": "response_item", "payload": {"type": "function_call_output", "call_id": "call_long_9", "output": "step9\nProcess exited with code 0"}}
+{"timestamp": "2026-05-18T10:25:00.000Z", "type": "response_item", "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "user message 10"}]}}
+{"timestamp": "2026-05-18T10:26:00.000Z", "type": "response_item", "payload": {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "assistant reply 10"}]}}
+{"timestamp": "2026-05-18T10:27:00.000Z", "type": "response_item", "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "user message 11"}]}}
+{"timestamp": "2026-05-18T10:28:00.000Z", "type": "response_item", "payload": {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "assistant reply 11"}]}}
+{"timestamp": "2026-05-18T10:29:00.000Z", "type": "response_item", "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "user message 12"}]}}
+{"timestamp": "2026-05-18T10:30:00.000Z", "type": "response_item", "payload": {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "assistant reply 12"}]}}
+{"timestamp": "2026-05-18T10:31:00.000Z", "type": "response_item", "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "user message 13"}]}}
+{"timestamp": "2026-05-18T10:32:00.000Z", "type": "response_item", "payload": {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "assistant reply 13"}]}}
+{"timestamp": "2026-05-18T10:33:00.000Z", "type": "response_item", "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "user message 14"}]}}
+{"timestamp": "2026-05-18T10:34:00.000Z", "type": "response_item", "payload": {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "assistant reply 14"}]}}
+{"timestamp": "2026-05-18T10:35:00.000Z", "type": "response_item", "payload": {"type": "function_call", "name": "exec_command", "arguments": "{\"cmd\": \"echo step14\"}", "call_id": "call_long_14"}}
+{"timestamp": "2026-05-18T10:36:00.000Z", "type": "response_item", "payload": {"type": "function_call_output", "call_id": "call_long_14", "output": "step14\nProcess exited with code 0"}}
+{"timestamp": "2026-05-18T10:37:00.000Z", "type": "response_item", "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "user message 15"}]}}
+{"timestamp": "2026-05-18T10:38:00.000Z", "type": "response_item", "payload": {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "assistant reply 15"}]}}
+{"timestamp": "2026-05-18T10:39:00.000Z", "type": "response_item", "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "user message 16"}]}}
+{"timestamp": "2026-05-18T10:40:00.000Z", "type": "response_item", "payload": {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "assistant reply 16"}]}}
+{"timestamp": "2026-05-18T10:41:00.000Z", "type": "response_item", "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "user message 17"}]}}
+{"timestamp": "2026-05-18T10:42:00.000Z", "type": "response_item", "payload": {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "assistant reply 17"}]}}
+{"timestamp": "2026-05-18T10:43:00.000Z", "type": "response_item", "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "user message 18"}]}}
+{"timestamp": "2026-05-18T10:44:00.000Z", "type": "response_item", "payload": {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "assistant reply 18"}]}}
+{"timestamp": "2026-05-18T10:45:00.000Z", "type": "response_item", "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "user message 19"}]}}
+{"timestamp": "2026-05-18T10:46:00.000Z", "type": "response_item", "payload": {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "assistant reply 19"}]}}
+{"timestamp": "2026-05-18T10:47:00.000Z", "type": "response_item", "payload": {"type": "function_call", "name": "exec_command", "arguments": "{\"cmd\": \"echo step19\"}", "call_id": "call_long_19"}}
+{"timestamp": "2026-05-18T10:48:00.000Z", "type": "response_item", "payload": {"type": "function_call_output", "call_id": "call_long_19", "output": "step19\nProcess exited with code 0"}}
+{"timestamp": "2026-05-18T10:49:00.000Z", "type": "response_item", "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "user message 20"}]}}
+{"timestamp": "2026-05-18T10:50:00.000Z", "type": "response_item", "payload": {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "assistant reply 20"}]}}
+{"timestamp": "2026-05-18T10:51:00.000Z", "type": "response_item", "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "user message 21"}]}}
+{"timestamp": "2026-05-18T10:52:00.000Z", "type": "response_item", "payload": {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "assistant reply 21"}]}}
+{"timestamp": "2026-05-18T10:53:00.000Z", "type": "response_item", "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "user message 22"}]}}
+{"timestamp": "2026-05-18T10:54:00.000Z", "type": "response_item", "payload": {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "assistant reply 22"}]}}
+{"timestamp": "2026-05-18T10:55:00.000Z", "type": "response_item", "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "user message 23"}]}}
+{"timestamp": "2026-05-18T10:56:00.000Z", "type": "response_item", "payload": {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "assistant reply 23"}]}}
+{"timestamp": "2026-05-18T10:57:00.000Z", "type": "response_item", "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "user message 24"}]}}
+{"timestamp": "2026-05-18T10:58:00.000Z", "type": "response_item", "payload": {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "assistant reply 24"}]}}
+{"timestamp": "2026-05-18T10:59:00.000Z", "type": "response_item", "payload": {"type": "function_call", "name": "exec_command", "arguments": "{\"cmd\": \"echo step24\"}", "call_id": "call_long_24"}}
+{"timestamp": "2026-05-18T10:60:00.000Z", "type": "response_item", "payload": {"type": "function_call_output", "call_id": "call_long_24", "output": "step24\nProcess exited with code 0"}}
