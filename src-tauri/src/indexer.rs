@@ -722,7 +722,22 @@ async fn bulk_index_legacy(
 }
 
 /// Flush one batch — collect 5 extracts per session, embed them in ONE pool
-/// call, then per-session pack + upsert with multivector.
+/// call, build all per-session points, then upsert them in a SINGLE Qdrant
+/// round-trip.
+///
+/// PERF FIX (Gemini PR #5 review, indexer.rs:737): the previous loop body
+/// called `upsert_points(vec![point])` once per session with `wait(true)`.
+/// That is one round-trip per session, and `wait(true)` makes each call
+/// block until the server has finished indexing — so the legacy bulk cost
+/// was `N × (RTT + index_time)` even though `pool.embed_batch` had already
+/// amortized the embedding cost. By batching the points into a single
+/// `UpsertPointsBuilder` we collapse network cost to one round-trip per
+/// batch (`CROSS_SESSION_BATCH=32`).
+///
+/// Trade-off — on a batch-level error we can no longer attribute the
+/// failure to a specific session. We charge **all** sessions in the batch
+/// as `errors` in that case, which matches the existing conservative
+/// behavior `pool.embed_batch` already had for embedding failures.
 async fn flush_batch(
     client: &Qdrant,
     pool: &crate::embed_pool::EmbedPool,
@@ -754,6 +769,12 @@ async fn flush_batch(
             return;
         }
     };
+
+    // Pack all sessions into PointStructs. Late-embed failures are charged
+    // per-session here (we DO have per-session attribution at this stage,
+    // since `embed_token_level` is local CPU work — not a Qdrant call).
+    let mut points: Vec<qdrant_client::qdrant::PointStruct> = Vec::with_capacity(local.len());
+    let mut batched_session_ids: Vec<String> = Vec::with_capacity(local.len());
     for (i, s) in local.iter().enumerate() {
         let extracts = &extracts_per_session[i];
         let base = i * 5;
@@ -776,17 +797,35 @@ async fn flush_batch(
             }
         };
         let point = build_point_v3_with_multivec(s, named_dense, chunk_vectors);
-        match client
-            .upsert_points(
-                UpsertPointsBuilder::new(crate::schema::COLLECTION_V3, vec![point]).wait(true),
-            )
-            .await
-        {
-            Ok(_) => report.indexed += 1,
-            Err(e) => {
-                pb.println(format!("  ⚠ {}: {:#}", s.session_id, e));
-                report.errors += 1;
+        points.push(point);
+        batched_session_ids.push(s.session_id.clone());
+    }
+
+    if points.is_empty() {
+        return;
+    }
+
+    // SINGLE-round-trip upsert. Still `wait(true)` so the indexed counter
+    // reflects "server has fully indexed", matching the previous semantics.
+    let batched_n = points.len();
+    match client
+        .upsert_points(UpsertPointsBuilder::new(crate::schema::COLLECTION_V3, points).wait(true))
+        .await
+    {
+        Ok(_) => {
+            report.indexed = report.indexed.saturating_add(batched_n);
+        }
+        Err(e) => {
+            // Batch failure: we don't know which point(s) the server
+            // rejected. Charge them all so the report's total adds up.
+            pb.println(format!(
+                "  ⚠ batch upsert failed ({} session(s)): {:#}",
+                batched_n, e
+            ));
+            for sid in &batched_session_ids {
+                pb.println(format!("    · affected session_id={}", sid));
             }
+            report.errors = report.errors.saturating_add(batched_n);
         }
     }
 }
@@ -1826,34 +1865,17 @@ pub async fn get_session_payload(
     crate::crud::dual_get_session_payload(client, session_id).await
 }
 
-fn payload_i64(
-    p: &HashMap<String, qdrant_client::qdrant::Value>,
-    key: &str,
-) -> Option<i64> {
-    p.get(key).and_then(|v| v.kind.as_ref()).and_then(|k| match k {
-        qdrant_client::qdrant::value::Kind::IntegerValue(i) => Some(*i),
-        _ => None,
-    })
-}
+// `payload_str` / `payload_i64` used to live here (and identical copies
+// lived in retrieval.rs + lens.rs). Lifted into the shared `crate::payload`
+// module (Gemini PR #4 review fix). Re-exported below so existing
+// `indexer::payload_str` callers still work without churn.
+pub(crate) use crate::payload::{payload_i64, payload_str};
 
 fn point_id_string(p: &PointId) -> Option<String> {
     match p.point_id_options.as_ref()? {
         PointIdOptions::Uuid(u) => Some(u.clone()),
         PointIdOptions::Num(n) => Some(n.to_string()),
     }
-}
-
-
-pub(crate) fn payload_str(
-    p: &HashMap<String, qdrant_client::qdrant::Value>,
-    key: &str,
-) -> Option<String> {
-    p.get(key)
-        .and_then(|v| v.kind.as_ref())
-        .and_then(|k| match k {
-            qdrant_client::qdrant::value::Kind::StringValue(s) => Some(s.clone()),
-            _ => None,
-        })
 }
 
 /// Snapshot export — calls Qdrant's HTTP snapshot endpoint and copies the file

@@ -14,10 +14,10 @@ use std::collections::HashMap;
 
 use anyhow::{Context, Result};
 use qdrant_client::qdrant::{
-    point_id::PointIdOptions, value::Kind as ValueKind, ContextInputBuilder, ContextInputPair,
-    Direction, Filter, OrderBy, OrderByBuilder, PointId, Query, QueryPointGroupsBuilder,
-    QueryPointsBuilder, RelevanceFeedbackInputBuilder, ScrollPointsBuilder, SearchParams,
-    SearchParamsBuilder, VectorInput, WithPayloadSelector,
+    point_id::PointIdOptions, ContextInputBuilder, ContextInputPair, Direction, Filter, OrderBy,
+    OrderByBuilder, PointId, Query, QueryPointGroupsBuilder, QueryPointsBuilder,
+    RelevanceFeedbackInputBuilder, ScrollPointsBuilder, SearchParams, SearchParamsBuilder,
+    VectorInput, WithPayloadSelector,
 };
 use qdrant_client::Qdrant;
 use serde::{Deserialize, Serialize};
@@ -418,16 +418,13 @@ pub async fn relevance_feedback(
 }
 
 // ---------------------------------------------------------------------------
-// Payload helpers (local, mirror indexer.rs::payload_str)
-//
-// NOTE (Gemini PR #4 review, retrieval.rs:470): these payload helpers
-// duplicate `indexer.rs::payload_str` + friends. We keep them local for
-// now because lifting them into a shared module touches the whole
-// indexer/retrieval/lens dependency graph; the optional value-vs-default
-// shape (`Option<String>` vs `String` here) also differs across call
-// sites in a way that resists a single shared signature. Deferred to a
-// dedicated cleanup PR.
+// Payload helpers — lifted into `crate::payload` so the three (formerly
+// four) duplicate implementations across indexer.rs/retrieval.rs/lens.rs
+// stay in lock-step. Re-imported below; signatures unchanged so callers
+// don't move (Gemini PR #4 review on retrieval.rs:470).
 // ---------------------------------------------------------------------------
+
+use crate::payload::{payload_bool, payload_i64, payload_string};
 
 /// QUALITY FIX (Gemini PR #4 review, retrieval.rs:186): the mapping from a
 /// Qdrant scored point payload to a `SearchHit` was inlined verbatim at four
@@ -446,34 +443,6 @@ fn map_search_hit(p: qdrant_client::qdrant::ScoredPoint) -> SearchHit {
         start_iso: payload_string(&p.payload, "start_iso"),
         vector_scores: HashMap::new(),
     }
-}
-
-fn payload_string(p: &HashMap<String, qdrant_client::qdrant::Value>, key: &str) -> String {
-    p.get(key)
-        .and_then(|v| v.kind.as_ref())
-        .and_then(|k| match k {
-            ValueKind::StringValue(s) => Some(s.clone()),
-            _ => None,
-        })
-        .unwrap_or_default()
-}
-
-fn payload_i64(p: &HashMap<String, qdrant_client::qdrant::Value>, key: &str) -> Option<i64> {
-    p.get(key)
-        .and_then(|v| v.kind.as_ref())
-        .and_then(|k| match k {
-            ValueKind::IntegerValue(i) => Some(*i),
-            _ => None,
-        })
-}
-
-fn payload_bool(p: &HashMap<String, qdrant_client::qdrant::Value>, key: &str) -> Option<bool> {
-    p.get(key)
-        .and_then(|v| v.kind.as_ref())
-        .and_then(|k| match k {
-            ValueKind::BoolValue(b) => Some(*b),
-            _ => None,
-        })
 }
 
 fn group_id_to_string(id: &Option<qdrant_client::qdrant::GroupId>) -> String {
