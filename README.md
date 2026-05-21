@@ -126,14 +126,27 @@ Inside each `.jsonl` is your *entire* conversation — every prompt, every tool 
 
 ## 🪟 Demo
 
-> **Place placeholders here for the demo video + key screenshots.** Update once recorded.
+Real screenshots from the running app (macOS · Apple Silicon) over an indexed corpus of **258 Claude Code + Codex sessions**.
 
-| Time Machine stack | Topology galaxy | Replay engine |
+| 🪟 Time Machine stack | 🌌 Topology galaxy | 🧪 Mix & Match |
 |:---:|:---:|:---:|
-| _Layered 3D card deck of every past session._ | _Force-directed graph with project clusters + bridge edges + gap insights._ | _Turn-by-turn playback with Bash terminals & Edit diffs._ |
-| ![Stack screenshot — placeholder until demo](docs/img/stack.svg) | ![Topology screenshot — placeholder until demo](docs/img/topology.svg) | ![Replay screenshot — placeholder until demo](docs/img/replay.svg) |
+| _Layered 3D card deck of every past session — ↑↓ / wheel to time-travel._ | _Force-directed galaxy: project clusters, cross-project bridges, gap insights._ | _Discovery hyperplane — drop positives & negatives, get recommendations._ |
+| ![Time Machine layered card stack](docs/img/stack.png) | ![3D topology galaxy with project cluster labels](docs/img/topology.png) | ![Mix & Match discovery hyperplane](docs/img/mix-match.png) |
+| 🔍 **Lens search** | 🔮 **Predict next-action** | ⏯ **Replay engine** |
+| _Weighted multi-named-vector search with per-vector contribution chips._ | _"What past-you did next" — neighbor pivot-walk + tool-call ranking._ | _Turn-by-turn playback with Bash / Edit-diff / Read / Task views._ |
+| ![Lens weighted multi-vector search results](docs/img/lens.png) | ![Predict next-action panel](docs/img/predict.png) | ![Replay engine turn-by-turn playback](docs/img/replay.png) |
 
-▶ **3-min walkthrough video**: _to be added (YouTube unlisted)_
+> 📹 A walkthrough video is **not part of this hackathon submission** — the six surfaces above are captured live from the app.
+
+---
+
+## ⬇️ Download
+
+**[→ Download Memex v0.1.0 for macOS (Apple Silicon)](https://github.com/Two-Weeks-Team/memex/releases/latest)** — `Memex_0.1.0_aarch64.dmg` (~16 MB)
+
+> ⚠️ **First launch (Gatekeeper):** Memex is an **unsigned MVP** — ad-hoc signed, with no Apple notarization. macOS will refuse a normal double-click the first time. Open the `.dmg`, drag **Memex.app** to `/Applications`, then **right-click → Open** and confirm in the dialog — or clear the quarantine flag with `xattr -dr com.apple.quarantine /Applications/Memex.app`. You only need to do this once.
+
+Memex also needs a local **Qdrant** on `localhost:6334` (it self-heals if you start Qdrant after launch) — see [Quick start](#-quick-start). Prefer to compile it yourself? [Build from source](#-quick-start).
 
 ---
 
@@ -325,7 +338,7 @@ The Lens slider is intentionally the *last* surface, not the first.
 
 ```bash
 # 1. Clone + install JS deps
-gh repo clone sgwannabe/memex ~/memex && cd ~/memex && npm install
+gh repo clone Two-Weeks-Team/memex ~/memex && cd ~/memex && npm install
 
 # 2. Start Qdrant (binary path — or docker run -d -p 6333:6333 -p 6334:6334 qdrant/qdrant:v1.18.0)
 mkdir -p .qdrant && curl -sL https://github.com/qdrant/qdrant/releases/download/v1.18.0/qdrant-aarch64-apple-darwin.tar.gz | tar xz -C .qdrant
@@ -355,7 +368,7 @@ That's it. Hit **⌘K**, type something you worked on last month, watch the card
 ### Step 1 — Clone
 
 ```bash
-gh repo clone sgwannabe/memex ~/memex
+gh repo clone Two-Weeks-Team/memex ~/memex
 cd ~/memex
 npm install
 ```
@@ -514,7 +527,7 @@ Deeper reading:
 <td><b>Bundle</b></td>
 <td>
 
-`Memex.app` ~45 MB · `Memex_0.1.0_aarch64.dmg` ~15 MB · No code signing in MVP — right-click → Open the first time.
+`Memex.app` ~47 MB · `Memex_0.1.0_aarch64.dmg` ~16 MB, [shipped on the v0.1.0 release](https://github.com/Two-Weeks-Team/memex/releases/latest) · No code signing in MVP (ad-hoc only) — right-click → Open the first time.
 
 </td>
 </tr>
@@ -547,7 +560,7 @@ This is a **hackathon MVP** built for [Qdrant Vector Space Day 2026](https://qdr
 - ✅ Lazy AppState init — self-heals if Qdrant is started after Memex
 - ✅ EROFS fix — fastembed cache + working-dir-on-launch for the bundled `.app`
 - ✅ Honest duplicate-sessionId detection in indexer reporting
-- ✅ `Memex.app` + `.dmg` for macOS arm64
+- ✅ `Memex.app` + `.dmg` for macOS arm64 — [downloadable on the v0.1.0 release](https://github.com/Two-Weeks-Team/memex/releases/latest)
 
 **Deferred to post-MVP**
 
@@ -568,7 +581,7 @@ This is a personal hackathon project, but PRs that don't break the demo are welc
 - Codex / Cursor / other CLI session formats (parser extension)
 - ColBERT v2 integration via `ort`
 
-For bugs or design feedback, [open an issue](https://github.com/sgwannabe/memex/issues/new).
+For bugs or design feedback, [open an issue](https://github.com/Two-Weeks-Team/memex/issues/new).
 
 ---
 
@@ -579,5 +592,5 @@ For bugs or design feedback, [open an issue](https://github.com/sgwannabe/memex/
 Built on the excellent open work of [Qdrant](https://github.com/qdrant/qdrant), [Tauri](https://github.com/tauri-apps/tauri), [fastembed-rs](https://github.com/Anush008/fastembed-rs), [petgraph](https://github.com/petgraph/petgraph), and [3d-force-graph](https://github.com/vasturiano/3d-force-graph).
 
 <div align="center">
-<sub>Made for <a href="https://qdrant.tech">Qdrant Vector Space Day 2026</a> · <a href="https://github.com/sgwannabe/memex">sgwannabe/memex</a></sub>
+<sub>Made for <a href="https://qdrant.tech">Qdrant Vector Space Day 2026</a> · <a href="https://github.com/Two-Weeks-Team/memex">Two-Weeks-Team/memex</a></sub>
 </div>
