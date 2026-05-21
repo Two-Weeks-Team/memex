@@ -38,6 +38,9 @@ tests/e2e/screenshots/*.png
 tests/e2e/screenshots/*.jpg
 tests/e2e/logs/
 
+# MCP / tooling scratch (Playwright snapshots, console logs)
+.playwright-mcp/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
