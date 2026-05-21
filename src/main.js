@@ -234,6 +234,7 @@ function showWatcherChip(text) {
 //   memex://lens        — focus the search input (lens is the search box)
 //   memex://predict     — focus the predict panel for the active session
 //   memex://mix-match   — open the Mix & Match modal
+//   memex://replay      — open the Replay engine for the active/focused session
 function dispatchDeepLink(rawUrl) {
   if (!rawUrl) return;
   let route;
@@ -302,6 +303,26 @@ function dispatchDeepLink(rawUrl) {
     case "mixmatch":
     case "discovery":
       document.getElementById("btn-mix")?.click();
+      break;
+    case "replay":
+    case "scrub":
+      // Open the Replay engine for the active session if one is selected,
+      // otherwise the card the Time Machine stack is currently focused on
+      // (final fallback: the topmost search result). This is the one surface
+      // that previously had no deep-link entry point.
+      {
+        const focused = state.stack?.[state.stackFocus];
+        const sid =
+          state.selected ||
+          focused?.session_id ||
+          document.querySelector("#results [data-session-id]")?.dataset
+            ?.sessionId;
+        if (sid) {
+          openReplay(sid, focused || {});
+        } else {
+          document.getElementById("search-input")?.focus();
+        }
+      }
       break;
     default:
       // Unknown route — fall back to focusing the search input.

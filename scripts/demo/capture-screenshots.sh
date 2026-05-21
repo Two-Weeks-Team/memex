@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # P8 — Empirically validate the `memex://` deep-link plugin by issuing
-# the 5 routes via macOS `open` and capturing screenshots for evidence.
+# the 6 routes via macOS `open` and capturing screenshots for evidence.
 #
 # Requirements:
 #   - Memex.app installed (DMG mounted + dragged to Applications) OR
@@ -121,7 +121,7 @@ capture_route() {
   # Let the surface render. Different surfaces need different settle times.
   case "$route" in
     topology|mix-match) sleep 3 ;;
-    predict)            sleep 2 ;;
+    predict|replay)     sleep 2 ;;
     *)                  sleep 1 ;;
   esac
   # Bring Memex window unambiguously to the absolute front. The combination
@@ -174,7 +174,7 @@ end tell
 ensure_running || exit 1
 
 # Allow filtering to one route as a positional argument.
-ROUTES=(timemachine topology lens predict mix-match)
+ROUTES=(timemachine topology lens predict mix-match replay)
 if [[ $# -gt 0 ]]; then
   ROUTES=("$@")
 fi
@@ -186,7 +186,7 @@ done
 
 step "Summary"
 COUNT=$(find "$OUTDIR" -name '*.png' -type f | wc -l | tr -d ' ')
-if (( FAILED == 0 )) && (( COUNT >= 5 )); then
+if (( FAILED == 0 )) && (( COUNT >= ${#ROUTES[@]} )); then
   printf "  ${G}✓ ${COUNT} screenshot(s) captured${X}\n"
   exit 0
 else
