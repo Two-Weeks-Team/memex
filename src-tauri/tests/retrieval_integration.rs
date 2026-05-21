@@ -42,7 +42,14 @@ fn skip_if_no_qdrant() -> bool {
 
 async fn client() -> Qdrant {
     let url = std::env::var("MEMEX_QDRANT_URL").unwrap_or_else(|_| "http://localhost:6334".into());
-    Qdrant::from_url(&url).build().expect("qdrant connect")
+    // Client request deadline must exceed the server-side `.timeout(30)` we set on
+    // create_collection: under `cargo test`'s default parallelism these collections
+    // are created concurrently, and the client's default deadline can fire before
+    // the server reports the collection ready.
+    Qdrant::from_url(&url)
+        .timeout(60u64)
+        .build()
+        .expect("qdrant connect")
 }
 
 fn unique_collection(prefix: &str) -> String {
