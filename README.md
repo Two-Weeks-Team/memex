@@ -376,19 +376,37 @@ npm install
 
 ### Step 2 — Start Qdrant
 
-Either download the prebuilt binary…
+**One command** (recommended — uses the pinned `docker-compose.yml`):
 
 ```bash
+bash scripts/start-qdrant.sh
+```
+
+This starts `qdrant/qdrant:v1.18.0`, waits for `/readyz`, and prints the
+health-check command. Qdrant listens on:
+
+| Port | Protocol | Used by | URL |
+|---|---|---|---|
+| **6334** | gRPC | **Memex** (`MEMEX_QDRANT_URL`, default `http://localhost:6334`) | `http://localhost:6334` |
+| 6333 | REST + dashboard + health | health checks, web UI | `http://localhost:6333/dashboard` |
+
+Health check: `curl -fsS http://localhost:6333/readyz && echo OK`.
+Stop later with `bash scripts/start-qdrant.sh --stop` (data is preserved in the `qdrant_storage` volume).
+
+<details>
+<summary>Alternatives (raw Docker, or prebuilt binary)</summary>
+
+```bash
+# Raw docker (no compose):
+docker run -d --name memex-qdrant -p 6333:6333 -p 6334:6334 qdrant/qdrant:v1.18.0
+
+# Prebuilt binary (no Docker — Apple Silicon shown):
 mkdir -p .qdrant && cd .qdrant
 curl -sL https://github.com/qdrant/qdrant/releases/download/v1.18.0/qdrant-aarch64-apple-darwin.tar.gz | tar xz
 ./qdrant            # serves Qdrant on localhost:6333 (HTTP) + 6334 (gRPC)
 ```
 
-…or run it via Docker:
-
-```bash
-docker run -d -p 6333:6333 -p 6334:6334 qdrant/qdrant:v1.18.0
-```
+</details>
 
 Verify: `curl localhost:6333 | jq .title` should print `"qdrant - vector search engine"`.
 
