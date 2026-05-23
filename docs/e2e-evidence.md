@@ -37,8 +37,10 @@ cargo test --manifest-path src-tauri/Cargo.toml --locked -- --test-threads=1
 | `snapshot_integration` | 2 | |
 | **Total** | **228** | **4** |
 
-Integration tests run for real here because Qdrant was up; they self-skip via
-`skip_if_no_qdrant()` when it isn't (so CI, which has no Qdrant, stays green).
+Integration tests run for real here because Qdrant was up. CI instead sets
+`MEMEX_SKIP_QDRANT_TESTS=1` (the in-repo "CI fallback" honored by the
+lens/retrieval/schema suites) so those skip and CI stays green without a Qdrant
+service — the Qdrant-backed coverage is this document.
 
 > **Known flake (not a regression):** the default *parallel* `cargo test` run
 > produced 1 failure in `schema_integration::it_quantization_present_in_collection_info`

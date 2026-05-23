@@ -7,9 +7,12 @@ name: CI
 # What this DOES verify:
 #   - The Rust workspace (the same binary that backs both the CLI and the
 #     Tauri GUI) compiles in release mode.
-#   - The full test suite passes. Integration tests that need a live Qdrant
-#     self-skip via `skip_if_no_qdrant()` (env MEMEX_QDRANT_URL, default
-#     :6334), so they are green on a runner with no Qdrant rather than red.
+#   - The full test suite passes. The lens/retrieval/schema integration
+#     tests talk to a live Qdrant; they honor MEMEX_SKIP_QDRANT_TESTS=1
+#     (the in-repo "CI fallback" documented in those test files), which is
+#     set on the test step below so the hermetic unit + parser/codex tests
+#     still run. The Qdrant-backed surfaces are evidenced separately in
+#     docs/e2e-evidence.md (228 tests pass locally with Qdrant up).
 #   - The JS side installs cleanly from the committed lockfile and the
 #     Tauri config is valid JSON.
 #
@@ -66,7 +69,12 @@ jobs:
         with:
           workspaces: src-tauri
 
-      - name: cargo test (integration tests self-skip without Qdrant)
+      - name: cargo test (Qdrant-dependent integration tests skipped via MEMEX_SKIP_QDRANT_TESTS)
+        env:
+          # lens/retrieval/schema integration tests need a live Qdrant; this
+          # is their in-repo "CI fallback" skip switch. Unit + parser/codex
+          # tests still run. Full Qdrant integration → docs/e2e-evidence.md.
+          MEMEX_SKIP_QDRANT_TESTS: "1"
         run: cargo test --manifest-path src-tauri/Cargo.toml --locked
 
       - name: cargo build --release (Tauri app binary compile smoke)

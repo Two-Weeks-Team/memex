@@ -71,11 +71,18 @@ cargo build --release --manifest-path src-tauri/Cargo.toml   # compile smoke
 cargo test  --manifest-path src-tauri/Cargo.toml             # unit + integration
 ```
 
-Integration tests that need a live Qdrant self-skip via `skip_if_no_qdrant()`
-(env `MEMEX_QDRANT_URL`, default `http://localhost:6334`), so the suite is
-**green without Qdrant** — this is exactly what CI relies on. Run them for real
-by starting Qdrant first. Exact test counts and the last local run are recorded
-in [docs/e2e-evidence.md](e2e-evidence.md).
+The lens/retrieval/schema integration tests need a live Qdrant. Set
+`MEMEX_SKIP_QDRANT_TESTS=1` to skip them (this is their in-repo "CI fallback"),
+leaving the hermetic unit + parser/codex tests:
+
+```bash
+MEMEX_SKIP_QDRANT_TESTS=1 cargo test --manifest-path src-tauri/Cargo.toml --locked
+```
+
+This is exactly what CI runs. To run the Qdrant-backed tests for real, start
+Qdrant first (`bash scripts/start-qdrant.sh`) and drop the env var. Exact test
+counts and the last local run are recorded in
+[docs/e2e-evidence.md](e2e-evidence.md).
 
 ## GUI build (macOS)
 
