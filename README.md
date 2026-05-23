@@ -34,6 +34,47 @@
 
 ---
 
+## 📌 At a glance
+
+| | |
+|---|---|
+| **Repo (canonical)** | [`Two-Weeks-Team/memex`](https://github.com/Two-Weeks-Team/memex) |
+| **Team / author** | Two-Weeks-Team · Sangguen Chang |
+| **Release** | [**v0.1.0**](https://github.com/Two-Weeks-Team/memex/releases/tag/v0.1.0) — `Memex_0.1.0_aarch64.dmg`, macOS Apple Silicon, **unsigned** ([install notes](docs/INSTALL.md)) |
+| **License** | [Apache-2.0](LICENSE) |
+| **Built for** | [Qdrant Vector Space Day 2026](https://qdrant.tech) — *"Think Outside the Bot."* All code authored during the hackathon build period (May 2026). |
+| **Qdrant role** | **Load-bearing, not a sidecar** — five distinct Qdrant primitives *are* the product. **No chatbot, no LLM at runtime.** |
+| **Landing page** | [sgwannabe.github.io/memex](https://sgwannabe.github.io/memex/) (static single-file, no JS) |
+
+### 🧑‍⚖️ Judge path in 5 steps
+
+```bash
+# 1. Start Qdrant (load-bearing dependency) — one command
+bash scripts/start-qdrant.sh
+
+# 2. Install OR source-build Memex
+#    install : https://github.com/Two-Weeks-Team/memex/releases/latest   (Gatekeeper steps → docs/INSTALL.md)
+#    source  : cargo build --release --manifest-path src-tauri/Cargo.toml  (platforms → docs/BUILD.md)
+
+# 3. Load the sample corpus (synthetic — no private data)
+./src-tauri/target/release/memex scan --path examples/sample-corpus --index
+
+# 4. Open the spatial memory view (GUI)   → npm run tauri build && open .../Memex.app
+#    …or stay in the terminal for step 5.
+
+# 5. Inspect the Qdrant-backed features
+memex lens     "build error" --error 2.0 --content 1.0    # named-vector lens
+memex mix      --pos <id> --neg <id>                       # Discovery API
+memex topology --sample 12 --out /tmp/topo.json            # Distance Matrix → MST
+memex recall   "cargo build linker error"                  # proactive recall
+#    replay = GUI surface, played over the indexed sessions
+```
+
+Proof it all runs end-to-end: **[docs/e2e-evidence.md](docs/e2e-evidence.md)** ·
+CLI examples + expected hits: **[examples/sample-corpus/README.md](examples/sample-corpus/README.md)**
+
+---
+
 ## 🗄️ Why Memex exists — your AI memory survives Anthropic's silent migrations
 
 Claude Code rewrites its own session storage every few months **without
@@ -145,7 +186,7 @@ Real screenshots from the running app (macOS · Apple Silicon) over an indexed c
 
 **[→ Download Memex v0.1.0 for macOS (Apple Silicon)](https://github.com/Two-Weeks-Team/memex/releases/latest)** — `Memex_0.1.0_aarch64.dmg` (~16 MB)
 
-> ⚠️ **First launch (Gatekeeper):** Memex is an **unsigned MVP** — ad-hoc signed, with no Apple notarization. macOS will refuse a normal double-click the first time. Open the `.dmg`, drag **Memex.app** to `/Applications`, then **right-click → Open** and confirm in the dialog — or clear the quarantine flag with `xattr -dr com.apple.quarantine /Applications/Memex.app`. You only need to do this once.
+> ⚠️ **First launch (Gatekeeper):** Memex is an **unsigned MVP** — ad-hoc signed, with no Apple notarization. macOS will refuse a normal double-click the first time. Open the `.dmg`, drag **Memex.app** to `/Applications`, then **right-click → Open** and confirm in the dialog — or clear the quarantine flag with `xattr -dr com.apple.quarantine /Applications/Memex.app`. You only need to do this once. **Full clean-machine steps + source-build fallback: [docs/INSTALL.md](docs/INSTALL.md).**
 
 Memex also needs a local **Qdrant** on `localhost:6334` (it self-heals if you start Qdrant after launch) — see [Quick start](#-quick-start). Prefer to compile it yourself? [Build from source](#-quick-start).
 
@@ -443,8 +484,9 @@ npm run tauri:dist     # → bundle/dmg/Memex_*.dmg, Inspector OFF for shipping
 Cargo feature so the resulting bundle is the production-hygiene one
 (no right-click → Inspect Element on the shipped `.dmg`). `npm run
 tauri dev` and `npm run tauri build` keep Inspector on so local
-debugging isn't blocked. See issue [#5](https://github.com/sgwannabe/memex/issues/5)
-for the threat-model discussion.
+debugging isn't blocked. See the `[features]` note in
+[`src-tauri/Cargo.toml`](src-tauri/Cargo.toml) for the devtools threat-model
+rationale.
 
 When the window opens, the bottom status bar should read:
 ```
