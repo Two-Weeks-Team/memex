@@ -1,0 +1,25 @@
+# One-command local Qdrant for Memex.
+#
+#   docker compose up -d qdrant      # or: bash scripts/start-qdrant.sh
+#
+# Memex talks to Qdrant over gRPC on :6334 by default (override with
+# MEMEX_QDRANT_URL). The REST API + health endpoints live on :6333.
+# Pinned to the same Qdrant version Memex was built and tested against.
+services:
+  qdrant:
+    image: qdrant/qdrant:v1.18.0
+    container_name: memex-qdrant
+    restart: unless-stopped
+    ports:
+      - "6333:6333"   # REST API + /healthz /readyz /livez + web dashboard
+      - "6334:6334"   # gRPC API (this is what Memex connects to)
+    volumes:
+      # Named volume so your indexed corpus survives `docker compose down`.
+      # Snapshots written via `memex snapshot export` land here too.
+      - qdrant_storage:/qdrant/storage
+    # Qdrant's image ships no curl/wget, so an in-container HTTP healthcheck
+    # is unreliable. Health is verified from the host instead — see
+    # scripts/start-qdrant.sh, which polls http://localhost:6333/readyz.
+
+volumes:
+  qdrant_storage:

@@ -1,0 +1,99 @@
+name: CI
+
+# Minimal, reproducible verification for Memex. Two jobs, no secrets, no
+# code-signing, no Apple notarization — everything here runs on a clean
+# GitHub-hosted runner.
+#
+# What this DOES verify:
+#   - The Rust workspace (the same binary that backs both the CLI and the
+#     Tauri GUI) compiles in release mode.
+#   - The full test suite passes. The lens/retrieval/schema integration
+#     tests talk to a live Qdrant; they honor MEMEX_SKIP_QDRANT_TESTS=1
+#     (the in-repo "CI fallback" documented in those test files), which is
+#     set on the test step below so the hermetic unit + parser/codex tests
+#     still run. The Qdrant-backed surfaces are evidenced separately in
+#     docs/e2e-evidence.md (228 tests pass locally with Qdrant up).
+#   - The JS side installs cleanly from the committed lockfile and the
+#     Tauri config is valid JSON.
+#
+# What this deliberately does NOT do, and why:
+#   - It does not run `npm run tauri:dist` (the full `.dmg`/bundle build).
+#     A signed, notarized macOS DMG needs an Apple Developer cert + secrets,
+#     and an unsigned bundle build is heavy (~10 min of WebKit/Rust linking)
+#     while proving little beyond what `cargo build --release` already proves:
+#     the Tauri app binary compiles. The release build below IS the Tauri
+#     compile smoke. See docs/BUILD.md for the full local bundle path.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Cancel superseded runs on the same ref to save runner minutes.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  rust:
+    name: Rust build + test (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Tauri 2 needs these system libraries to compile on Linux. They are
+      # the standard Tauri prerequisites; none are macOS/signing specific.
+      - name: Install Tauri Linux system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            librsvg2-dev \
+            libsoup-3.0-dev \
+            libjavascriptcoregtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            libxdo-dev \
+            libssl-dev \
+            build-essential curl wget file pkg-config
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry + target
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: cargo test (Qdrant-dependent integration tests skipped via MEMEX_SKIP_QDRANT_TESTS)
+        env:
+          # lens/retrieval/schema integration tests need a live Qdrant; this
+          # is their in-repo "CI fallback" skip switch. Unit + parser/codex
+          # tests still run. Full Qdrant integration → docs/e2e-evidence.md.
+          MEMEX_SKIP_QDRANT_TESTS: "1"
+        run: cargo test --manifest-path src-tauri/Cargo.toml --locked
+
+      - name: cargo build --release (Tauri app binary compile smoke)
+        run: cargo build --release --manifest-path src-tauri/Cargo.toml --locked
+
+  frontend:
+    name: Frontend install + config validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: npm ci (validates committed lockfile installs cleanly)
+        run: npm ci
+
+      - name: Validate tauri.conf.json is well-formed JSON
+        run: node -e "JSON.parse(require('fs').readFileSync('src-tauri/tauri.conf.json','utf8')); console.log('tauri.conf.json OK')"
