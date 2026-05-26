@@ -105,8 +105,13 @@ pub async fn serve(port: u16, ui_dir: PathBuf) -> Result<()> {
 
     let app = Router::new()
         .merge(api)
-        // Serve index.html with the __TAURI__ fetch shim injected (web only).
+        // Serve the html entrypoints with the __TAURI__ fetch shim injected
+        // (web only). Both index.html and dashboard.html drive the backend via
+        // `invoke()`, so both need the shim; everything else (css/js/assets)
+        // falls through to the static dir below.
         .route("/", get(index_html))
+        .route("/index.html", get(index_html))
+        .route("/dashboard.html", get(dashboard_html))
         .fallback_service(ServeDir::new(&ui_dir).append_index_html_on_directories(true))
         .layer(CorsLayer::permissive())
         .with_state(state);
@@ -459,6 +464,30 @@ async fn dispatch_invoke(s: &WebState, cmd: &str, args: Value) -> ApiResult {
         // A static server corpus has no live sessions changing under it, so
         // proactive-recall polling correctly returns empty (not a stub).
         "tail_recent_errors" => ok_json(Vec::<Value>::new()),
+        // Dashboard activity-heatmap source. Reads ~/.claude/history.jsonl;
+        // when absent (the usual case for a server) the parser returns empty
+        // stats rather than erroring, so the heatmap just shows no prompt data.
+        "prompt_history_stats" => {
+            let path = a_str(&args, "path").map(PathBuf::from).unwrap_or_else(|| {
+                let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+                PathBuf::from(home).join(".claude").join("history.jsonl")
+            });
+            ok_json(
+                tokio::task::spawn_blocking(move || parser::read_prompt_history_stats(&path))
+                    .await
+                    .map_err(|e| err500(format!("history stats task panicked: {e}")))?
+                    .map_err(err500)?,
+            )
+        }
+        // Main UI "Snapshot" button: it prompts for a destination path (works
+        // in a browser) and passes it here. Mirrors the Tauri command, writing
+        // the Qdrant snapshot to that path inside the container.
+        "snapshot_export" => {
+            let path = a_str(&args, "path")
+                .ok_or((StatusCode::BAD_REQUEST, "snapshot_export requires 'path'".to_string()))?;
+            let name = indexer::snapshot_export(&PathBuf::from(&path)).await.map_err(err500)?;
+            ok_json(name)
+        }
         "snapshot_export_default" => {
             let dir = std::env::var("XDG_CACHE_HOME").map(PathBuf::from).unwrap_or_else(|_| PathBuf::from("."));
             let ts = chrono::Utc::now().format("%Y-%m-%dT%H-%M-%S").to_string();
@@ -470,12 +499,15 @@ async fn dispatch_invoke(s: &WebState, cmd: &str, args: Value) -> ApiResult {
     }
 }
 
-/// Serve index.html with the __TAURI__ fetch shim injected so the existing
-/// browser frontend's `invoke()`/`event.listen()` calls work over HTTP. Only
-/// the web server hits this path — the Tauri desktop app loads index.html
-/// directly and is unaffected.
-async fn index_html(State(s): State<WebState>) -> Response {
-    let path = s.ui_dir.join("index.html");
+/// Read a UI html entrypoint and inject the __TAURI__ fetch shim right after
+/// `<head>` so the existing browser frontend's `invoke()`/`event.listen()`
+/// calls work over HTTP. Used for *every* html page the web server owns
+/// (index.html AND dashboard.html) — both call `window.__TAURI__.core.invoke`,
+/// so both need the shim or the page renders but never loads data. The Tauri
+/// desktop app loads these files directly with the real runtime and is
+/// unaffected (it never hits these routes).
+async fn html_with_shim(ui_dir: &std::path::Path, file: &str) -> Response {
+    let path = ui_dir.join(file);
     match tokio::fs::read_to_string(&path).await {
         Ok(html) => {
             let shim = format!("<script>{SHIM_JS}</script>");
@@ -489,8 +521,16 @@ async fn index_html(State(s): State<WebState>) -> Response {
             };
             Html(injected).into_response()
         }
-        Err(_) => (StatusCode::NOT_FOUND, "index.html not found").into_response(),
+        Err(_) => (StatusCode::NOT_FOUND, format!("{file} not found")).into_response(),
     }
+}
+
+async fn index_html(State(s): State<WebState>) -> Response {
+    html_with_shim(&s.ui_dir, "index.html").await
+}
+
+async fn dashboard_html(State(s): State<WebState>) -> Response {
+    html_with_shim(&s.ui_dir, "dashboard.html").await
 }
 
 const SHIM_JS: &str = r#"
