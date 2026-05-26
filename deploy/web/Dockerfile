@@ -41,26 +41,42 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 # Must match the builder's glibc/libstdc++ (trixie) for the ONNX Runtime symbols.
 FROM debian:trixie-slim AS runtime
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      ca-certificates curl libgomp1 libunwind8 \
-    && rm -rf /var/lib/apt/lists/*
+      ca-certificates curl libgomp1 libunwind8 tini \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd --create-home --uid 10001 --shell /usr/sbin/nologin memex
 
 # memex binary + any onnxruntime .so live together; PATH + LD_LIBRARY_PATH point here.
 COPY --from=builder /out /opt/memex
 COPY --from=qdrant  /qdrant/qdrant /usr/local/bin/qdrant
-# Static UI + a ready-to-load synthetic corpus.
+# Static UI. The synthetic corpus lives UNDER $HOME/.claude/projects so that
+# list_sessions, replay, and predict — which re-parse source jsonl through the
+# `sec` sandbox (trusted roots: ~/.claude/projects, ~/.codex/sessions) — work.
 COPY src /app/ui
-COPY examples/sample-corpus /app/sample-corpus
+COPY examples/sample-corpus /home/memex/.claude/projects/memex-sample
 COPY deploy/web/entrypoint.sh /usr/local/bin/entrypoint.sh
-RUN chmod +x /usr/local/bin/entrypoint.sh /opt/memex/memex
+RUN chmod +x /usr/local/bin/entrypoint.sh /opt/memex/memex /usr/local/bin/qdrant
 
 ENV PATH="/opt/memex:${PATH}" \
     LD_LIBRARY_PATH="/opt/memex" \
-    XDG_CACHE_HOME="/app/cache" \
+    HOME="/home/memex" \
+    XDG_CACHE_HOME="/home/memex/.cache" \
     MEMEX_QDRANT_URL="http://localhost:6334" \
     MEMEX_WEB_PORT="8765" \
-    QDRANT__STORAGE__STORAGE_PATH="/qdrant/storage" \
-    MEMEX_WEB_UI_DIR="/app/ui"
+    MEMEX_WEB_UI_DIR="/app/ui" \
+    MEMEX_SCAN_ROOT="/home/memex/.claude/projects/memex-sample" \
+    MEMEX_WEB_AUTOINDEX="1" \
+    QDRANT__STORAGE__STORAGE_PATH="/home/memex/qdrant-storage"
+
+# Pre-bake the embedding model into the image (no first-query network needed),
+# create the Qdrant storage dir, and hand everything to the non-root user.
+RUN memex warm-embedder \
+ && mkdir -p /home/memex/qdrant-storage \
+ && chown -R memex:memex /home/memex
+
+WORKDIR /home/memex
+USER memex
 
 # 8765 = web (UI/API/MCP). 6333/6334 = Qdrant (exposed for inspection/health).
 EXPOSE 8765 6333 6334
-ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+# tini as PID 1 → proper signal handling + zombie reaping for the two processes.
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/entrypoint.sh"]

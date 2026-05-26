@@ -38,9 +38,12 @@ curl -fsS -X POST http://localhost:8765/api/index \
 # → {"indexed":12,"total":12,"errors":0,...}
 ```
 
-> First index/search downloads the BGE-small embedding model (~130 MB) from
-> Hugging Face into `/app/cache` — the container needs network on first use.
-> Mount a volume at `/app/cache` to cache it across runs.
+> The embedding model is **pre-baked into the image** (no first-query network
+> needed), and the container **auto-indexes the bundled corpus on startup**
+> (`MEMEX_WEB_AUTOINDEX=1`) — so the browser UI shows data immediately. The
+> manual `/api/index` call above is only for (re)indexing a different corpus.
+> Point at your own sessions by mounting them under
+> `/home/memex/.claude/projects` and setting `MEMEX_SCAN_ROOT`.
 
 ## JSON API
 
@@ -87,11 +90,28 @@ The web binary compiles with `--no-default-features --features web`: the
 build links neither and runs on `debian:bookworm-slim`. The macOS app build
 (`cargo build --release`, default features) is unchanged.
 
-## Notes / limitations
+## Browser UI
 
-- The static UI (`src/`) currently targets Tauri IPC; over HTTP it loads and
-  renders the shell, while the **JSON API** is the programmatic surface. Wiring
-  the UI to `fetch` the JSON API is a follow-up.
-- The container runs Qdrant + the web server under a small bash supervisor
-  (entrypoint). A process supervisor (tini/s6) would be sturdier for production.
-- Runs as root inside the container (MVP). Add a non-root `USER` for hardening.
+The served UI is **functional in a browser**: a `__TAURI__` fetch shim
+(injected only on the web-served `index.html`) routes the frontend's
+`invoke("cmd", args)` calls to `POST /api/invoke/{cmd}`, which dispatches to the
+same backend logic the desktop app uses. The Tauri desktop app is unaffected
+(it loads `index.html` directly, with the real Tauri runtime).
+
+## Hardening & self-containment
+
+- **Non-root:** runs as user `memex` (uid 10001); ports are all > 1024.
+- **Proper init:** `tini` is PID 1 (signal handling + zombie reaping) over the
+  bash entrypoint that supervises Qdrant + the web server.
+- **Self-contained:** the BGE-small model is **pre-baked** at build time — no
+  network needed at runtime.
+- **Replay & predict work:** the corpus is mounted under
+  `/home/memex/.claude/projects`, a trusted `sec`-sandbox root, so `predict`
+  and turn-by-turn replay (which re-parse source `.jsonl`) function in-container.
+
+## Remaining notes
+
+- The bundled corpus is synthetic sample data; mount your own under
+  `/home/memex/.claude/projects` (+ `MEMEX_SCAN_ROOT`) for real sessions.
+- `tail_recent_errors` (proactive-recall polling) returns empty in the server
+  variant — a static server corpus has no live sessions changing under it.
