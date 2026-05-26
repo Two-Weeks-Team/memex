@@ -55,7 +55,7 @@ preflight() {
     ok "Qdrant container memex-qdrant Up"
   else
     err "memex-qdrant container not running"
-    info "fix: docker run -d --name memex-qdrant -p 6333:6333 -p 6334:6334 qdrant/qdrant:v1.18.0"
+    info "fix: docker run -d --name memex-qdrant -p 6333:6333 -p 6334:6334 qdrant/qdrant:v1.18.1"
     return 1
   fi
 
@@ -68,10 +68,10 @@ preflight() {
 
   local ver
   ver=$(curl -s http://localhost:6333 | python3 -c "import sys,json;print(json.load(sys.stdin).get('version','?'))" 2>/dev/null || echo "?")
-  if [[ "$ver" == "1.18.0" ]]; then
-    ok "Qdrant version 1.18.0 confirmed"
+  if [[ "$ver" == 1.18.* ]]; then
+    ok "Qdrant version $ver confirmed (1.18.x)"
   else
-    warn "Qdrant version is $ver (expected 1.18.0)"
+    warn "Qdrant version is $ver (expected 1.18.x)"
   fi
 
   if [[ -d "$HOME/.fastembed_cache" ]] && [[ -n "$(ls -A "$HOME/.fastembed_cache" 2>/dev/null)" ]]; then

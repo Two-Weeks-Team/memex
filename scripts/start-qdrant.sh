@@ -54,7 +54,7 @@ case "${1:-}" in
   *) echo "usage: $0 [--stop | --down]" >&2; exit 2 ;;
 esac
 
-echo "Starting Qdrant (qdrant/qdrant:v1.18.0) via docker compose…"
+echo "Starting Qdrant (qdrant/qdrant:v1.18.1) via docker compose…"
 docker compose up -d "$SERVICE"
 
 printf "Waiting for Qdrant to become ready at %s/readyz " "$REST_URL"

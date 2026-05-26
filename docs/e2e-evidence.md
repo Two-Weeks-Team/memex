@@ -5,9 +5,9 @@ corpus, and answers across all Qdrant-backed surfaces. Every output below comes
 from the **committed synthetic** `examples/sample-corpus/` (no private data), so
 it is publishable as-is.
 
-- **Run date:** 2026-05-23
+- **Run date:** 2026-05-23 (re-verified 2026-05-26 after the dependency upgrade — `cargo update` + Qdrant 1.18.1; `cargo build --release` + 228 tests still pass, surfaces unchanged)
 - **Host:** macOS (Darwin arm64) · `cargo 1.93.0` · `docker 29.3.1` + compose v2 · `node v24.15.0`
-- **Qdrant:** `qdrant/qdrant:v1.18.0` via `docker-compose.yml`
+- **Qdrant:** `qdrant/qdrant:v1.18.1` via `docker-compose.yml`
 
 Private-corpus E2E (the author's real `~/.claude/projects`) is validated
 separately by `scripts/demo/smoke-test.sh`; its raw artifacts are **gitignored**
@@ -70,7 +70,7 @@ bash scripts/start-qdrant.sh
 #   ✓ Qdrant is up.  gRPC (Memex uses): http://localhost:6334
 
 curl -fsS http://localhost:6333/readyz   # → all shards are ready
-curl -fsS http://localhost:6333/         # → {"title":"qdrant - vector search engine","version":"1.18.0"}
+curl -fsS http://localhost:6333/         # → {"title":"qdrant - vector search engine","version":"1.18.1"}
 ```
 
 gRPC listener confirmed up on `:6334` (the port `MEMEX_QDRANT_URL` points at).
