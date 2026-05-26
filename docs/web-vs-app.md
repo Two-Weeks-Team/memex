@@ -104,7 +104,7 @@ condensed, re-runnable forms:
 # §A  same source, two targets
 cargo build --release --manifest-path src-tauri/Cargo.toml                       # app: Mach-O arm64
 cargo build --release --no-default-features --features web --manifest-path src-tauri/Cargo.toml   # web: native binary
-docker run --rm memex-allinone file /opt/memex/memex                             # in-image: ELF (Linux)
+docker run -d --name elf memex-allinone; docker exec elf head -c4 /opt/memex/memex | od -An -c; docker rm -f elf  # magic: 177 E L F (Linux)
 
 # §B  one-command, offline, hardened
 docker run -d --name m --network none memex-allinone
