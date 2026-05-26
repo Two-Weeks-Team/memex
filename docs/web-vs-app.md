@@ -77,6 +77,24 @@ to *live in* it."
 
 ---
 
+## What it looks like in a browser (every surface, served over HTTP)
+
+All four were captured with Playwright (real Chromium) against the all-in-one
+container — **0 console errors** on load and after interaction:
+
+| | |
+|---|---|
+| ![Time Machine, Lens and Predict in a browser](img/web/web-timemachine.png) | ![Search results re-ranked in-UI](img/web/web-search.png) |
+| **Time Machine + Lens + Predict** — the full deck, 6 named-vector sliders, and "what past-you did next", all live | **Search** — type a query, sessions re-rank in place |
+| ![Topology galaxy in a browser](img/web/web-topology.png) | ![Analytics dashboard in a browser](img/web/web-dashboard.png) |
+| **Topology galaxy** — Distance-Matrix→MST scene over WebGL | **Dashboard** — session analytics; prompt-history cells empty by design (a server has no `history.jsonl`) |
+
+Replay (turn-by-turn) and Mix & Match (Discovery hyperplane) were also driven
+interactively in the browser. The web dispatcher handles **100 % of the 16
+commands** the frontend (`main.js` + `dashboard.js`) invokes.
+
+---
+
 ## Reproduce the web-specific evidence
 
 The exact commands and raw outputs are captured in the PR discussion; the
