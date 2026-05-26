@@ -126,6 +126,11 @@ pub enum Command {
         #[arg(long, default_value = "src")]
         ui_dir: PathBuf,
     },
+    /// Download/load the embedding model into the cache, then exit. Used to
+    /// pre-bake the model into the Docker image so first query needs no
+    /// network. (`web` feature only.)
+    #[cfg(feature = "web")]
+    WarmEmbedder,
 }
 
 #[derive(Debug, Subcommand)]
@@ -172,6 +177,12 @@ pub fn run(args: Vec<String>) -> Result<()> {
         Command::InstallMcp { run } => cmd_install_mcp(run),
         #[cfg(feature = "web")]
         Command::Serve { port, ui_dir } => cmd_serve(port, ui_dir),
+        #[cfg(feature = "web")]
+        Command::WarmEmbedder => {
+            let _ = indexer::Embedder::new()?;
+            println!("embedder model ready");
+            Ok(())
+        }
     }
 }
 
