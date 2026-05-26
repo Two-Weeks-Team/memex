@@ -233,7 +233,7 @@ memex install-mcp           # echoes the `claude mcp add …` line
 memex install-mcp --run     # actually runs it
 ```
 
-The server exposes **9 tools** mapping directly to the same Qdrant primitives that power the desktop UI:
+The server exposes **11 tools** mapping directly to the same Qdrant primitives that power the desktop UI:
 
 | Tool | What it does |
 |---|---|
@@ -246,6 +246,8 @@ The server exposes **9 tools** mapping directly to the same Qdrant primitives th
 | `list_recent_sessions(limit?)` | Most-recent-first walk of `~/.claude/projects` — works even before Qdrant is fully warm. |
 | `analyze_corpus_topology(sample?, per_point?)` | MST of session content vectors, per-project auto-labels, cross-project bridges, and gap insights. |
 | `snapshot_export(path)` | Server-side snapshot of the entire collection to a portable `.snapshot` file. |
+| `get_project_memory(cwd?, limit?)` <kbd>NEW</kbd> | **Cold Start Killer.** Mines past sessions for `cwd` and returns a ready-to-inject memory primer (decisions, pitfalls, stack fingerprint) as markdown. Drop into a new session's system prompt at turn 0. See [Companion family](#-companion-family--agent-memory-layer) below. |
+| `generate_wrapped_report(window_days?, limit?)` <kbd>NEW</kbd> | **Engineering Wrapped.** Corpus-wide digest for the last *N* days: top tools/binaries/languages, intent / arc / outcome mix, repeated decisions, debugging fingerprint, cross-agent split. Screenshot-friendly markdown. |
 
 Example transcript inside a Claude Code session, with Memex wired up:
 
@@ -273,6 +275,128 @@ Behind the scenes Memex stays 100 % local — no LLM calls inside the server, no
 > *"Memex · I've seen this error before · &lt;project&gt; · turn #N"*.
 > Clicking it brings the app to focus and auto-opens the past session's
 > replay so you can scrub through how you fixed it last time.
+
+---
+
+## 🧠 Companion family — agent memory layer
+
+The seven surfaces above are what *you* do in Memex. The **Companion family** is what your *agent* does **through** Memex via MCP — three surfaces that turn Memex from a passive archive into an active memory layer that follows your AI across every session.
+
+| Surface | Triggered by | Backed by |
+|---|---|---|
+| 🧠 **Cold Start Killer** | new Claude Code / Codex session opens | `compose_memory_primer(cwd)` — payload scroll + content-vector neighbors + decision/pitfall mining |
+| 🎁 **Engineering Wrapped** | `memex wrapped` or `generate_wrapped_report` MCP call | `start_ts_dt` datetime-indexed scroll + corpus-wide aggregation + repeated-decision detection |
+| 🔁 **Loop Breaker** | active session shows ≥3 tool errors in last 10 turns | watcher poll → `predict_next_actions` pivot-walk → past session that broke a similar loop |
+
+All three are **zero-LLM**, deterministic, sub-second on a 70-session corpus, and emit standard markdown you can paste straight into a system prompt or screenshot for sharing.
+
+### 🧠 Cold Start Killer — `get_project_memory`
+
+Every Claude Code / Codex session starts with amnesia. Stack already chosen in this codebase? Forgotten. JWT vs NextAuth decided three weeks ago? Forgotten. The known WAL pitfall? You'll re-discover it. Cold Start Killer ends that.
+
+```bash
+memex memory --cwd "$(pwd)" --limit 8 | pbcopy
+# → 1.5 KB markdown primer ready to paste into your next claude / codex turn
+```
+
+Or let the agent fetch it itself (MCP):
+
+```text
+> Add login to this app.
+
+⏺ memex - get_project_memory { cwd: "/Users/demo/acme-saas", limit: 6 }
+  ⎿  📚 Memory Primer
+     Loaded from 5 past session(s) in this codebase (`acme-saas`).
+     Decisions you already made:
+       ▸ Stack: Next.js 15 + Drizzle + Neon Postgres  (acme0001)
+       ▸ Auth: NextAuth v5 + PKCE — JWT-only rejected  (acme0002)
+       ▸ DDL drivers MUST use session-mode pooling  (acme0003)
+       ▸ Wrap with lib/err.ts — never bare Response.json  (acme0004)
+     Known pitfalls:
+       ▸ WAL Kind(WouldBlock) — connection pool exhausted
+
+⏺ Based on your prior decisions, I'll wire NextAuth with PKCE using the
+  existing Drizzle adapter and wrap the new /api/auth route with withErr().
+  No setup questions — past-you already decided.
+```
+
+How it works (no LLM, all deterministic):
+
+1. Scroll v3 collection filtered by `project_name` (tenant keyword index → O(matches) instead of full scan), post-filter on `project_path` equality for *exact* cwd hits.
+2. If fewer than `limit/2` local hits, augment with cross-project semantic neighbors via the `content` named vector on a cwd-derived synthetic query.
+3. Re-parse each session jsonl through `PREDICT_PARSE_CACHE` (LRU memo, mtime-keyed).
+4. Mine each session's head + tail (12 turns each):
+   - **First user turn** → original intent (skipping Conductor / Claude Code XML wrappers + LLM persona preambles)
+   - **Decision turns** — regex on EN (`I'll use X`, `Stack:`, `decided to`) AND KR (`X 쓰자`, `결정:`, `선택`)
+   - **Pitfall turns** — `tool_result.is_error=true` first line, filtered against user-rejection noise
+   - **Tool fingerprint** — top tools + file extensions + bash binaries
+5. Dedup decisions/intents by normalized-key (bullet-marker / case insensitive).
+6. Synthesize markdown ≤ 600 tokens.
+
+Empirical: **140-490 ms** on a 69-session real corpus; **17 ms** on a 5-session demo. Multi-language ready (Korean + English decision patterns verified by 23 unit tests).
+
+The watcher auto-fires this when a brand-new session jsonl appears in `~/.claude/projects` — a macOS notification pops *"📚 Memex loaded memory from N past sessions"* and the in-app Companion panel slides the primer in.
+
+### 🎁 Engineering Wrapped — `generate_wrapped_report`
+
+A corpus-wide digest you can run monthly (or any window). Think "engineering Spotify Wrapped" — screenshot-friendly markdown surfacing patterns about *you* you didn't know.
+
+```bash
+memex wrapped --window-days 30
+```
+
+```text
+🎁 Memex Wrapped — last 30 days
+57 session(s) · 15022 tool call(s) · 32 sessions deep-mined
+
+🧬 Your engineering fingerprint
+- Average 729 turns per session · median 384 · longest 5552 turns
+- 75% of sessions hit at least one error
+- When you're debugging, you fire 467 tool calls per session
+
+📁 Where your time went
+  redesign · 8 · social-seeding · 5 · 2026 · 4 · …
+
+🛠 Top tools          Bash×77 · Read×21 · Agent×5 · Write×5 · Edit×4
+🐚 Bash binaries     ls×20 · cd×12 · git×11 · gh×4 · cargo×4
+📄 Languages         .md×18 · .rs×3 · .swift×3 · .ts×3
+
+🎯 What you actually did    65% build · 28% mixed · 7% impl
+📈 Session shapes           54% debug-fix · 44% mixed
+✅ Outcomes                 77% resolved · 21% partial
+
+🔁 Decisions you re-made
+  - "I'll use Drizzle ORM" — surfaced in 3 sessions
+  - "session-mode pooling" — surfaced in 2 sessions
+```
+
+Mechanics: v3 `start_ts_dt` datetime-indexed range scroll → payload aggregation (intent/arc/outcome distributions) → top-K mining over recent `limit` sessions for repeated decisions across sessions (the *"I keep re-deciding this"* signal). Cross-agent split appears automatically when both Claude Code + Codex are present in your corpus.
+
+### 🔁 Loop Breaker — real-time stuck-detection
+
+The 60 s watcher already polls `~/.claude/projects` for proactive recall (surface #4 above). Loop Breaker is its second job: detect when the active session is *stuck in a loop* and surface what past-you ran to break out.
+
+Trigger conditions (all three must hold):
+- Active session has ≥ 12 turns total (enough history to judge).
+- ≥ 3 `tool_result.is_error=true` events inside the last 10 turns.
+- Per-session debounce window (20 min) has elapsed.
+
+When fired:
+
+```text
+🔁  Memex Loop Breaker · you've been stuck
+    acme-saas · 5 errors in 10 turns
+
+    Past-you broke this loop in #acme0003 (turn #8):
+
+        Bash  pnpm drizzle-kit push:pg  (with pool_mode=session)
+
+    [Show pivot]  [Dismiss]
+```
+
+The "Show pivot" button deep-links into the matched past session's Replay engine at the exact turn where the loop got broken — the user sees the resolution play out as it happened.
+
+Same `predict_next_actions` infrastructure as surface #5 (Predict next-action), reframed: instead of "past-you usually does X next from this position", Loop Breaker says "past-you was stuck like this and *unstuck* by doing X". Zero LLM, ≤ 2 s on a 70-session corpus.
 
 ---
 
@@ -509,6 +633,8 @@ memex mix --pos <session_id> --neg <session_id>
 memex topology --sample 80 --per-point 6 --out topo.json
 memex recall "Tauri build failed missing icons"
 memex predict <session_id> --last-n 3 --horizon 3 --neighbors 8
+memex memory  --cwd "$(pwd)" --limit 8           # NEW · Cold Start Killer (Companion)
+memex wrapped --window-days 30                   # NEW · Engineering Wrapped
 memex snapshot export ./memex.snapshot
 memex snapshot import ./memex.snapshot
 ```
@@ -616,6 +742,9 @@ This is a **hackathon MVP** built for [Qdrant Vector Space Day 2026](https://qdr
 - ✅ 🔮 **Predict next-action** — neighbor-vector pivot walk + tool-call aggregation
 - ✅ ⏯ Replay engine with Bash / Edit-diff / Read / Task tool visualizations at 1×–8×
 - ✅ 🔍 Lens slider (multi-named-vector weighted search) — the "advanced vector search" axis
+- ✅ 🧠 **Cold Start Killer** — `compose_memory_primer(cwd)` + MCP `get_project_memory` + `memex memory` CLI + watcher auto-fire on new session (23 unit tests, multi-language EN+KR heuristics)
+- ✅ 🎁 **Engineering Wrapped** — `compose_wrapped(window_days)` + MCP `generate_wrapped_report` + `memex wrapped` CLI (7 unit tests, datetime-indexed range scroll)
+- ✅ 🔁 **Loop Breaker** — watcher stuck-detection (≥3 errors / 10 turns) + macOS notification + `loop-breaker-ready` event + frontend banner (3 unit tests)
 - ✅ 📦 Snapshot export/import via Qdrant HTTP API
 - ✅ 🌐 Public landing page at [sgwannabe.github.io/memex](https://sgwannabe.github.io/memex/) (single-file `index.html`, no JS)
 - ✅ Lazy AppState init — self-heals if Qdrant is started after Memex

@@ -280,6 +280,46 @@ pub async fn predict_next_actions(
     .map_err(stringify)
 }
 
+/// **Wrapped (GUI surface).** Compose a corpus-wide digest covering the
+/// last `window_days` days (0 = all-time). LLM-free, embedder-free —
+/// pure aggregation over Qdrant payload + JSONL re-parse for decisions.
+#[tauri::command]
+pub async fn compose_wrapped(
+    state: State<'_, AppStateArc>,
+    window_days: Option<u32>,
+    limit: Option<usize>,
+) -> Result<crate::wrapped::WrappedReport, String> {
+    let qdrant = state.qdrant().await.map_err(stringify)?;
+    crate::wrapped::compose_wrapped(
+        &qdrant,
+        window_days.unwrap_or(30),
+        limit.unwrap_or(32),
+    )
+    .await
+    .map_err(stringify)
+}
+
+/// **Cold Start Killer (GUI surface).** Compose a memory primer for the
+/// given cwd. The frontend Companion panel calls this on demand (or in
+/// response to a watcher event that flagged a freshly-opened session).
+#[tauri::command]
+pub async fn compose_memory_primer(
+    state: State<'_, AppStateArc>,
+    cwd: Option<String>,
+    limit: Option<usize>,
+) -> Result<crate::companion::MemoryPrimer, String> {
+    let cwd_path = match cwd.as_deref() {
+        Some(s) if !s.is_empty() => Some(std::path::PathBuf::from(s)),
+        _ => None,
+    };
+    let resolved = crate::companion::resolve_cwd_arg(cwd_path.as_deref()).map_err(stringify)?;
+    let qdrant = state.qdrant().await.map_err(stringify)?;
+    let embedder = state.embedder().await.map_err(stringify)?;
+    crate::companion::compose_memory_primer(&qdrant, &embedder, &resolved, limit.unwrap_or(8))
+        .await
+        .map_err(stringify)
+}
+
 #[tauri::command]
 pub async fn snapshot_export(path: PathBuf) -> Result<String, String> {
     let sb = crate::snapshot::SnapshotSandbox::from_env().map_err(stringify)?;

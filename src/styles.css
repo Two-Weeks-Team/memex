@@ -2586,3 +2586,280 @@ textarea:focus {
 ::-webkit-scrollbar-track {
   background: transparent;
 }
+
+/* ── Memex Companion (Cold Start Killer) ─────────────────────────────── */
+
+.companion-modal {
+  width: min(1180px, 96vw);
+  max-height: min(86vh, 920px);
+}
+
+.companion-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 14px 18px 20px;
+  overflow: hidden;
+}
+
+.companion-controls {
+  display: flex;
+  gap: 10px;
+  align-items: flex-end;
+  flex-wrap: wrap;
+}
+
+.companion-cwd-lbl {
+  flex: 1 1 360px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--text-secondary, rgba(255, 255, 255, 0.62));
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.companion-cwd-input,
+.companion-limit-input {
+  font-family: var(--mono);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: var(--text-primary, #fff);
+  padding: 9px 11px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  outline: none;
+  transition: border 0.15s ease, background 0.15s ease;
+}
+
+.companion-cwd-input:focus,
+.companion-limit-input:focus {
+  border-color: var(--accent, #0a84ff);
+  background: rgba(10, 132, 255, 0.07);
+}
+
+.companion-limit-lbl {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--text-secondary, rgba(255, 255, 255, 0.62));
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.companion-limit-input {
+  width: 88px;
+  text-align: right;
+}
+
+.companion-stats {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.companion-stats.hidden {
+  display: none;
+}
+
+.cs-pill {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  padding: 5px 10px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  color: var(--text-secondary, rgba(255, 255, 255, 0.78));
+}
+
+.cs-pill strong {
+  color: var(--text-primary, #fff);
+  font-weight: 600;
+  margin-right: 4px;
+}
+
+.cs-pill.muted {
+  opacity: 0.72;
+}
+
+.cs-pill.cs-mode {
+  background: var(--accent-soft, rgba(10, 132, 255, 0.18));
+  color: var(--accent, #0a84ff);
+  border-color: rgba(10, 132, 255, 0.35);
+  text-transform: lowercase;
+  letter-spacing: 0;
+}
+
+.cs-pill.cs-mode.cross {
+  background: rgba(191, 90, 242, 0.16);
+  color: #bf5af2;
+  border-color: rgba(191, 90, 242, 0.35);
+}
+
+.companion-grid {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr;
+  gap: 14px;
+  min-height: 0;
+  flex: 1;
+  overflow: hidden;
+}
+
+@media (max-width: 980px) {
+  .companion-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.companion-markdown-wrap,
+.companion-detail {
+  display: flex;
+  flex-direction: column;
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  overflow: hidden;
+  min-height: 280px;
+}
+
+.cm-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 10px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.cm-title {
+  font-size: 11.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-secondary, rgba(255, 255, 255, 0.7));
+  font-weight: 600;
+}
+
+.cm-hint {
+  font-size: 10.5px;
+  font-family: var(--mono);
+}
+
+.companion-markdown {
+  flex: 1;
+  margin: 0;
+  padding: 14px 18px;
+  overflow: auto;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-primary, #fff);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.companion-markdown .empty {
+  color: var(--text-secondary, rgba(255, 255, 255, 0.5));
+  font-family: var(--sans);
+}
+
+.companion-sources {
+  flex: 1;
+  overflow: auto;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.cs-source {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 9px 11px;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  font-size: 12px;
+}
+
+.cs-source:hover {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.12);
+  cursor: pointer;
+}
+
+.cs-source-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.cs-source-title {
+  color: var(--text-primary, #fff);
+  font-weight: 500;
+}
+
+.cs-source-meta {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--text-secondary, rgba(255, 255, 255, 0.55));
+  display: flex;
+  gap: 6px;
+}
+
+.cs-source-reason {
+  font-size: 10.5px;
+  color: var(--text-secondary, rgba(255, 255, 255, 0.5));
+  font-family: var(--mono);
+}
+
+.cs-source.exact .cs-source-reason {
+  color: #30d158;
+}
+
+.cs-source.cross .cs-source-reason {
+  color: #bf5af2;
+}
+
+.companion-recent {
+  border-top: 1px dashed rgba(255, 255, 255, 0.08);
+  padding-top: 10px;
+}
+
+.companion-recent-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 200px;
+  overflow: auto;
+}
+
+.companion-recent-item {
+  padding: 10px 12px;
+  border-radius: 9px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.025);
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: baseline;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s ease, border 0.15s ease;
+}
+
+.companion-recent-item:hover {
+  background: rgba(10, 132, 255, 0.06);
+  border-color: rgba(10, 132, 255, 0.25);
+}
+
+.companion-recent-item .when {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--text-secondary, rgba(255, 255, 255, 0.5));
+}
+

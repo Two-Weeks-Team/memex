@@ -41,10 +41,50 @@ impl SandboxRoot {
     /// in favor of `%USERPROFILE%`). `dirs` is a transitive dependency.
     pub fn from_env() -> Result<Self> {
         let home = dirs::home_dir().context("could not resolve home directory")?;
-        let candidates = [
+        let mut candidates: Vec<(SourceAgent, PathBuf)> = vec![
             (SourceAgent::ClaudeCode, home.join(".claude/projects")),
             (SourceAgent::Codex, home.join(".codex/sessions")),
         ];
+        // Demo / CI escape hatch — `MEMEX_EXTRA_SANDBOX_ROOTS` is a
+        // colon-separated list of additional directories that should pass
+        // path validation. Used by the VSD 2026 demo scenario (which
+        // indexes synthetic English sessions outside $HOME) and by CI
+        // fixtures. Each entry is treated as a ClaudeCode-style root.
+        //
+        // Security note: this is intentionally opt-in via env var so the
+        // default ship behavior (no env) keeps the sandbox locked to the
+        // two real agent roots. A demo runner has to set this explicitly.
+        // We refuse trivially-too-wide entries (root `/`, the user's HOME
+        // itself, any path with < 3 components) and log every accepted
+        // widening to stderr so an operator can't silently broaden the
+        // sandbox via a launchd plist or shell rc. (Security review M-1.)
+        if let Ok(raw) = std::env::var("MEMEX_EXTRA_SANDBOX_ROOTS") {
+            for part in raw.split(':').filter(|s| !s.is_empty()) {
+                let p = PathBuf::from(part);
+                // Reject obvious foot-guns. We compare against the path as
+                // given AND its canonical form (when available) so neither
+                // `/` nor `~` shenanigans get through.
+                let canon = p.canonicalize().ok();
+                let is_root = p == PathBuf::from("/")
+                    || canon.as_ref().is_some_and(|c| c == &PathBuf::from("/"));
+                let is_home = canon.as_ref().is_some_and(|c| c == &home);
+                let too_shallow = canon
+                    .as_ref()
+                    .map(|c| c.components().count() < 3)
+                    .unwrap_or(false);
+                if is_root || is_home || too_shallow {
+                    eprintln!(
+                        "[memex sec] refusing MEMEX_EXTRA_SANDBOX_ROOTS entry {part:?} — \
+                         too wide (root / $HOME / <3 path components). Pick a deeper subdirectory."
+                    );
+                    continue;
+                }
+                eprintln!(
+                    "[memex sec] sandbox widened via env var MEMEX_EXTRA_SANDBOX_ROOTS: {part:?}"
+                );
+                candidates.push((SourceAgent::ClaudeCode, p));
+            }
+        }
         let canonical_roots: Vec<(SourceAgent, PathBuf)> = candidates
             .into_iter()
             .filter_map(|(a, p)| p.canonicalize().ok().map(|c| (a, c)))

@@ -1,6 +1,7 @@
 pub mod cli;
 pub mod codex_parser;
 pub mod commands;
+pub mod companion;
 pub mod crud;
 pub mod embed_late;
 pub mod embed_pool;
@@ -18,6 +19,7 @@ pub mod schema;
 pub mod sec;
 pub mod snapshot;
 pub mod watcher;
+pub mod wrapped;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -130,6 +132,10 @@ pub fn run() {
             // P2 KA-01/02/05 — FormulaQuery-backed lens with score breakdown
             commands::lens_search_v2,
             commands::prompt_history_stats,
+            // Memex Companion — Cold Start Killer.
+            commands::compose_memory_primer,
+            // Memex Wrapped — engineering "Spotify Wrapped".
+            commands::compose_wrapped,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

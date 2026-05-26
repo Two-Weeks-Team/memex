@@ -103,14 +103,20 @@ document.addEventListener("DOMContentLoaded", async () => {
   attachAgentFilterHandlers();
   // WOW-5: register the self-contained Mix & Match picker (search + add).
   attachMixPickerEvents();
-  // P8 — `memex://<route>` deep links: register listener + handle launch URL.
-  attachDeepLinkRoutes();
-  // Kick off both pollers; the stack uses pure jsonl parsing so it succeeds
-  // even before Qdrant comes up, giving the user something to look at
-  // immediately.
+  // ORDERING FIX (Quality review H3, deep-link cold-start race): the deep
+  // link router uses companionState.recent[0] and showLoopBanner — both
+  // populated by attachCompanion / attachLoopBreaker. If we register the
+  // deep-link routes FIRST, a cold-start `open memex://companion` opens an
+  // empty modal because companionState hasn't been initialized yet.
+  // Attach surface handlers BEFORE wiring deep-link dispatch.
   loadInitialStack();
   attachWatcherListener();
   attachRecallNotificationListener();
+  attachCompanion();
+  attachLoopBreaker();
+  // P8 — `memex://<route>` deep links: register listener + handle launch URL.
+  // Must run AFTER attachCompanion / attachLoopBreaker (see above).
+  attachDeepLinkRoutes();
   handleDashboardDeepLink();
   await pollUntilReady();
   startRecallPolling();
@@ -229,12 +235,15 @@ function showWatcherChip(text) {
 // was launched with (cold-start case).
 //
 // Routes:
-//   memex://timemachine — return to main Time Machine view (clear modals)
-//   memex://topology    — open Topology galaxy modal
-//   memex://lens        — focus the search input (lens is the search box)
-//   memex://predict     — focus the predict panel for the active session
-//   memex://mix-match   — open the Mix & Match modal
-//   memex://replay      — open the Replay engine for the active/focused session
+//   memex://timemachine   — return to main Time Machine view (clear modals)
+//   memex://topology      — open Topology galaxy modal
+//   memex://lens          — focus the search input (lens is the search box)
+//   memex://predict       — focus the predict panel for the active session
+//   memex://mix-match     — open the Mix & Match modal
+//   memex://replay        — open the Replay engine for the active/focused session
+//   memex://companion     — open the Companion modal (Cold Start Killer primer)
+//   memex://wrapped       — alias for companion (Memex Wrapped lives inside it)
+//   memex://loop-breaker  — re-show the most recent Loop Breaker banner
 function dispatchDeepLink(rawUrl) {
   if (!rawUrl) return;
   let route;
@@ -322,6 +331,36 @@ function dispatchDeepLink(rawUrl) {
         } else {
           document.getElementById("search-input")?.focus();
         }
+      }
+      break;
+    case "companion":
+    case "primer":
+    case "memory":
+    case "wrapped":
+      // Open the Companion modal directly. The most recent primer (if any)
+      // is restored from companionState.recent[0] so the user lands on the
+      // last payload they saw in the banner, not a blank slate.
+      {
+        const recent = companionState?.recent?.[0];
+        if (recent && recent.primer) {
+          companionState.lastPrimer = recent.primer;
+          renderPrimerIntoModal(recent.primer);
+        }
+        openCompanionModal();
+      }
+      break;
+    case "loop":
+    case "loop-breaker":
+    case "loopbreaker":
+    case "pivot":
+      // Re-display the most recent Loop Breaker banner if the watcher has
+      // already fired one. Otherwise this is a no-op (banner is reactive,
+      // not user-initiated). Falls back to focusing search so the user has
+      // a sensible keyboard target.
+      if (_lastLoopPayload && typeof showLoopBanner === "function") {
+        showLoopBanner(_lastLoopPayload);
+      } else {
+        document.getElementById("search-input")?.focus();
       }
       break;
     default:
@@ -807,6 +846,7 @@ function attachEvents() {
   });
   document.getElementById("btn-topology").addEventListener("click", onTopology);
   document.getElementById("btn-mix").addEventListener("click", openMixModal);
+  document.getElementById("btn-companion")?.addEventListener("click", openCompanionModal);
   document.getElementById("btn-snapshot").addEventListener("click", onSnapshot);
   document.getElementById("btn-refresh").addEventListener("click", onRefresh);
   document.getElementById("btn-reset-lens").addEventListener("click", resetLens);
@@ -3155,6 +3195,377 @@ document.addEventListener(
   { once: true },
 );
 
+// ===========================================================================
+// 📚 Memex Companion — Cold Start Killer (GUI surface)
+// ---------------------------------------------------------------------------
+// The watcher fires `companion-primer-ready` when it sees a new Claude Code /
+// Codex session jsonl appear. The agent already has the primer surfaced as a
+// macOS notification + Tauri event; this module is the in-app visualization:
+// a modal showing the markdown the agent could paste, the source sessions
+// that contributed, and a live feed of recent auto-composed primers.
+// ===========================================================================
+
+const companionState = {
+  lastPrimer: null,
+  recent: [], // [{ when:Date, primer, source_session_id }]
+};
+
+function attachCompanion() {
+  // Modal-side buttons.
+  document.getElementById("btn-companion-compose")?.addEventListener("click", () => {
+    runComposePrimer().catch((e) => console.warn("companion compose failed", e));
+  });
+  document.getElementById("companion-cwd-input")?.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      runComposePrimer().catch((err) => console.warn(err));
+    }
+  });
+  document.getElementById("btn-companion-copy")?.addEventListener("click", () => {
+    if (!companionState.lastPrimer) return;
+    navigator.clipboard.writeText(companionState.lastPrimer.markdown || "").then(
+      () => flashCompanionButton("btn-companion-copy", "Copied ✓"),
+      () => flashCompanionButton("btn-companion-copy", "Copy failed"),
+    );
+  });
+  document
+    .getElementById("btn-companion-copy-prompt")
+    ?.addEventListener("click", () => {
+      if (!companionState.lastPrimer) return;
+      const wrapped = wrapAsSystemPrompt(companionState.lastPrimer.markdown);
+      navigator.clipboard.writeText(wrapped).then(
+        () => flashCompanionButton("btn-companion-copy-prompt", "Copied ✓"),
+        () => flashCompanionButton("btn-companion-copy-prompt", "Copy failed"),
+      );
+    });
+
+  // Live primer events from the watcher.
+  if (tauriEvent && typeof tauriEvent.listen === "function") {
+    tauriEvent
+      .listen("companion-primer-ready", (event) => {
+        const p = event.payload || {};
+        if (!p.primer) return;
+        addRecentPrimer(p.primer, p.session_id);
+        showCompanionBanner(p);
+      })
+      .catch((e) => console.warn("companion-primer-ready listen failed:", e));
+  }
+
+  // Banner buttons.
+  document
+    .getElementById("companion-banner-open")
+    ?.addEventListener("click", () => {
+      hideCompanionBanner();
+      // Re-display the most recent primer in the modal.
+      const recent = companionState.recent[0];
+      if (recent) {
+        companionState.lastPrimer = recent.primer;
+        renderPrimerIntoModal(recent.primer);
+      }
+      openCompanionModal();
+    });
+  document
+    .getElementById("companion-banner-dismiss")
+    ?.addEventListener("click", hideCompanionBanner);
+}
+
+function openCompanionModal() {
+  const m = document.getElementById("companion-modal");
+  if (!m) return;
+  if (!m.open) m.showModal();
+  // Pre-fill cwd input with the most-recent primer cwd, OR with the user's
+  // ~ for a clean starting point.
+  const cwdEl = document.getElementById("companion-cwd-input");
+  if (cwdEl && !cwdEl.value) {
+    const recent = companionState.recent[0];
+    if (recent && recent.primer && recent.primer.cwd) {
+      cwdEl.value = recent.primer.cwd;
+    } else {
+      // Best-effort default — frontend doesn't know the user's $HOME, so
+      // we leave the placeholder pointing them at the right shape.
+      cwdEl.value = "";
+    }
+    cwdEl.focus();
+  }
+  // Re-paint recent list every open.
+  renderRecentList();
+}
+
+async function runComposePrimer() {
+  const cwdEl = document.getElementById("companion-cwd-input");
+  const limitEl = document.getElementById("companion-limit-input");
+  const cwd = (cwdEl?.value || "").trim();
+  const limit = Math.max(2, Math.min(20, parseInt(limitEl?.value || "8", 10) || 8));
+  const md = document.getElementById("companion-markdown");
+  const stats = document.getElementById("companion-stats");
+  const sources = document.getElementById("companion-sources");
+  if (md) {
+    md.innerHTML = '<span class="empty">Mining past sessions… BGE-small + Qdrant…</span>';
+  }
+  if (stats) stats.classList.add("hidden");
+
+  try {
+    const primer = await invoke("compose_memory_primer", { cwd, limit });
+    companionState.lastPrimer = primer;
+    renderPrimerIntoModal(primer);
+  } catch (e) {
+    if (md) {
+      md.innerHTML = `<span class="empty">Compose failed: ${escapeHtml(String(e))}</span>`;
+    }
+    if (sources) {
+      sources.innerHTML = `<span class="empty muted">No sources (compose failed).</span>`;
+    }
+  }
+}
+
+function renderPrimerIntoModal(primer) {
+  const md = document.getElementById("companion-markdown");
+  const stats = document.getElementById("companion-stats");
+  const sources = document.getElementById("companion-sources");
+  if (!md || !stats || !sources) return;
+
+  md.textContent = primer.markdown || "(empty primer)";
+
+  document.getElementById("cs-sources").textContent =
+    primer.source_sessions?.length ?? 0;
+  document.getElementById("cs-decisions").textContent =
+    primer.stats?.decisions_extracted ?? 0;
+  document.getElementById("cs-pitfalls").textContent =
+    primer.stats?.pitfalls_extracted ?? 0;
+  document.getElementById("cs-intents").textContent =
+    primer.stats?.intents_extracted ?? 0;
+  document.getElementById("cs-elapsed").textContent = primer.elapsed_ms ?? 0;
+
+  const modePill = document.getElementById("cs-mode");
+  if (modePill) {
+    if (primer.matched_local_project) {
+      modePill.textContent = "local match";
+      modePill.classList.remove("cross");
+    } else {
+      modePill.textContent = "cross-project match";
+      modePill.classList.add("cross");
+    }
+  }
+  stats.classList.remove("hidden");
+
+  // Sources list.
+  if (!primer.source_sessions?.length) {
+    sources.innerHTML = `<span class="empty muted">No source sessions matched. The agent will start cold.</span>`;
+  } else {
+    sources.innerHTML = "";
+    for (const s of primer.source_sessions) {
+      const item = document.createElement("div");
+      item.className = "cs-source";
+      if (s.match_reason && s.match_reason.includes("exact")) item.classList.add("exact");
+      if (s.match_reason && s.match_reason.includes("semantic")) item.classList.add("cross");
+      const date = (s.start_iso || "").slice(0, 10) || "?";
+      const head = document.createElement("div");
+      head.className = "cs-source-head";
+      const title = document.createElement("span");
+      title.className = "cs-source-title";
+      title.textContent = (s.ai_title && s.ai_title.length > 0) ? s.ai_title : "(untitled)";
+      const meta = document.createElement("span");
+      meta.className = "cs-source-meta";
+      meta.textContent = `${s.project_name || "?"} · ${date} · ${s.turn_count} turns${s.has_errors ? " · ⚠" : ""}`;
+      head.appendChild(title);
+      head.appendChild(meta);
+      const reason = document.createElement("span");
+      reason.className = "cs-source-reason";
+      reason.textContent = `${s.match_reason || "match"}  ·  sim ${Number(s.similarity || 0).toFixed(2)}`;
+      item.appendChild(head);
+      item.appendChild(reason);
+      item.addEventListener("click", () => {
+        // Open the source session in the existing replay engine.
+        if (s.session_id && typeof openReplay === "function") {
+          document.getElementById("companion-modal").close();
+          openReplay(s.session_id, {}).catch((e) =>
+            console.warn("companion → openReplay failed", e),
+          );
+        }
+      });
+      sources.appendChild(item);
+    }
+  }
+}
+
+function addRecentPrimer(primer, sourceSessionId) {
+  companionState.recent.unshift({
+    when: new Date(),
+    primer,
+    source_session_id: sourceSessionId,
+  });
+  if (companionState.recent.length > 8) {
+    companionState.recent.length = 8;
+  }
+  renderRecentList();
+}
+
+function renderRecentList() {
+  const wrap = document.getElementById("companion-recent");
+  if (!wrap) return;
+  if (companionState.recent.length === 0) {
+    wrap.innerHTML = `<span class="empty muted">No live primers yet. Open a new Claude Code session and Memex will surface one within ~60s.</span>`;
+    return;
+  }
+  wrap.innerHTML = "";
+  for (const r of companionState.recent) {
+    const item = document.createElement("div");
+    item.className = "companion-recent-item";
+    const left = document.createElement("div");
+    const proj = r.primer.project_name || "(unknown)";
+    const ds = r.primer.stats?.decisions_extracted ?? 0;
+    const ps = r.primer.stats?.pitfalls_extracted ?? 0;
+    const src = r.primer.source_sessions?.length ?? 0;
+    left.innerHTML =
+      `<strong>${escapeHtml(proj)}</strong>` +
+      ` <span class="muted">·</span> ` +
+      `<span class="muted">${src} sources · ${ds} decisions · ${ps} pitfalls</span>`;
+    const when = document.createElement("span");
+    when.className = "when";
+    when.textContent = formatWhen(r.when);
+    item.appendChild(left);
+    item.appendChild(when);
+    item.addEventListener("click", () => {
+      companionState.lastPrimer = r.primer;
+      renderPrimerIntoModal(r.primer);
+    });
+    wrap.appendChild(item);
+  }
+}
+
+function showCompanionBanner(payload) {
+  const banner = document.getElementById("companion-banner");
+  const title = document.getElementById("companion-banner-title");
+  const detail = document.getElementById("companion-banner-detail");
+  if (!banner || !title || !detail) return;
+  const primer = payload.primer || {};
+  const proj = primer.project_name || payload.project_name || "?";
+  const sources = primer.source_sessions?.length ?? 0;
+  const decisions = primer.stats?.decisions_extracted ?? 0;
+  title.textContent = `Memex loaded memory for ${proj}`;
+  detail.textContent = `${sources} past session(s) · ${decisions} decisions ready to inject`;
+  banner.classList.remove("hidden");
+  // Auto-hide after 22s if the user doesn't act.
+  if (window._companionBannerTimer) clearTimeout(window._companionBannerTimer);
+  window._companionBannerTimer = setTimeout(hideCompanionBanner, 22000);
+}
+
+function hideCompanionBanner() {
+  const banner = document.getElementById("companion-banner");
+  if (banner) banner.classList.add("hidden");
+  if (window._companionBannerTimer) {
+    clearTimeout(window._companionBannerTimer);
+    window._companionBannerTimer = null;
+  }
+}
+
+function flashCompanionButton(id, label) {
+  const btn = document.getElementById(id);
+  if (!btn) return;
+  const original = btn.textContent;
+  btn.textContent = label;
+  setTimeout(() => {
+    btn.textContent = original;
+  }, 1400);
+}
+
+function wrapAsSystemPrompt(markdown) {
+  // The exact frame Claude Code / Codex respond well to: a clearly-fenced
+  // memory block with a directive about how to use it. Empirically, the
+  // agent honors decisions far more reliably when they're framed as
+  // "your" past decisions, not generic context.
+  const md = (markdown || "").trim();
+  return [
+    "<MEMEX_MEMORY_PRIMER>",
+    "The user has worked on similar problems before. The block below was",
+    "distilled by Memex from their past Claude Code / Codex sessions in this",
+    "codebase (or semantically similar projects). Treat it as the user's",
+    "*own* prior reasoning — respect committed decisions, avoid known",
+    "pitfalls, and use the stack fingerprint when proposing new code.",
+    "",
+    md,
+    "</MEMEX_MEMORY_PRIMER>",
+    "",
+  ].join("\n");
+}
+
+// escapeHtml() is already declared earlier in this file (around line 2951)
+// — module mode treats a second top-level `function escapeHtml(...)` as a
+// duplicate-binding SyntaxError. Reuse the existing one instead.
+
+function formatWhen(d) {
+  if (!(d instanceof Date)) return "";
+  const diff = (Date.now() - d.getTime()) / 1000;
+  if (diff < 60) return "just now";
+  if (diff < 3600) return `${Math.floor(diff / 60)} min ago`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+  return d.toISOString().slice(0, 10);
+}
+
+// ===========================================================================
+// 🔁 Memex Loop Breaker — active-session stuck-detection banner
+// ---------------------------------------------------------------------------
+// Watcher fires `loop-breaker-ready` when an active session shows ≥3 tool
+// errors in the most recent 10 turns. Payload carries the top
+// predict_next_actions suggestion — what past-you ran next from a similar
+// stuck position. We pop a banner with a "Show pivot" CTA that opens the
+// suggested past session's replay at the pivot turn so the user can see
+// exactly how that loop was broken last time.
+// ===========================================================================
+
+let _loopBannerTimer = null;
+let _lastLoopPayload = null;
+
+function attachLoopBreaker() {
+  if (tauriEvent && typeof tauriEvent.listen === "function") {
+    tauriEvent.listen("loop-breaker-ready", (event) => {
+      _lastLoopPayload = event.payload || {};
+      showLoopBanner(_lastLoopPayload);
+    }).catch((e) => console.warn("loop-breaker-ready listen failed:", e));
+  }
+
+  document
+    .getElementById("loop-banner-open")
+    ?.addEventListener("click", () => {
+      hideLoopBanner();
+      if (!_lastLoopPayload || !_lastLoopPayload.suggestion) return;
+      const s = _lastLoopPayload.suggestion;
+      if (s.from_session_id && typeof openReplay === "function") {
+        openReplay(s.from_session_id, { from_turn_index: s.from_turn_index }).catch(
+          (e) => console.warn("loop-breaker → openReplay failed", e),
+        );
+      }
+    });
+  document
+    .getElementById("loop-banner-dismiss")
+    ?.addEventListener("click", hideLoopBanner);
+}
+
+function showLoopBanner(payload) {
+  const banner = document.getElementById("loop-banner");
+  const title = document.getElementById("loop-banner-title");
+  const detail = document.getElementById("loop-banner-detail");
+  if (!banner || !title || !detail) return;
+  const s = payload.suggestion || {};
+  const recent = payload.recent_errors ?? "?";
+  const win = payload.recent_window ?? 10;
+  const proj = payload.from_project || "this session";
+  title.textContent = `You've been stuck in ${proj} (${recent} errors / ${win} turns)`;
+  detail.textContent = `Past-you ran \`${s.tool_name || "?"}\` next — ${s.from_session_project || "?"} turn #${s.from_turn_index ?? "?"}`;
+  banner.classList.remove("hidden");
+  if (_loopBannerTimer) clearTimeout(_loopBannerTimer);
+  _loopBannerTimer = setTimeout(hideLoopBanner, 28000);
+}
+
+function hideLoopBanner() {
+  const banner = document.getElementById("loop-banner");
+  if (banner) banner.classList.add("hidden");
+  if (_loopBannerTimer) {
+    clearTimeout(_loopBannerTimer);
+    _loopBannerTimer = null;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Phase 5 — Replay engine
 // ---------------------------------------------------------------------------
@@ -3185,6 +3596,15 @@ async function openReplay(sessionId, hit) {
   document.getElementById("replay-detail").innerHTML =
     `<div class="empty">Loading session…</div>`;
   document.getElementById("replay-list").innerHTML = "";
+  // CURSOR HONOR (Codex P2-c, Quality H?, Loop Breaker "Show pivot" CTA):
+  // Loop Breaker passes { from_turn_index } so the replay opens at the
+  // suggested pivot turn, not at turn 0. Predict cards do the same via
+  // hit.from_turn_index. Fall back to 0 when no anchor is provided.
+  const requestedCursor = Number.isFinite(hit?.from_turn_index)
+    ? hit.from_turn_index
+    : Number.isFinite(hit?.cursor)
+      ? hit.cursor
+      : 0;
   state.replay = {
     sessionId,
     turns: [],
@@ -3202,7 +3622,13 @@ async function openReplay(sessionId, hit) {
       return;
     }
     renderReplayList(session);
-    renderReplayTurn(0);
+    // Clamp the cursor against actual session length so a stale
+    // `from_turn_index` (e.g. session was truncated) doesn't render NaN.
+    const startCursor = Math.max(
+      0,
+      Math.min(requestedCursor, state.replay.turns.length - 1),
+    );
+    renderReplayTurn(startCursor);
   } catch (err) {
     document.getElementById("replay-detail").innerHTML =
       `<div class="empty">Failed to load: ${escapeHtml(String(err))}</div>`;
