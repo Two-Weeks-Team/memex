@@ -7,7 +7,7 @@
 # Pinned to the same Qdrant version Memex was built and tested against.
 services:
   qdrant:
-    image: qdrant/qdrant:v1.18.0
+    image: qdrant/qdrant:v1.18.1
     container_name: memex-qdrant
     restart: unless-stopped
     ports:

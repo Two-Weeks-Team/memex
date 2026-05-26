@@ -43,7 +43,7 @@ jobs:
     name: Rust build + test (Linux)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       # Tauri 2 needs these system libraries to compile on Linux. They are
       # the standard Tauri prerequisites; none are macOS/signing specific.
@@ -84,10 +84,10 @@ jobs:
     name: Frontend install + config validate
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: npm
