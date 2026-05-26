@@ -41,7 +41,7 @@ use std::time::Instant;
 
 use anyhow::{Context, Result};
 use qdrant_client::qdrant::{
-    Condition, DatetimeRange, Filter, ScrollPointsBuilder, Timestamp,
+    Condition, DatetimeRange, Direction, Filter, OrderBy, ScrollPointsBuilder, Timestamp,
 };
 use qdrant_client::Qdrant;
 use serde::{Deserialize, Serialize};
@@ -149,9 +149,6 @@ const MAX_MINED_SESSIONS: usize = 64;
 /// (Codex P2-b / Quality H1 fix.)
 const MAX_SCROLLED_SESSIONS: usize = 20_000;
 
-/// Page size for paginated scroll. Qdrant default tops out at ~1000.
-const SCROLL_PAGE_SIZE: u32 = 1_000;
-
 /// Minimum number of distinct sessions a decision must appear in to count
 /// as "repeated" in the report.
 const REPEATED_DECISION_THRESHOLD: usize = 2;
@@ -249,7 +246,12 @@ pub async fn compose_wrapped(
     let mut tool_counts: HashMap<String, usize> = HashMap::new();
     let mut ext_counts: HashMap<String, usize> = HashMap::new();
     let mut bin_counts: HashMap<String, usize> = HashMap::new();
-    let mut decision_sessions: HashMap<String, Vec<String>> = HashMap::new();
+    // Decision-key → (original text, distinct session ids that uttered it).
+    // We store the text alongside the sids on first sight so the report can
+    // be built in one pass — eliminates the second `recompute_repeated_
+    // decisions` walk gemini PR #7 flagged (4 HIGH comments, lines 252/317
+    // /356/637). Per-session dedup via a HashSet local to each session.
+    let mut decision_sessions: HashMap<String, (String, Vec<String>)> = HashMap::new();
     let mut sessions_mined: usize = 0;
 
     for s in &to_mine {
@@ -273,6 +275,10 @@ pub async fn compose_wrapped(
         let head_take = n.min(12);
         let tail_take = n.min(12);
         let mut seen_idx: std::collections::HashSet<usize> = std::collections::HashSet::new();
+        // Track keys we've already pushed THIS session's id for, so a single
+        // session that emits "I'll use X" five times only counts once.
+        let mut session_keys: std::collections::HashSet<String> =
+            std::collections::HashSet::new();
         let iter = session
             .turns
             .iter()
@@ -310,10 +316,13 @@ pub async fn compose_wrapped(
             );
             for d in bucket {
                 let key = normalize_dedup_key_pub(&d.text);
-                decision_sessions
+                if !session_keys.insert(key.clone()) {
+                    continue;
+                }
+                let entry = decision_sessions
                     .entry(key)
-                    .or_default()
-                    .push(s.session_id.clone());
+                    .or_insert_with(|| (d.text.clone(), Vec::new()));
+                entry.1.push(s.session_id.clone());
             }
         }
     }
@@ -327,31 +336,24 @@ pub async fn compose_wrapped(
     let arc_mix = into_buckets(&arc_counts, sessions_total);
     let outcome_mix = into_buckets(&outcome_counts, sessions_total);
 
+    // Build the repeated-decisions list directly from the populated map —
+    // no second mining pass. session_keys above guarantees each sid appears
+    // at most once per key, so a plain len() check is enough. gemini PR #7
+    // (lines 252/317/356/637) suggested this exact shape; matched.
     let mut repeated: Vec<RepeatedDecision> = decision_sessions
         .into_iter()
-        .filter_map(|(_key, sids)| {
-            // Dedup session ids — a single session may emit the same decision
-            // text twice; we only count distinct sessions.
-            let mut distinct: Vec<String> = sids;
-            distinct.sort();
-            distinct.dedup();
-            if distinct.len() >= REPEATED_DECISION_THRESHOLD {
+        .filter_map(|(_key, (text, sids))| {
+            if sids.len() >= REPEATED_DECISION_THRESHOLD {
                 Some(RepeatedDecision {
-                    text: String::new(), // filled in next pass
-                    sessions: distinct.len(),
-                    examples: distinct.into_iter().take(3).collect(),
+                    text,
+                    sessions: sids.len(),
+                    examples: sids.into_iter().take(3).collect(),
                 })
             } else {
                 None
             }
         })
         .collect();
-    // We dropped the text mid-loop — re-resolve from the first example so
-    // the key normalization doesn't obscure the surfaced text. We pick
-    // the highest-count entries first (recompute below from raw bucket).
-    repeated.clear();
-    let recomputed = recompute_repeated_decisions(&to_mine);
-    repeated.extend(recomputed);
     repeated.sort_by(|a, b| b.sessions.cmp(&a.sessions));
     repeated.truncate(6);
 
@@ -463,9 +465,13 @@ struct ScrolledSession {
     tool_count: i32,
 }
 
-/// Paginated payload-only scroll across the window. Returns `(sessions,
-/// truncated)` where `truncated == true` iff the corpus had more sessions
-/// than `MAX_SCROLLED_SESSIONS` (so the caller can disclose the cap).
+/// Payload-only scroll across the window. Returns `(sessions, truncated)`
+/// where `truncated == true` iff the corpus had more sessions than
+/// `MAX_SCROLLED_SESSIONS` (so the caller can disclose the cap).
+///
+/// Orders by `start_ts_dt` DESC so when truncation fires, the report
+/// covers the **most-recent** N sessions, not a non-deterministic slice
+/// (Codex review P2 — `chatgpt-codex-connector` PR #7 line 509).
 async fn scroll_window(
     qdrant: &Qdrant,
     window_days: u32,
@@ -499,141 +505,55 @@ async fn scroll_window(
         None
     };
 
-    let mut out: Vec<ScrolledSession> = Vec::new();
-    let mut offset: Option<qdrant_client::qdrant::PointId> = None;
-    let mut truncated = false;
-    loop {
-        let mut builder = ScrollPointsBuilder::new(crate::schema::COLLECTION_V3)
-            .with_payload(true)
-            .with_vectors(false)
-            .limit(SCROLL_PAGE_SIZE);
-        if let Some(f) = filter.clone() {
-            builder = builder.filter(f);
-        }
-        if let Some(o) = offset.clone() {
-            builder = builder.offset(o);
-        }
+    // Ask for one more than the cap so we can detect truncation without
+    // a second round-trip. `order_by` + a single bounded scroll is
+    // cleaner than pagination here — pagination + ordering have subtle
+    // cursor semantics in Qdrant, and we never want more than
+    // MAX_SCROLLED_SESSIONS points loaded anyway.
+    let probe_limit = (MAX_SCROLLED_SESSIONS as u32).saturating_add(1);
+    let order = OrderBy {
+        key: "start_ts_dt".to_string(),
+        direction: Some(Direction::Desc as i32),
+        ..Default::default()
+    };
+    let mut builder = ScrollPointsBuilder::new(crate::schema::COLLECTION_V3)
+        .with_payload(true)
+        .with_vectors(false)
+        .order_by(order)
+        .limit(probe_limit);
+    if let Some(f) = filter {
+        builder = builder.filter(f);
+    }
 
-        let resp = qdrant
-            .scroll(builder)
-            .await
-            .context("wrapped: scroll v3 failed")?;
-        if resp.result.is_empty() {
-            break;
-        }
+    let resp = qdrant
+        .scroll(builder)
+        .await
+        .context("wrapped: scroll v3 failed")?;
 
-        for p in resp.result {
-            let pl = p.payload;
-            let Some(sid) = payload_str(&pl, "session_id") else { continue };
-            out.push(ScrolledSession {
-                session_id: sid,
-                project_name: payload_str(&pl, "project_name").unwrap_or_default(),
-                project_path: payload_str(&pl, "project_path").unwrap_or_default(),
-                ai_title: payload_str(&pl, "ai_title").unwrap_or_default(),
-                start_iso: payload_str(&pl, "start_iso").unwrap_or_default(),
-                source_agent: payload_str(&pl, "source_agent")
-                    .unwrap_or_else(|| "claude_code".into()),
-                source_path: payload_str(&pl, "source_path"),
-                intent: payload_str(&pl, "intent").unwrap_or_default(),
-                arc: payload_str(&pl, "arc").unwrap_or_default(),
-                outcome: payload_str(&pl, "outcome").unwrap_or_default(),
-                has_errors: payload_bool(&pl, "has_errors").unwrap_or(false),
-                user_turns: payload_i64(&pl, "user_turns").unwrap_or(0) as i32,
-                assistant_turns: payload_i64(&pl, "assistant_turns").unwrap_or(0) as i32,
-                tool_count: payload_i64(&pl, "tool_count").unwrap_or(0) as i32,
-            });
-            if out.len() >= MAX_SCROLLED_SESSIONS {
-                truncated = true;
-                break;
-            }
-        }
-
-        if truncated {
-            break;
-        }
-        offset = resp.next_page_offset;
-        if offset.is_none() {
-            break;
-        }
+    let truncated = resp.result.len() > MAX_SCROLLED_SESSIONS;
+    let mut out: Vec<ScrolledSession> = Vec::with_capacity(resp.result.len());
+    for p in resp.result.into_iter().take(MAX_SCROLLED_SESSIONS) {
+        let pl = p.payload;
+        let Some(sid) = payload_str(&pl, "session_id") else { continue };
+        out.push(ScrolledSession {
+            session_id: sid,
+            project_name: payload_str(&pl, "project_name").unwrap_or_default(),
+            project_path: payload_str(&pl, "project_path").unwrap_or_default(),
+            ai_title: payload_str(&pl, "ai_title").unwrap_or_default(),
+            start_iso: payload_str(&pl, "start_iso").unwrap_or_default(),
+            source_agent: payload_str(&pl, "source_agent")
+                .unwrap_or_else(|| "claude_code".into()),
+            source_path: payload_str(&pl, "source_path"),
+            intent: payload_str(&pl, "intent").unwrap_or_default(),
+            arc: payload_str(&pl, "arc").unwrap_or_default(),
+            outcome: payload_str(&pl, "outcome").unwrap_or_default(),
+            has_errors: payload_bool(&pl, "has_errors").unwrap_or(false),
+            user_turns: payload_i64(&pl, "user_turns").unwrap_or(0) as i32,
+            assistant_turns: payload_i64(&pl, "assistant_turns").unwrap_or(0) as i32,
+            tool_count: payload_i64(&pl, "tool_count").unwrap_or(0) as i32,
+        });
     }
     Ok((out, truncated))
-}
-
-// ---------------------------------------------------------------------------
-// Re-parse + decision recomputation
-// ---------------------------------------------------------------------------
-
-fn recompute_repeated_decisions(sessions: &[ScrolledSession]) -> Vec<RepeatedDecision> {
-    // Walk each session once and group decisions by normalized key,
-    // keeping the *first* surfaced text as the canonical representation
-    // (clipped to 160 chars for the markdown card).
-    let mut by_key: HashMap<String, (String, Vec<String>)> = HashMap::new();
-    for s in sessions {
-        let Some(source_path) = s.source_path.as_ref() else { continue };
-        let Ok(validated) = crate::sec::validate_session_path(Path::new(source_path)) else {
-            continue;
-        };
-        let parsed = if s.source_agent == "codex" {
-            crate::codex_parser::parse_codex_session(&validated)
-        } else {
-            crate::parser::parse_session(&validated)
-        };
-        let Ok(session) = parsed else { continue };
-        if session.turns.is_empty() {
-            continue;
-        }
-        let n = session.turns.len();
-        let head = n.min(12);
-        let tail = n.min(12);
-        let mut session_keys: std::collections::HashSet<String> = std::collections::HashSet::new();
-        let iter = session
-            .turns
-            .iter()
-            .take(head)
-            .chain(session.turns.iter().skip(n.saturating_sub(tail)));
-        for turn in iter {
-            let primed = crate::companion::PrimedSession {
-                session_id: s.session_id.clone(),
-                project_name: s.project_name.clone(),
-                project_path: s.project_path.clone(),
-                ai_title: s.ai_title.clone(),
-                start_iso: s.start_iso.clone(),
-                turn_count: i64::from(s.user_turns + s.assistant_turns),
-                has_errors: s.has_errors,
-                similarity: 1.0,
-                match_reason: "wrapped".into(),
-            };
-            let mut bucket = Vec::new();
-            crate::companion::extract_decisions_from_turn_pub(turn, 0, &primed, &mut bucket);
-            for d in bucket {
-                let key = normalize_dedup_key_pub(&d.text);
-                // Only count once per session for this key.
-                if !session_keys.insert(key.clone()) {
-                    continue;
-                }
-                let entry = by_key
-                    .entry(key)
-                    .or_insert_with(|| (d.text.clone(), Vec::new()));
-                entry.1.push(s.session_id.clone());
-            }
-        }
-    }
-    let mut out: Vec<RepeatedDecision> = by_key
-        .into_iter()
-        .filter_map(|(_k, (text, sids))| {
-            if sids.len() >= REPEATED_DECISION_THRESHOLD {
-                Some(RepeatedDecision {
-                    text,
-                    sessions: sids.len(),
-                    examples: sids.into_iter().take(3).collect(),
-                })
-            } else {
-                None
-            }
-        })
-        .collect();
-    out.sort_by(|a, b| b.sessions.cmp(&a.sessions));
-    out
 }
 
 // ---------------------------------------------------------------------------

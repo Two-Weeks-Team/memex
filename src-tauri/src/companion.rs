@@ -257,19 +257,13 @@ fn is_boilerplate_line(line: &str) -> bool {
     false
 }
 
-/// Pull the first *meaningful* line out of a turn's text — skipping
-/// boilerplate, empty lines, and the wall-of-XML tags Conductor adds.
-///
-/// Smart about multi-line tag blocks: when we see an opener tag like
-/// `<system_instruction>` or `<system-reminder>` we skip every line until
-/// the matching closer (or until we see a non-indented user-looking line).
-/// This is what handles Conductor's preamble in full — the block body
-/// "You are working inside Conductor…\nYour work should take place in…"
-/// gets ignored as a unit, not via dozens of per-prefix matches.
-fn first_meaningful_line(text: &str) -> Option<String> {
-    // Tag names we treat as boilerplate containers — body is skipped until
-    // we see the corresponding closer.
-    const SKIP_BLOCKS: &[&str] = &[
+/// Tag names we treat as boilerplate containers — body is skipped until
+/// we see the corresponding closer. Pre-formatted once into `(name, open,
+/// close)` tuples so `first_meaningful_line` doesn't re-allocate the
+/// `<tag>` / `</tag>` strings on every line of every turn (gemini PR #7
+/// review line 335 — hot path on large sessions).
+static SKIP_BLOCKS: Lazy<Vec<(&'static str, String, String)>> = Lazy::new(|| {
+    [
         "system_instruction",
         "system-reminder",
         "local-command-caveat",
@@ -285,8 +279,22 @@ fn first_meaningful_line(text: &str) -> Option<String> {
         "function_results",
         "user-prompt-submit-hook",
         "task-notification",
-    ];
+    ]
+    .iter()
+    .map(|t| (*t, format!("<{t}>"), format!("</{t}>")))
+    .collect()
+});
 
+/// Pull the first *meaningful* line out of a turn's text — skipping
+/// boilerplate, empty lines, and the wall-of-XML tags Conductor adds.
+///
+/// Smart about multi-line tag blocks: when we see an opener tag like
+/// `<system_instruction>` or `<system-reminder>` we skip every line until
+/// the matching closer (or until we see a non-indented user-looking line).
+/// This is what handles Conductor's preamble in full — the block body
+/// "You are working inside Conductor…\nYour work should take place in…"
+/// gets ignored as a unit, not via dozens of per-prefix matches.
+fn first_meaningful_line(text: &str) -> Option<String> {
     let mut in_block: Option<&'static str> = None;
     for line in text.lines() {
         let trimmed = line.trim();
@@ -295,25 +303,25 @@ fn first_meaningful_line(text: &str) -> Option<String> {
         }
         // Inside a skip-block — keep walking until we see its closer.
         if let Some(open) = in_block {
-            let closer = format!("</{open}>");
-            if trimmed.contains(&closer) {
-                in_block = None;
+            // Tags table is small (~15 entries), linear scan is fine.
+            if let Some((_, _, close)) = SKIP_BLOCKS.iter().find(|(name, _, _)| *name == open) {
+                if trimmed.contains(close) {
+                    in_block = None;
+                }
             }
             continue;
         }
         // Detect opener tag.
         let mut opened_skip = false;
-        for tag in SKIP_BLOCKS {
+        for (tag, open, close) in SKIP_BLOCKS.iter() {
             // Open-only tag (no closer on the same line) → enter block.
-            let open = format!("<{tag}>");
-            let close = format!("</{tag}>");
-            if trimmed.contains(&open) && !trimmed.contains(&close) {
+            if trimmed.contains(open) && !trimmed.contains(close) {
                 in_block = Some(*tag);
                 opened_skip = true;
                 break;
             }
             // Single-line `<tag>body</tag>` → just treat the line as boilerplate.
-            if trimmed.contains(&open) && trimmed.contains(&close) {
+            if trimmed.contains(open) && trimmed.contains(close) {
                 opened_skip = true;
                 break;
             }
@@ -405,7 +413,16 @@ pub async fn compose_memory_primer_excluding(
                     if !seen_ids.insert(h.session_id.clone()) {
                         continue;
                     }
-                    // Prefer exact project_path matches over name-only.
+                    // STRICTER LOCAL FILTER (codex review PR #7 line 419):
+                    // Sessions sharing only project_name across distinct
+                    // project_paths (e.g. two unrelated repos both named
+                    // "frontend" / "backend" / "site") bled into each
+                    // other's primer as "local hits". That's a confused-
+                    // deputy memory leak across workspaces. Only sessions
+                    // whose canonical project_path matches the requested
+                    // `cwd` count as local; project_name-only matches now
+                    // fall through to the cross-project semantic neighbor
+                    // pass, where they're correctly tagged as such.
                     if h.project_path == cwd_string {
                         local_hits.push(PrimedSession {
                             similarity: 1.0,
@@ -413,11 +430,10 @@ pub async fn compose_memory_primer_excluding(
                             ..h
                         });
                     } else {
-                        local_hits.push(PrimedSession {
-                            similarity: 0.85,
-                            match_reason: "project_name match".into(),
-                            ..h
-                        });
+                        // Free the seen_ids slot so the semantic-neighbor
+                        // pass can pick this session up again if it scores
+                        // highly enough on content similarity.
+                        seen_ids.remove(&h.session_id);
                     }
                 }
             }
@@ -801,7 +817,10 @@ fn extract_decisions_from_turn(
         let line_trim = line.trim();
         // Width band tightened on the low end (Korean directives can be short:
         // "BGE 쓰자" is 7 chars) and held at 240 on the high end.
-        if line_trim.chars().count() < 5 || line_trim.len() > 240 {
+        // Check the cheap O(1) `len()` upper bound BEFORE the O(N)
+        // `chars().count()` lower bound so build-log / base64 lines bail
+        // out without scanning the entire string (gemini PR #7 line 807).
+        if line_trim.len() > 240 || line_trim.chars().count() < 5 {
             continue;
         }
         if is_boilerplate_line(line_trim) {
