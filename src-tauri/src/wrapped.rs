@@ -635,7 +635,6 @@ fn median_u32(samples: &mut [u32]) -> u32 {
 // ---------------------------------------------------------------------------
 
 #[allow(clippy::too_many_arguments)]
-#[allow(clippy::too_many_arguments)]
 fn render_markdown(
     window_days: u32,
     sessions_total: usize,

@@ -2757,7 +2757,11 @@ textarea:focus {
   line-height: 1.55;
   color: var(--text-primary, #fff);
   white-space: pre-wrap;
-  word-break: break-word;
+  /* `word-break: break-word` is deprecated and stylelint-flagged
+   * (coderabbit PR #7 styles.css:2761). `overflow-wrap: anywhere` is
+   * the modern equivalent and gives the same long-token-wrapping
+   * behavior in code-block-heavy primer markdown. */
+  overflow-wrap: anywhere;
 }
 
 .companion-markdown .empty {
@@ -2775,6 +2779,16 @@ textarea:focus {
 }
 
 .cs-source {
+  /* A11Y note: `.cs-source` is now a real `<button>` element (coderabbit
+   * PR #7 main.js:3387) so screen readers + keyboard users can operate
+   * the row. These resets neutralize the browser's default button
+   * chrome so the visual remains the same as the prior <div>. */
+  appearance: none;
+  -webkit-appearance: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  width: 100%;
   display: flex;
   flex-direction: column;
   gap: 3px;
@@ -2783,6 +2797,12 @@ textarea:focus {
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid rgba(255, 255, 255, 0.06);
   font-size: 12px;
+  cursor: pointer;
+}
+
+.cs-source:focus-visible {
+  outline: 2px solid rgba(10, 132, 255, 0.7);
+  outline-offset: 1px;
 }
 
 .cs-source:hover {
@@ -2839,6 +2859,13 @@ textarea:focus {
 }
 
 .companion-recent-item {
+  /* See `.cs-source` for the button-as-row a11y rationale. */
+  appearance: none;
+  -webkit-appearance: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  width: 100%;
   padding: 10px 12px;
   border-radius: 9px;
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -2855,6 +2882,11 @@ textarea:focus {
 .companion-recent-item:hover {
   background: rgba(10, 132, 255, 0.06);
   border-color: rgba(10, 132, 255, 0.25);
+}
+
+.companion-recent-item:focus-visible {
+  outline: 2px solid rgba(10, 132, 255, 0.7);
+  outline-offset: 1px;
 }
 
 .companion-recent-item .when {

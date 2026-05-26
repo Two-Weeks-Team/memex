@@ -3209,6 +3209,9 @@ const companionState = {
   lastPrimer: null,
   recent: [], // [{ when:Date, primer, source_session_id }]
 };
+// File-level timer to match the `_loopBannerTimer` pattern and avoid
+// polluting the global `window` object (gemini PR #7 main.js:3211/3460).
+let _companionBannerTimer = null;
 
 function attachCompanion() {
   // Modal-side buttons.
@@ -3354,7 +3357,11 @@ function renderPrimerIntoModal(primer) {
   } else {
     sources.innerHTML = "";
     for (const s of primer.source_sessions) {
-      const item = document.createElement("div");
+      // A11Y (coderabbit PR #7 main.js:3387): use a real <button> so the
+      // source row is keyboard-operable (Tab + Enter/Space) and announced
+      // as an interactive control to screen readers.
+      const item = document.createElement("button");
+      item.type = "button";
       item.className = "cs-source";
       if (s.match_reason && s.match_reason.includes("exact")) item.classList.add("exact");
       if (s.match_reason && s.match_reason.includes("semantic")) item.classList.add("cross");
@@ -3409,7 +3416,10 @@ function renderRecentList() {
   }
   wrap.innerHTML = "";
   for (const r of companionState.recent) {
-    const item = document.createElement("div");
+    // A11Y (coderabbit PR #7 main.js:3412): real <button> keeps the recent-
+    // primer row keyboard-operable + screen-reader-announced.
+    const item = document.createElement("button");
+    item.type = "button";
     item.className = "companion-recent-item";
     const left = document.createElement("div");
     const proj = r.primer.project_name || "(unknown)";
@@ -3446,16 +3456,16 @@ function showCompanionBanner(payload) {
   detail.textContent = `${sources} past session(s) · ${decisions} decisions ready to inject`;
   banner.classList.remove("hidden");
   // Auto-hide after 22s if the user doesn't act.
-  if (window._companionBannerTimer) clearTimeout(window._companionBannerTimer);
-  window._companionBannerTimer = setTimeout(hideCompanionBanner, 22000);
+  if (_companionBannerTimer) clearTimeout(_companionBannerTimer);
+  _companionBannerTimer = setTimeout(hideCompanionBanner, 22000);
 }
 
 function hideCompanionBanner() {
   const banner = document.getElementById("companion-banner");
   if (banner) banner.classList.add("hidden");
-  if (window._companionBannerTimer) {
-    clearTimeout(window._companionBannerTimer);
-    window._companionBannerTimer = null;
+  if (_companionBannerTimer) {
+    clearTimeout(_companionBannerTimer);
+    _companionBannerTimer = null;
   }
 }
 

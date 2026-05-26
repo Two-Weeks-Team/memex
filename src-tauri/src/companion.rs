@@ -40,7 +40,7 @@ use std::time::Instant;
 use anyhow::{Context, Result};
 use once_cell::sync::Lazy;
 use qdrant_client::qdrant::{
-    Condition, Filter, Query, QueryPointsBuilder, ScrollPointsBuilder,
+    Condition, Direction, Filter, OrderBy, Query, QueryPointsBuilder, ScrollPointsBuilder,
 };
 use qdrant_client::Qdrant;
 use regex::Regex;
@@ -656,10 +656,21 @@ async fn scroll_by_project_name(
         must: vec![Condition::matches("project_name", project_name.to_string())],
         ..Default::default()
     };
+    // RECENCY ORDER (codex PR #7 companion.rs:663): without `order_by`,
+    // Qdrant returned candidates in scroll order (point-id ≈ UUID, ~random)
+    // and the post-filter `truncate(limit)` could silently drop the newest
+    // decisions for active repos. Ordering by `start_ts_dt` DESC means the
+    // truncation always keeps the freshest sessions.
+    let order = OrderBy {
+        key: "start_ts_dt".to_string(),
+        direction: Some(Direction::Desc as i32),
+        ..Default::default()
+    };
     let req = ScrollPointsBuilder::new(crate::schema::COLLECTION_V3)
         .filter(filter)
         .with_payload(true)
         .with_vectors(false)
+        .order_by(order)
         .limit(limit);
     let resp = qdrant
         .scroll(req)
@@ -815,12 +826,14 @@ fn extract_decisions_from_turn(
     // <local-command-*> envelopes don't masquerade as decisions.
     for line in text.lines() {
         let line_trim = line.trim();
-        // Width band tightened on the low end (Korean directives can be short:
-        // "BGE 쓰자" is 7 chars) and held at 240 on the high end.
+        // Width band tightened on the low end and held at 240 on the high
+        // end. The minimum 4-char floor accommodates extra-short Korean
+        // directives like "C 쓰자" / "R 쓰자" (4 chars each) that round-1
+        // had at 5 chars and missed (gemini PR #7 companion.rs:825).
         // Check the cheap O(1) `len()` upper bound BEFORE the O(N)
         // `chars().count()` lower bound so build-log / base64 lines bail
         // out without scanning the entire string (gemini PR #7 line 807).
-        if line_trim.len() > 240 || line_trim.chars().count() < 5 {
+        if line_trim.len() > 240 || line_trim.chars().count() < 4 {
             continue;
         }
         if is_boilerplate_line(line_trim) {
@@ -1220,18 +1233,24 @@ fn short_sid(sid: &str) -> String {
 
 /// Resolve `cwd` argument the way the CLI / GUI expects: turn an optional
 /// user-supplied path into an absolute PathBuf, defaulting to the process'
-/// own cwd if none was given.
+/// own cwd if none was given. The result is canonicalized when possible so
+/// later exact-equality matching against Qdrant's `project_path` payload
+/// doesn't fail on symlinks (e.g. macOS's `/var` → `/private/var`) or
+/// relative components like `../foo`. (gemini PR #7 companion.rs:1235.)
+/// Falls back to the absolute-but-uncanonicalized form if the path doesn't
+/// exist on disk — callers can still use it as a key.
 pub fn resolve_cwd_arg(cwd_arg: Option<&Path>) -> Result<PathBuf> {
     let raw = match cwd_arg {
         Some(p) => p.to_path_buf(),
         None => std::env::current_dir().context("could not read process cwd")?,
     };
-    if raw.is_absolute() {
-        Ok(raw)
+    let absolute = if raw.is_absolute() {
+        raw
     } else {
         let base = std::env::current_dir().context("could not read process cwd")?;
-        Ok(base.join(raw))
-    }
+        base.join(raw)
+    };
+    Ok(absolute.canonicalize().unwrap_or(absolute))
 }
 
 // ---------------------------------------------------------------------------

@@ -112,43 +112,44 @@ fn it_records_error_in_every_loop_iteration() {
         .flat_map(|t| t.tool_results.iter())
         .filter(|r| r.is_error)
         .count();
-    assert!(
-        total_errors >= 5,
-        "stuck fixture should carry at least 5 error events; got {total_errors}"
+    // Exact-count assertion (coderabbit PR #7 loop_breaker_integration.rs:118):
+    // the fixture is deterministic — drift to 5 or 7 means the inlined jsonl
+    // was edited in a way that changes the Loop Breaker signal shape, and a
+    // loose `>= 5` would mask the regression. The current fixture emits 6
+    // is_error tool_results: 1 from the initial Bash call + 5 from the
+    // retry loop.
+    assert_eq!(
+        total_errors, 6,
+        "stuck fixture error count drifted; expected 6, got {total_errors}"
     );
 }
 
 #[test]
 fn it_predict_next_actions_surfaces_pivot_when_corpus_is_indexed() {
-    if std::env::var("MEMEX_SKIP_QDRANT_TESTS").as_deref() == Ok("1") {
-        eprintln!("(skipping Qdrant-backed Loop Breaker predict step — MEMEX_SKIP_QDRANT_TESTS=1)");
+    // OPT-IN GATE (coderabbit PR #7 loop_breaker_integration.rs:168):
+    // round-1 used `MEMEX_SKIP_QDRANT_TESTS=1` as a CI escape hatch, which
+    // meant the default (no env) tried to connect and silently `return`ed
+    // when Qdrant was unreachable / embedder init failed / predict failed.
+    // That's a false-positive risk: the test passes whether the predict
+    // pipeline works or whether the entire infra is broken. Flip to
+    // OPT-IN (`MEMEX_RUN_QDRANT_TESTS=1`) so the default skips, but
+    // when the env IS set, ANY failure panics — a real regression.
+    if std::env::var("MEMEX_RUN_QDRANT_TESTS").as_deref() != Ok("1") {
+        eprintln!(
+            "(skipping Qdrant-backed Loop Breaker predict step — \
+             set MEMEX_RUN_QDRANT_TESTS=1 to enable)"
+        );
         return;
     }
 
     let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
     rt.block_on(async {
-        // Pre-flight: do we have a reachable Qdrant?
-        let client = match indexer::connect().await {
-            Ok(c) => c,
-            Err(e) => {
-                eprintln!(
-                    "(skipping predict step — Qdrant unreachable: {e:#}). Set up \
-                     `./.qdrant/qdrant &` and index a corpus containing the stuck session."
-                );
-                return;
-            }
-        };
-
-        // Predict needs an embedder.
-        let embedder = match indexer::Embedder::new() {
-            Ok(e) => e,
-            Err(e) => {
-                eprintln!("(skipping predict step — embedder init failed: {e:#})");
-                return;
-            }
-        };
-
-        let ctx = match indexer::predict_next_actions(
+        let client = indexer::connect()
+            .await
+            .expect("MEMEX_RUN_QDRANT_TESTS=1 but Qdrant connect failed");
+        let embedder = indexer::Embedder::new()
+            .expect("MEMEX_RUN_QDRANT_TESTS=1 but Embedder init failed");
+        let ctx = indexer::predict_next_actions(
             &client,
             &embedder,
             STUCK_SESSION_ID,
@@ -157,16 +158,10 @@ fn it_predict_next_actions_surfaces_pivot_when_corpus_is_indexed() {
             10, // neighbors     (Loop Breaker default)
         )
         .await
-        {
-            Ok(c) => c,
-            Err(e) => {
-                eprintln!(
-                    "(skipping predict assertion — predict call failed: {e:#}). \
-                     This usually means the stuck-session jsonl isn't indexed yet."
-                );
-                return;
-            }
-        };
+        .expect(
+            "MEMEX_RUN_QDRANT_TESTS=1 but predict_next_actions failed — \
+             check that the stuck-session jsonl is indexed in this Qdrant",
+        );
 
         eprintln!(
             "loop-breaker predict: searched={} used={} predictions={}",

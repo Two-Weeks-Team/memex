@@ -59,8 +59,11 @@ impl SandboxRoot {
         // widening to stderr so an operator can't silently broaden the
         // sandbox via a launchd plist or shell rc. (Security review M-1.)
         if let Ok(raw) = std::env::var("MEMEX_EXTRA_SANDBOX_ROOTS") {
-            for part in raw.split(':').filter(|s| !s.is_empty()) {
-                let p = PathBuf::from(part);
+            // PORTABILITY (gemini PR #7 sec.rs:87): manual `:` split breaks
+            // Windows drive letters like `C:\path\to\corpus`. Defer to
+            // `std::env::split_paths` which uses `:` on Unix and `;` on
+            // Windows, matching how PATH-shaped env vars work everywhere.
+            for p in std::env::split_paths(&raw).filter(|p| !p.as_os_str().is_empty()) {
                 // Reject obvious foot-guns. We compare against the path as
                 // given AND its canonical form (when available) so neither
                 // `/` nor `~` shenanigans get through.
@@ -74,13 +77,13 @@ impl SandboxRoot {
                     .unwrap_or(false);
                 if is_root || is_home || too_shallow {
                     eprintln!(
-                        "[memex sec] refusing MEMEX_EXTRA_SANDBOX_ROOTS entry {part:?} — \
+                        "[memex sec] refusing MEMEX_EXTRA_SANDBOX_ROOTS entry {p:?} — \
                          too wide (root / $HOME / <3 path components). Pick a deeper subdirectory."
                     );
                     continue;
                 }
                 eprintln!(
-                    "[memex sec] sandbox widened via env var MEMEX_EXTRA_SANDBOX_ROOTS: {part:?}"
+                    "[memex sec] sandbox widened via env var MEMEX_EXTRA_SANDBOX_ROOTS: {p:?}"
                 );
                 candidates.push((SourceAgent::ClaudeCode, p));
             }

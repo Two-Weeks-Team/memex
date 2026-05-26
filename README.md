@@ -742,9 +742,9 @@ This is a **hackathon MVP** built for [Qdrant Vector Space Day 2026](https://qdr
 - ✅ 🔮 **Predict next-action** — neighbor-vector pivot walk + tool-call aggregation
 - ✅ ⏯ Replay engine with Bash / Edit-diff / Read / Task tool visualizations at 1×–8×
 - ✅ 🔍 Lens slider (multi-named-vector weighted search) — the "advanced vector search" axis
-- ✅ 🧠 **Cold Start Killer** — `compose_memory_primer(cwd)` + MCP `get_project_memory` + `memex memory` CLI + watcher auto-fire on new session (23 unit tests, multi-language EN+KR heuristics)
-- ✅ 🎁 **Engineering Wrapped** — `compose_wrapped(window_days)` + MCP `generate_wrapped_report` + `memex wrapped` CLI (7 unit tests, datetime-indexed range scroll)
-- ✅ 🔁 **Loop Breaker** — watcher stuck-detection (≥3 errors / 10 turns) + macOS notification + `loop-breaker-ready` event + frontend banner (3 unit tests)
+- ✅ 🧠 **Cold Start Killer** — `compose_memory_primer(cwd)` + MCP `get_project_memory` + `memex memory` CLI + watcher auto-fire on new session (27 unit tests, multi-language EN+KR heuristics, indirect-injection-safe markdown)
+- ✅ 🎁 **Engineering Wrapped** — `compose_wrapped(window_days)` + MCP `generate_wrapped_report` + `memex wrapped` CLI (8 unit tests, datetime-indexed range scroll ordered by recency, truncation-disclosed)
+- ✅ 🔁 **Loop Breaker** — watcher stuck-detection (≥3 errors / 10 turns) + macOS notification + `loop-breaker-ready` event + frontend banner (3 unit tests + 5 integration tests)
 - ✅ 📦 Snapshot export/import via Qdrant HTTP API
 - ✅ 🌐 Public landing page at [sgwannabe.github.io/memex](https://sgwannabe.github.io/memex/) (single-file `index.html`, no JS)
 - ✅ Lazy AppState init — self-heals if Qdrant is started after Memex
