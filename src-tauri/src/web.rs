@@ -495,8 +495,25 @@ async fn index_html(State(s): State<WebState>) -> Response {
 
 const SHIM_JS: &str = r#"
 (function(){
+  // The Tauri desktop app ships a bundled window icon; the web server serves a
+  // static dir without one, so the browser would 404 on /favicon.ico. Inject a
+  // brand favicon (rounded dark tile + accent dot) so the console stays clean.
+  try {
+    if (document.head && !document.querySelector('link[rel="icon"]')) {
+      var fav = document.createElement('link');
+      fav.rel = 'icon';
+      fav.type = 'image/svg+xml';
+      fav.href = "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%230f0f12'/><circle cx='16' cy='16' r='7' fill='%230a84ff'/></svg>";
+      document.head.appendChild(fav);
+    }
+  } catch (e) { /* non-fatal */ }
+
   if (window.__TAURI__ && window.__TAURI__.core && typeof window.__TAURI__.core.invoke === 'function') return;
   async function invoke(cmd, args){
+    // Tauri plugin IPC (deep-link, notification, opener, …) is delivered by the
+    // native runtime and has no server-side equivalent in the web variant.
+    // Resolve to null instead of POSTing to a command that would 404.
+    if (typeof cmd === 'string' && cmd.indexOf('plugin:') === 0) return null;
     const res = await fetch('/api/invoke/'+cmd, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(args||{})});
     if(!res.ok){ throw new Error('invoke '+cmd+' failed: '+res.status+' '+(await res.text())); }
     return await res.json();
