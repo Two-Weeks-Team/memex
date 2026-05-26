@@ -115,6 +115,17 @@ pub enum Command {
         #[arg(long)]
         run: bool,
     },
+    /// Start the headless web service: serves the UI + JSON API + HTTP MCP at
+    /// `/mcp`. Used by the single Docker image. (`web` feature only.)
+    #[cfg(feature = "web")]
+    Serve {
+        /// Port to listen on.
+        #[arg(long, default_value_t = 8765)]
+        port: u16,
+        /// Directory of static UI assets to serve.
+        #[arg(long, default_value = "src")]
+        ui_dir: PathBuf,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -159,7 +170,17 @@ pub fn run(args: Vec<String>) -> Result<()> {
         Command::Snapshot { op } => cmd_snapshot(op),
         Command::Mcp => cmd_mcp(),
         Command::InstallMcp { run } => cmd_install_mcp(run),
+        #[cfg(feature = "web")]
+        Command::Serve { port, ui_dir } => cmd_serve(port, ui_dir),
     }
+}
+
+#[cfg(feature = "web")]
+fn cmd_serve(port: u16, ui_dir: PathBuf) -> Result<()> {
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?;
+    rt.block_on(async move { crate::web::serve(port, ui_dir).await })
 }
 
 fn cmd_mcp() -> Result<()> {
