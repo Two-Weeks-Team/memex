@@ -1,0 +1,741 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Memex — a train arrives carrying the memory</title>
+<meta name="description" content="Memex turns your Claude Code & Codex session history into a navigable associative memory backed by Qdrant. Your past sessions are stations on a transit map; when the moment calls, a train glides in on its own and through its windows you see the remembered coding moment." />
+<style>
+  :root{
+    /* mid-century transit-poster palette: warm cream paper + saturated route inks */
+    --paper:#f3ead6;        /* aged poster cream */
+    --paper-2:#ece0c6;
+    --ink:#1d2530;          /* near-black engraving ink */
+    --ink-soft:#3c4656;
+    --faint:#6b7484;
+    --rail:#cdbf9f;         /* light track / hairlines on paper */
+    --line-red:#d8453a;     /* the "Recall" line — the one in play */
+    --line-blue:#2f6db5;
+    --line-amber:#e0a32a;
+    --line-teal:#2f9c8f;
+    --line-plum:#7d4b9c;
+    --window:#0c1422;       /* dark glass when train is unlit */
+    --glow:#ffd27a;         /* warm lamp glow inside the scene */
+    --screen:#7fd6ff;       /* monitor glow inside the scene */
+    --panel:rgba(243,234,214,.86);
+    --hair:rgba(29,37,48,.16);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    background:var(--paper);
+    color:var(--ink);
+    font:16px/1.6 ui-sans-serif,-apple-system,"Segoe UI",Roboto,Inter,system-ui,sans-serif;
+    overflow-x:hidden;
+    -webkit-font-smoothing:antialiased;
+  }
+  a{color:var(--line-blue);text-decoration:none}
+  a:hover{text-decoration:underline}
+  code,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+
+  /* ============ the transit stage (full-bleed poster) ============ */
+  .stage{position:relative;width:100%;height:100svh;min-height:660px;overflow:hidden;
+    background:
+      radial-gradient(140% 120% at 50% 8%, #f8f1e0 0%, var(--paper) 46%, var(--paper-2) 100%);}
+  /* faint paper grain + vignette so the poster feels printed, not flat */
+  .stage::after{
+    content:"";position:absolute;inset:0;pointer-events:none;z-index:5;
+    background:
+      radial-gradient(120% 90% at 50% 40%, transparent 52%, rgba(70,56,30,.16) 100%);
+    mix-blend-mode:multiply;
+  }
+  #map{position:absolute;inset:0;width:100%;height:100%;display:block;z-index:1}
+
+  /* ---------- overlaid copy / HUD ---------- */
+  .hud{position:absolute;inset:0;display:flex;flex-direction:column;pointer-events:none;z-index:6}
+  .hud > *{pointer-events:auto}
+
+  .topbar{display:flex;align-items:center;justify-content:space-between;gap:16px;
+    padding:20px clamp(18px,5vw,56px)}
+  .brand{display:flex;align-items:center;gap:11px;font-weight:800;letter-spacing:.20em;
+    text-transform:uppercase;font-size:13px;color:var(--ink)}
+  .brand .roundel{width:18px;height:18px;border-radius:50%;border:4px solid var(--line-red);
+    background:var(--paper)}
+  .topbar nav{display:flex;gap:clamp(10px,2.4vw,26px);font-size:13px;letter-spacing:.04em}
+  .topbar nav a{color:var(--ink-soft)}
+  .topbar nav a:hover{color:var(--ink)}
+
+  .hero{margin-top:auto;padding:0 clamp(18px,5vw,56px) clamp(24px,5vh,56px);max-width:680px}
+
+  /* the "current situation" — the station you're standing in right now */
+  .moment{display:inline-flex;align-items:center;gap:10px;margin-bottom:18px;
+    padding:7px 14px 7px 10px;border:1.5px solid var(--ink);border-radius:999px;
+    background:var(--panel);backdrop-filter:blur(2px);
+    font-size:12.5px;letter-spacing:.02em;color:var(--ink-soft)}
+  .moment .dot{width:9px;height:9px;border-radius:50%;background:var(--line-red);
+    box-shadow:0 0 0 0 rgba(216,69,58,.6);animation:pulse 2.6s ease-out infinite;flex:0 0 auto}
+  .moment b{color:var(--ink);font-weight:700}
+  @keyframes pulse{
+    0%{box-shadow:0 0 0 0 rgba(216,69,58,.5)}
+    70%{box-shadow:0 0 0 9px rgba(216,69,58,0)}
+    100%{box-shadow:0 0 0 0 rgba(216,69,58,0)}
+  }
+
+  h1{margin:0;font-weight:800;font-size:clamp(33px,6vw,60px);line-height:1.02;
+    letter-spacing:-.02em;color:var(--ink)}
+  h1 .glow{color:var(--line-red)}
+  .lede{margin:16px 0 0;font-size:clamp(15px,2.1vw,18px);color:var(--ink-soft);max-width:560px}
+  .lede b{color:var(--ink);font-weight:700}
+
+  .cta{display:flex;flex-wrap:wrap;gap:13px;margin-top:26px}
+  .btn{display:inline-flex;align-items:center;gap:9px;padding:12px 20px;border-radius:8px;
+    font-size:14.5px;font-weight:700;letter-spacing:.01em;border:2px solid var(--ink);
+    transition:transform .14s ease, box-shadow .2s ease, background .2s ease}
+  .btn:hover{text-decoration:none;transform:translateY(-1px)}
+  .btn-primary{background:var(--line-red);color:#fff;border-color:var(--line-red);
+    box-shadow:0 6px 0 rgba(150,38,30,.55)}
+  .btn-primary:hover{box-shadow:0 8px 0 rgba(150,38,30,.55)}
+  .btn-ghost{background:var(--panel);color:var(--ink)}
+  .btn-ghost:hover{background:#fff}
+
+  /* arrivals board, lower-right: which scene is at the platform now */
+  .arrivals{position:absolute;right:clamp(16px,4vw,40px);bottom:clamp(20px,5vh,40px);
+    z-index:7;border:2px solid var(--ink);border-radius:10px;background:#10141b;
+    color:#ffd27a;min-width:236px;overflow:hidden;
+    box-shadow:0 8px 0 rgba(29,37,48,.35);font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  .arrivals .ah{display:flex;align-items:center;justify-content:space-between;gap:10px;
+    padding:8px 12px;background:#1a1f29;border-bottom:1px solid rgba(255,210,122,.22);
+    font-size:10.5px;letter-spacing:.18em;text-transform:uppercase;color:#cdbf9f}
+  .arrivals .ah .live{display:inline-flex;align-items:center;gap:6px;color:#ffd27a}
+  .arrivals .ah .live i{width:7px;height:7px;border-radius:50%;background:#ffd27a;
+    animation:blink 1.4s steps(2,end) infinite;font-style:normal}
+  @keyframes blink{50%{opacity:.2}}
+  .arrivals .arow{display:flex;align-items:baseline;gap:9px;padding:10px 12px}
+  .arrivals .ln{width:11px;height:11px;border-radius:50%;flex:0 0 auto;align-self:center;
+    border:2px solid #10141b;background:var(--line-red);box-shadow:0 0 0 2px #ffd27a}
+  .arrivals .dest{font-size:13.5px;color:#ffe7b8;letter-spacing:.01em;line-height:1.3}
+  .arrivals .sta{margin-left:auto;font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;
+    color:#9fd3ff;align-self:center;white-space:nowrap}
+  .arrivals .sta.arriving{color:#ffd27a}
+  .arrivals .sta.departing{color:#cdbf9f}
+
+  /* replay / call-another control */
+  .replay{position:absolute;left:clamp(18px,5vw,56px);bottom:clamp(20px,5vh,40px);
+    display:none;z-index:7}
+
+  /* ============ ground-truth section below the fold ============ */
+  .below{position:relative;z-index:2;max-width:1080px;margin:0 auto;
+    padding:clamp(54px,9vh,104px) clamp(18px,5vw,40px) 36px}
+  .kicker{font-size:12px;letter-spacing:.22em;text-transform:uppercase;color:var(--faint);
+    margin:0 0 14px;font-weight:700}
+  .below h2{font-size:clamp(24px,4vw,37px);line-height:1.1;margin:0;color:var(--ink);
+    letter-spacing:-.012em;font-weight:800;max-width:760px}
+  .below p.sub{color:var(--ink-soft);max-width:680px;margin:16px 0 0;font-size:16px}
+
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(238px,1fr));gap:16px;
+    margin-top:40px}
+  .card{border:2px solid var(--ink);border-radius:14px;padding:20px 20px 22px;
+    background:#fbf5e6;transition:transform .18s ease, box-shadow .18s ease}
+  .card:hover{transform:translateY(-2px);box-shadow:0 6px 0 rgba(29,37,48,.18)}
+  .card h3{margin:0 0 8px;font-size:16px;color:var(--ink);letter-spacing:.01em;
+    display:flex;align-items:center;gap:9px;font-weight:800}
+  .card h3 .lp{width:14px;height:14px;border-radius:50%;border:3px solid var(--line-red);
+    background:var(--paper);flex:0 0 auto}
+  .card:nth-child(2) h3 .lp{border-color:var(--line-blue)}
+  .card:nth-child(3) h3 .lp{border-color:var(--line-amber)}
+  .card:nth-child(4) h3 .lp{border-color:var(--line-teal)}
+  .card:nth-child(5) h3 .lp{border-color:var(--line-plum)}
+  .card:nth-child(6) h3 .lp{border-color:var(--ink)}
+  .card p{margin:0;font-size:14px;color:var(--ink-soft);line-height:1.55}
+
+  .facts{margin-top:42px;border:2px solid var(--ink);border-radius:14px;overflow:hidden;
+    background:#fbf5e6}
+  .facts .row{display:grid;grid-template-columns:160px 1fr;gap:18px;padding:15px 22px;
+    border-top:1.5px solid var(--hair);font-size:14.5px}
+  .facts .row:first-child{border-top:0}
+  .facts .row .lab{color:var(--faint);letter-spacing:.04em;font-size:12.5px;
+    text-transform:uppercase;padding-top:2px;font-weight:700}
+  .facts .row .val{color:var(--ink)}
+  .facts .row .val .mono{color:var(--line-blue);font-size:13.5px}
+
+  .addline{margin-top:34px;border:2px solid var(--ink);border-radius:12px;
+    background:#10141b;padding:15px 18px;font-size:13.5px;color:#cdbf9f;overflow-x:auto}
+  .addline .mono{color:#ffe7b8}
+  .addline .c{color:var(--line-red)}
+
+  footer{position:relative;z-index:2;border-top:2px solid var(--ink);margin-top:56px}
+  .foot{max-width:1080px;margin:0 auto;padding:26px clamp(18px,5vw,40px) 56px;
+    display:flex;flex-wrap:wrap;gap:18px;justify-content:space-between;align-items:center;
+    color:var(--faint);font-size:13px}
+  .foot a{color:var(--ink-soft)}
+  .foot .links{display:flex;flex-wrap:wrap;gap:18px}
+
+  @media (prefers-reduced-motion: reduce){
+    .moment .dot{animation:none}
+    .arrivals .ah .live i{animation:none}
+  }
+  @media (max-width:680px){
+    .topbar nav{display:none}
+    .facts .row{grid-template-columns:1fr;gap:4px}
+    .arrivals{min-width:0;right:14px;bottom:14px}
+    .arrivals .dest{font-size:12px}
+  }
+</style>
+</head>
+<body>
+
+<section class="stage" aria-label="A transit map of past coding sessions where a train glides into the platform on its own, its lit windows showing a remembered coding moment">
+
+  <!-- The whole poster is one hand-authored SVG: the associative transit network,
+       the platform, and the train whose windows hold the depicted memory-scene. -->
+  <svg id="map" viewBox="0 0 1600 900" preserveAspectRatio="xMidYMid slice"
+       role="img" aria-hidden="true">
+    <defs>
+      <!-- warm lamp glow filter for the scene inside the windows -->
+      <radialGradient id="lampGlow" cx="50%" cy="42%" r="62%">
+        <stop offset="0%"  stop-color="#ffe6ad" stop-opacity="0.95"/>
+        <stop offset="42%" stop-color="#ffcf86" stop-opacity="0.5"/>
+        <stop offset="100%" stop-color="#ffcf86" stop-opacity="0"/>
+      </radialGradient>
+      <radialGradient id="screenGlow" cx="50%" cy="50%" r="60%">
+        <stop offset="0%"  stop-color="#bfeeff" stop-opacity="0.95"/>
+        <stop offset="60%" stop-color="#7fd6ff" stop-opacity="0.4"/>
+        <stop offset="100%" stop-color="#7fd6ff" stop-opacity="0"/>
+      </radialGradient>
+      <linearGradient id="trainBody" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#e9e0cb"/>
+        <stop offset="48%" stop-color="#d7ccae"/>
+        <stop offset="52%" stop-color="#cdbf9f"/>
+        <stop offset="100%" stop-color="#b9a980"/>
+      </linearGradient>
+      <linearGradient id="glassDark" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#16202f"/>
+        <stop offset="100%" stop-color="#0a121d"/>
+      </linearGradient>
+      <!-- platform tint -->
+      <linearGradient id="platformG" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#ded0b0"/>
+        <stop offset="100%" stop-color="#c9b88f"/>
+      </linearGradient>
+    </defs>
+
+    <!-- ===================== ASSOCIATIVE TRANSIT NETWORK =====================
+         Lines = similarity trails between past sessions. Stations = named past
+         moments. Mid-century geometry: 45° / 90° segments, rounded corners,
+         ringed interchange nodes. The RED line is the one in play (Recall). -->
+    <g id="network" stroke-linecap="round" stroke-linejoin="round" fill="none">
+      <!-- soft connective ground hairlines -->
+      <g stroke="var(--rail)" stroke-width="2" opacity="0.55">
+        <path d="M120 760 L380 760 L520 620 L760 620"/>
+        <path d="M1480 180 L1180 180 L1040 320 L820 320"/>
+        <path d="M150 150 L150 360 L300 510"/>
+      </g>
+
+      <!-- TEAL line -->
+      <path stroke="var(--line-teal)" stroke-width="7"
+            d="M140 660 L300 660 L420 540 L640 540 L760 420"/>
+      <!-- PLUM line -->
+      <path stroke="var(--line-plum)" stroke-width="7"
+            d="M250 200 L250 380 L430 560 L430 720 L560 720"/>
+      <!-- AMBER line -->
+      <path stroke="var(--line-amber)" stroke-width="7"
+            d="M1460 230 L1180 230 L1040 370 L900 370"/>
+      <!-- BLUE line -->
+      <path stroke="var(--line-blue)" stroke-width="7"
+            d="M1440 640 L1180 640 L1060 520 L900 520 L820 440"/>
+
+      <!-- RED line — the line the arriving train runs on. It threads through the
+           platform region (center) so the train's path reads as part of the map. -->
+      <path id="redline" stroke="var(--line-red)" stroke-width="9"
+            d="M120 470 L360 470 L470 360 L740 360 L900 520 L1100 520 L1230 650 L1480 650"/>
+    </g>
+
+    <!-- interchange + stop nodes (named past sessions) -->
+    <g id="stations" font-family="ui-sans-serif,system-ui,sans-serif">
+      <!-- ringed interchanges -->
+      <g>
+        <circle cx="470" cy="360" r="9" fill="var(--paper)" stroke="var(--ink)" stroke-width="3.5"/>
+        <text x="470" y="338" text-anchor="middle" font-size="14" font-weight="700" fill="var(--ink)">auth&#8209;retry</text>
+      </g>
+      <g>
+        <circle cx="900" cy="520" r="11" fill="var(--paper)" stroke="var(--ink)" stroke-width="4"/>
+        <text x="916" y="500" text-anchor="start" font-size="14" font-weight="700" fill="var(--ink)">token refresh</text>
+      </g>
+      <g>
+        <circle cx="760" cy="420" r="8" fill="var(--paper)" stroke="var(--ink)" stroke-width="3.5"/>
+        <text x="760" y="404" text-anchor="middle" font-size="13.5" font-weight="700" fill="var(--ink)">CI&nbsp;green</text>
+      </g>
+      <!-- simple tick stops -->
+      <g stroke="var(--ink)" stroke-width="3">
+        <line x1="356" y1="460" x2="364" y2="480"/>
+        <line x1="736" y1="350" x2="744" y2="370"/>
+        <line x1="1096" y1="510" x2="1104" y2="530"/>
+        <line x1="640" y1="530" x2="640" y2="550" stroke="var(--line-teal)"/>
+        <line x1="430" y1="560" x2="430" y2="580" stroke="var(--line-plum)"/>
+        <line x1="1040" y1="360" x2="1040" y2="380" stroke="var(--line-amber)"/>
+        <line x1="1060" y1="510" x2="1060" y2="530" stroke="var(--line-blue)"/>
+      </g>
+      <g fill="var(--faint)" font-size="12.5">
+        <text x="150" y="455" text-anchor="start">flaky&nbsp;test</text>
+        <text x="1300" y="675" text-anchor="middle">rate&nbsp;limit</text>
+        <text x="250" y="190" text-anchor="middle" fill="var(--line-plum)">migration</text>
+        <text x="1455" y="250" text-anchor="end" fill="var(--line-amber)">env&nbsp;config</text>
+      </g>
+    </g>
+
+    <!-- ===================== PLATFORM ===================== -->
+    <!-- the platform edge the train pulls up to; centered on the red line -->
+    <g id="platform">
+      <rect x="430" y="560" width="740" height="46" rx="6" fill="url(#platformG)" stroke="var(--ink)" stroke-width="3"/>
+      <!-- tactile edge stripe -->
+      <rect x="430" y="560" width="740" height="8" fill="var(--line-red)" opacity="0.8"/>
+      <!-- platform name plate -->
+      <g>
+        <rect x="700" y="612" width="200" height="30" rx="5" fill="#10141b" stroke="var(--ink)" stroke-width="2"/>
+        <text x="800" y="632" text-anchor="middle" font-size="14" font-weight="700"
+              letter-spacing="3" fill="#ffd27a" font-family="ui-monospace,monospace">NOW · HERE</text>
+      </g>
+    </g>
+
+    <!-- ===================== THE TRAIN =====================
+         Glides in along the red line and stops at the platform. Through the lit
+         windows you SEE a depicted scene of a remembered coding moment. The whole
+         <g id="train"> is translated by JS to arrive / dwell / depart. -->
+    <g id="train" transform="translate(1700,0)">
+      <!-- car shadow on the platform -->
+      <ellipse cx="800" cy="566" rx="360" ry="14" fill="rgba(29,37,48,0.22)"/>
+
+      <!-- car body: a long rounded carriage -->
+      <rect x="470" y="362" width="660" height="180" rx="30" fill="url(#trainBody)"
+            stroke="var(--ink)" stroke-width="4"/>
+      <!-- nose taper (front, toward platform exit on the right) -->
+      <path d="M1130 372 q70 8 70 80 q0 72 -70 80 Z" fill="url(#trainBody)" stroke="var(--ink)" stroke-width="4"/>
+      <!-- roof band + the red route stripe -->
+      <rect x="470" y="362" width="660" height="20" rx="14" fill="#c2b48d"/>
+      <rect x="470" y="392" width="700" height="9" fill="var(--line-red)"/>
+      <!-- destination blind on the front -->
+      <rect x="1118" y="406" width="74" height="26" rx="4" fill="#10141b" stroke="var(--ink)" stroke-width="2"/>
+      <text x="1155" y="424" text-anchor="middle" font-size="12" font-weight="700"
+            letter-spacing="1" fill="#ffd27a" font-family="ui-monospace,monospace">RECALL</text>
+
+      <!-- ===== the FOUR lit windows, each a pane of the remembered SCENE ===== -->
+      <!-- Composition across the 4 windows reads as ONE continuous tableau of a
+           late-night coding moment: a desk by a window, a bent lamp throwing
+           warm light, a glowing monitor with a green test bar, a person seated,
+           a mug. Each <g class="scene-..."> is a hand-drawn slice of that scene. -->
+
+      <g id="windows">
+        <!-- window 1 (leftmost): the night window + city lights behind the desk -->
+        <g>
+          <rect x="500" y="412" width="138" height="100" rx="10" fill="url(#glassDark)"
+                stroke="var(--ink)" stroke-width="3"/>
+          <clipPath id="w1"><rect x="503" y="415" width="132" height="94" rx="8"/></clipPath>
+          <g clip-path="url(#w1)" class="paneScene">
+            <!-- night sky gradient + distant building lights -->
+            <rect x="503" y="415" width="132" height="62" fill="#0e1a2c"/>
+            <rect x="503" y="473" width="132" height="40" fill="#13202f"/>
+            <g fill="#ffd27a" opacity="0.85">
+              <rect x="520" y="438" width="4" height="6"/><rect x="532" y="446" width="4" height="6"/>
+              <rect x="548" y="432" width="4" height="6"/><rect x="566" y="450" width="4" height="6"/>
+              <rect x="588" y="440" width="4" height="6"/><rect x="606" y="448" width="4" height="6"/>
+              <rect x="620" y="436" width="4" height="6"/>
+            </g>
+            <!-- a low moon -->
+            <circle cx="600" cy="436" r="9" fill="#f3ead6" opacity="0.9"/>
+            <!-- windowsill / desk front edge -->
+            <rect x="503" y="500" width="132" height="13" fill="#241a10"/>
+          </g>
+        </g>
+
+        <!-- window 2: the bent desk lamp + its warm pool of light -->
+        <g>
+          <rect x="650" y="412" width="138" height="100" rx="10" fill="url(#glassDark)"
+                stroke="var(--ink)" stroke-width="3"/>
+          <clipPath id="w2"><rect x="653" y="415" width="132" height="94" rx="8"/></clipPath>
+          <g clip-path="url(#w2)" class="paneScene">
+            <rect x="653" y="415" width="132" height="98" fill="#101a26"/>
+            <!-- warm glow pool from the lamp -->
+            <circle class="lampPool" cx="724" cy="470" r="64" fill="url(#lampGlow)"/>
+            <!-- the desk lamp: base, arm, head -->
+            <g stroke="#2a2017" stroke-width="6" fill="none" stroke-linecap="round">
+              <line x1="700" y1="505" x2="700" y2="470"/>     <!-- post -->
+              <line x1="700" y1="470" x2="736" y2="446"/>     <!-- arm -->
+            </g>
+            <path d="M732 440 l22 6 l-12 18 Z" fill="#3a2c1c" stroke="#2a2017" stroke-width="2"/>
+            <!-- lamp filament hotspot -->
+            <circle class="bulb" cx="740" cy="450" r="5" fill="#fff3d0"/>
+            <rect x="686" y="503" width="70" height="10" fill="#241a10"/>
+          </g>
+        </g>
+
+        <!-- window 3: the glowing monitor with the green test bar going green -->
+        <g>
+          <rect x="800" y="412" width="138" height="100" rx="10" fill="url(#glassDark)"
+                stroke="var(--ink)" stroke-width="3"/>
+          <clipPath id="w3"><rect x="803" y="415" width="132" height="94" rx="8"/></clipPath>
+          <g clip-path="url(#w3)" class="paneScene">
+            <rect x="803" y="415" width="132" height="98" fill="#0d1622"/>
+            <circle class="scrPool" cx="869" cy="458" r="58" fill="url(#screenGlow)"/>
+            <!-- monitor bezel -->
+            <rect x="828" y="430" width="84" height="56" rx="5" fill="#0a1018" stroke="#2a3340" stroke-width="3"/>
+            <!-- screen content: a couple code lines + the test bar that lands green -->
+            <g>
+              <rect x="836" y="438" width="40" height="4" rx="2" fill="#5aa0d8"/>
+              <rect x="836" y="447" width="58" height="4" rx="2" fill="#7fc8b0"/>
+              <rect x="836" y="456" width="30" height="4" rx="2" fill="#c9a55a"/>
+              <!-- the green bar (the moment the build went green) -->
+              <rect class="greenbar" x="836" y="470" width="68" height="7" rx="3" fill="#37c46a"/>
+            </g>
+            <!-- monitor stand + desk -->
+            <rect x="866" y="486" width="8" height="14" fill="#1a222c"/>
+            <rect x="803" y="500" width="132" height="13" fill="#241a10"/>
+          </g>
+        </g>
+
+        <!-- window 4: the person seated, a mug, hand at the keyboard -->
+        <g>
+          <rect x="950" y="412" width="138" height="100" rx="10" fill="url(#glassDark)"
+                stroke="var(--ink)" stroke-width="3"/>
+          <clipPath id="w4"><rect x="953" y="415" width="132" height="94" rx="8"/></clipPath>
+          <g clip-path="url(#w4)" class="paneScene">
+            <rect x="953" y="415" width="132" height="98" fill="#111a26"/>
+            <circle class="lampPool" cx="1010" cy="470" r="56" fill="url(#lampGlow)" opacity="0.7"/>
+            <!-- person: head + shoulders + back, seated, facing the screen (left) -->
+            <g fill="#2b3340" stroke="#1a222c" stroke-width="1.5">
+              <circle cx="1006" cy="452" r="15"/>                         <!-- head -->
+              <path d="M984 512 q0 -42 22 -52 q22 10 22 52 Z"/>           <!-- torso -->
+            </g>
+            <!-- arm reaching toward the keyboard (toward window 3) -->
+            <path d="M992 478 q-24 4 -34 18" stroke="#2b3340" stroke-width="9" fill="none" stroke-linecap="round"/>
+            <!-- steam-rising mug on the desk -->
+            <g>
+              <rect x="1044" y="486" width="20" height="20" rx="3" fill="#b6543a" stroke="#1a222c" stroke-width="2"/>
+              <path d="M1064 490 q8 0 8 7 q0 7 -8 7" fill="none" stroke="#1a222c" stroke-width="2"/>
+              <path class="steam" d="M1052 484 q4 -8 0 -16" stroke="#ffe7b8" stroke-width="2" fill="none" opacity="0.6"/>
+            </g>
+            <rect x="953" y="500" width="132" height="13" fill="#241a10"/>
+          </g>
+        </g>
+      </g>
+
+      <!-- doors between window groups (closed) -->
+      <g fill="#b3a37a" stroke="var(--ink)" stroke-width="2.5">
+        <rect x="640" y="416" width="8" height="120" rx="2"/>
+        <rect x="790" y="416" width="8" height="120" rx="2"/>
+        <rect x="940" y="416" width="8" height="120" rx="2"/>
+      </g>
+
+      <!-- bogies / wheels -->
+      <g fill="#2a3340" stroke="var(--ink)" stroke-width="3">
+        <circle cx="560" cy="548" r="16"/>
+        <circle cx="660" cy="548" r="16"/>
+        <circle cx="940" cy="548" r="16"/>
+        <circle cx="1040" cy="548" r="16"/>
+      </g>
+    </g>
+
+    <!-- the headlight pool the train throws onto the platform as it arrives -->
+    <ellipse id="headlight" cx="1260" cy="470" rx="0" ry="0" fill="url(#lampGlow)" opacity="0.0"/>
+  </svg>
+
+  <div class="hud">
+    <header class="topbar">
+      <div class="brand"><span class="roundel" aria-hidden="true"></span> Memex</div>
+      <nav aria-label="Primary">
+        <a href="https://github.com/Two-Weeks-Team/memex">Repo</a>
+        <a href="https://two-weeks-team.github.io/memex/">Live</a>
+        <a href="#how">How it works</a>
+        <a href="#agent">For agents</a>
+      </nav>
+    </header>
+
+    <div class="hero">
+      <span class="moment">
+        <span class="dot" aria-hidden="true"></span>
+        Right now you're at <b>auth&#8209;retry</b> &mdash; and a train is pulling in&hellip;
+      </span>
+
+      <h1>You solved this once.<br>A train arrives <span class="glow">carrying&nbsp;it.</span></h1>
+
+      <p class="lede">
+        Your past sessions are stations; the lines between them are
+        <b>similarity trails</b>, not a search. You don't go hunting the platform &mdash;
+        the moment you're at <i>calls a train in on its own</i>, and through its lit windows
+        you <b>see the night you fixed it</b>: the desk, the bent lamp, the test bar going green.
+      </p>
+
+      <div class="cta">
+        <a class="btn btn-primary" href="https://github.com/Two-Weeks-Team/memex">Get Memex on GitHub</a>
+        <a class="btn btn-ghost" href="https://two-weeks-team.github.io/memex/">See it live</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- arrivals board: announces the scene currently at the platform -->
+  <aside class="arrivals" aria-live="polite" aria-label="Arrivals at this platform">
+    <div class="ah">
+      <span>Arrivals</span>
+      <span class="live"><i aria-hidden="true"></i> live</span>
+    </div>
+    <div class="arow">
+      <span class="ln" aria-hidden="true"></span>
+      <span class="dest" id="arrDest">the night you fixed it</span>
+      <span class="sta arriving" id="arrStatus">arriving</span>
+    </div>
+  </aside>
+</section>
+
+<main class="below">
+  <section id="how">
+    <p class="kicker">What just happened</p>
+    <h2>People don't document every memory &mdash; yet when the moment arrives,
+      the relevant thought surfaces on its own.</h2>
+    <p class="sub">
+      Memex is a non-chatbot, LLM-free-at-runtime tool that reads your existing
+      Claude&nbsp;Code and Codex session history and turns it into a navigable
+      associative memory backed by <b style="color:var(--ink)">Qdrant</b>. The map above is the idea:
+      your sessions are stations, the colored lines are <i>similarity trails</i>, and the
+      relevant past can pull into your platform proactively &mdash; you move by similarity, not keywords.
+    </p>
+
+    <div class="grid">
+      <article class="card">
+        <h3><span class="lp" aria-hidden="true"></span>Time Machine</h3>
+        <p>Replay any past session as it happened &mdash; the whole scene, not a snippet.</p>
+      </article>
+      <article class="card">
+        <h3><span class="lp" aria-hidden="true"></span>Lens</h3>
+        <p>Named-vector weighted search to look through your history from one angle at a time.</p>
+      </article>
+      <article class="card">
+        <h3><span class="lp" aria-hidden="true"></span>Topology</h3>
+        <p>A distance-matrix &rarr; MST graph &mdash; the literal transit network of how your sessions connect.</p>
+      </article>
+      <article class="card">
+        <h3><span class="lp" aria-hidden="true"></span>Mix &amp; Discovery</h3>
+        <p>Positive / negative recommendation to pull related work toward you and push noise away.</p>
+      </article>
+      <article class="card">
+        <h3><span class="lp" aria-hidden="true"></span>Proactive Recall</h3>
+        <p>The piece that called the train in: a relevant past moment surfaces because the current one evoked it.</p>
+      </article>
+      <article class="card">
+        <h3><span class="lp" aria-hidden="true"></span>Companion · Wrapped · Loop&nbsp;Breaker</h3>
+        <p>An agent-memory layer over your corpus &mdash; recap what you've done, and catch yourself circling.</p>
+      </article>
+    </div>
+
+    <div class="facts" aria-label="What Memex is">
+      <div class="row"><div class="lab">Reads</div>
+        <div class="val"><span class="mono">~/.claude/projects/**/*.jsonl</span>, legacy transcripts, and <span class="mono">history.jsonl</span></div></div>
+      <div class="row"><div class="lab">Backed by</div>
+        <div class="val">Qdrant &mdash; navigate by vector similarity, no runtime LLM</div></div>
+      <div class="row"><div class="lab">Why</div>
+        <div class="val">Claude&nbsp;Code silently migrates and deletes old sessions. Memex keeps a corpus <b style="color:var(--ink)">you own.</b></div></div>
+      <div class="row"><div class="lab">Built for</div>
+        <div class="val">Qdrant Vector Space Day 2026 &mdash; <i>"Think Outside the Bot."</i></div></div>
+    </div>
+  </section>
+
+  <section id="agent">
+    <p class="kicker" style="margin-top:54px">For your agent</p>
+    <h2 style="font-size:clamp(20px,3vw,28px)">11 MCP tools over stdio + HTTP &mdash;
+      works in Claude&nbsp;Code, Codex, and Cursor.</h2>
+    <p class="sub">A server / Docker variant runs Qdrant, the web UI, and the MCP server in one image.
+      The tools let an agent recall, replay, and connect across your own history.</p>
+    <div class="addline mono">
+      <span class="c">$</span> claude mcp add memex -- memex-mcp
+    </div>
+    <p style="margin-top:18px;font-size:14px">
+      <a href="https://github.com/Two-Weeks-Team/memex#server--docker">Server / Docker variant</a>
+      &nbsp;&middot;&nbsp;
+      <a href="https://github.com/Two-Weeks-Team/memex">MCP integration &amp; the 11 tools</a>
+    </p>
+  </section>
+</main>
+
+<footer>
+  <div class="foot">
+    <div>Memex &mdash; a memory you own, surfaced by association.</div>
+    <div class="links">
+      <a href="https://github.com/Two-Weeks-Team/memex">GitHub</a>
+      <a href="https://two-weeks-team.github.io/memex/">Live landing</a>
+      <a href="https://github.com/Two-Weeks-Team/memex#server--docker">Docker</a>
+    </div>
+  </div>
+</footer>
+
+<script>
+(function(){
+  "use strict";
+
+  var train     = document.getElementById('train');
+  var headlight = document.getElementById('headlight');
+  var arrDest   = document.getElementById('arrDest');
+  var arrStatus = document.getElementById('arrStatus');
+  var moment    = document.querySelector('.moment');
+
+  if (!train) return;
+
+  var reduce = window.matchMedia &&
+               window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // Each entry is one train run: the station you're "at" (the situation that
+  // calls it up) + the scene depicted in the windows. Copy stays honest — these
+  // are plausible past coding moments, not invented product claims.
+  var RUNS = [
+    { at:'auth‑retry',  dest:'the night you fixed it' },
+    { at:'a flaky test',     dest:'the run that finally went green' },
+    { at:'a rate‑limit',dest:'the backoff you tuned at 2&nbsp;a.m.' },
+    { at:'a migration',      dest:'the schema you almost lost' }
+  ];
+  var runIx = 0;
+
+  // X positions, in the SVG's local space, that the <g id="train"> is translated to.
+  var DOCK_X    = 0;      // pulled up at the platform (authored position)
+  var ENTER_X   = 1700;   // off-stage to the right (incoming)
+  var EXIT_X    = -1800;  // off-stage to the left (departed)
+
+  // current animated translateX
+  var curX = ENTER_X;
+  var fromX = ENTER_X, toX = DOCK_X;
+  var moveT0 = 0, moveDur = 0;
+  var phase = '';         // 'arrive' | 'dwell' | 'depart'
+  var phaseUntil = 0;
+  var rafId = 0;
+
+  function setStatus(txt, cls){
+    arrStatus.textContent = txt;
+    arrStatus.className = 'sta ' + (cls||'');
+  }
+
+  function applyRunCopy(run){
+    arrDest.innerHTML = run.dest;
+    // update the "current situation" chip so the situation visibly calls THIS train
+    moment.innerHTML =
+      '<span class="dot" aria-hidden="true"></span> Right now you&rsquo;re at <b>' +
+      run.at + '</b> &mdash; and a train is pulling in&hellip;';
+  }
+
+  // easing: a train decelerating into / accelerating out of a platform
+  function easeOutQuint(t){ return 1 - Math.pow(1-t, 5); }
+  function easeInQuint(t){ return Math.pow(t, 5); }
+
+  function startMove(from, to, dur, ease){
+    fromX = from; toX = to; moveDur = dur; moveT0 = performance.now();
+    train._ease = ease;
+  }
+
+  function beginArrive(){
+    var run = RUNS[runIx];
+    applyRunCopy(run);
+    setStatus('arriving', 'arriving');
+    phase = 'arrive';
+    startMove(ENTER_X, DOCK_X, 2600, easeOutQuint);
+  }
+
+  function beginDwell(){
+    phase = 'dwell';
+    setStatus('at platform', '');
+    // lifelike, irregular dwell so it never feels metronomic
+    phaseUntil = performance.now() + (4200 + Math.random()*2600);
+  }
+
+  function beginDepart(){
+    phase = 'depart';
+    setStatus('departing', 'departing');
+    startMove(DOCK_X, EXIT_X, 2200, easeInQuint);
+  }
+
+  function nextRun(){
+    runIx = (runIx + 1) % RUNS.length;
+    // a short empty-platform beat before the next train is called in
+    phase = 'gap';
+    phaseUntil = performance.now() + (900 + Math.random()*1400);
+  }
+
+  function frame(now){
+    // animate translation if a move is in progress
+    if (moveDur > 0){
+      var t = (now - moveT0) / moveDur;
+      if (t >= 1){ t = 1; }
+      var e = (train._ease || easeOutQuint)(t);
+      curX = fromX + (toX - fromX) * e;
+      train.setAttribute('transform', 'translate(' + curX.toFixed(1) + ',0)');
+
+      // headlight pool grows as the train nears the platform during arrival
+      if (phase === 'arrive'){
+        var prox = 1 - Math.min(1, Math.abs(curX) / 1700); // 0 far → 1 docked
+        var r = 220 * prox;
+        headlight.setAttribute('rx', r.toFixed(1));
+        headlight.setAttribute('ry', (r*0.34).toFixed(1));
+        headlight.setAttribute('opacity', (0.5 * prox).toFixed(2));
+        headlight.setAttribute('cx', (1140 + curX).toFixed(1));
+      }
+
+      if (t >= 1){
+        moveDur = 0;
+        if (phase === 'arrive'){ headlight.setAttribute('opacity','0'); beginDwell(); }
+        else if (phase === 'depart'){ nextRun(); }
+      }
+    } else {
+      // timed phases with no active movement
+      if (phase === 'dwell' && now >= phaseUntil){ beginDepart(); }
+      else if (phase === 'gap' && now >= phaseUntil){ beginArrive(); }
+    }
+
+    rafId = requestAnimationFrame(frame);
+  }
+
+  function startStatic(){
+    // reduced-motion: train docked at the platform, the scene fully visible & lit
+    var run = RUNS[0];
+    applyRunCopy(run);
+    setStatus('at platform', '');
+    train.setAttribute('transform', 'translate(0,0)');
+    headlight.setAttribute('opacity','0');
+    // (no rAF loop — the scene is held static and readable)
+  }
+
+  function startMotion(){
+    cancelAnimationFrame(rafId);
+    runIx = 0;
+    curX = ENTER_X;
+    train.setAttribute('transform', 'translate(' + ENTER_X + ',0)');
+    beginArrive();
+    rafId = requestAnimationFrame(frame);
+  }
+
+  function boot(){
+    reduce = window.matchMedia &&
+             window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    cancelAnimationFrame(rafId);
+    if (reduce) startStatic();
+    else startMotion();
+  }
+
+  // honor live changes to the motion preference
+  if (window.matchMedia){
+    try {
+      window.matchMedia('(prefers-reduced-motion: reduce)')
+        .addEventListener('change', boot);
+    } catch(_){}
+  }
+
+  // pause the run loop when the stage is off-screen (keyboard-friendly, battery-friendly)
+  if ('IntersectionObserver' in window){
+    var io = new IntersectionObserver(function(entries){
+      entries.forEach(function(en){
+        if (reduce) return;
+        if (en.isIntersecting){ if (!rafId) rafId = requestAnimationFrame(frame); }
+        else { cancelAnimationFrame(rafId); rafId = 0; }
+      });
+    }, {threshold:0.05});
+    io.observe(document.querySelector('.stage'));
+  }
+
+  boot();
+})();
+</script>
+</body>
+</html>

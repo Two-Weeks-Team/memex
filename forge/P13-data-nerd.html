@@ -1,0 +1,516 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Memex — an associative map of your own sessions</title>
+<meta name="description" content="Memex turns your Claude Code / Codex session history into a navigable associative memory backed by Qdrant. Not a search box, not a chatbot — a topology you move through by similarity.">
+<style>
+  /* ---- OKLCH palette (2026) ---- */
+  :root {
+    --bg:        oklch(16% 0.02 265);
+    --bg-2:      oklch(20% 0.03 265);
+    --panel:     oklch(23% 0.035 265 / 0.72);
+    --ink:       oklch(95% 0.01 265);
+    --ink-dim:   oklch(72% 0.02 265);
+    --ink-faint: oklch(58% 0.02 265);
+    --line:      oklch(40% 0.03 265 / 0.5);
+    --node:      oklch(72% 0.06 265);
+    --edge:      oklch(50% 0.04 265 / 0.45);
+    --accent:    oklch(78% 0.15 200);   /* cyan — "the thought surfacing" */
+    --accent-2:  oklch(80% 0.16 320);   /* magenta — secondary lens */
+    --warm:      oklch(82% 0.14 70);    /* amber — recall */
+    --good:      oklch(80% 0.14 150);
+    --focus:     oklch(85% 0.18 200);
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    font-family: system-ui, -apple-system, sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--accent); }
+  a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 3px;
+    border-radius: 4px;
+  }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 0 20px; }
+  .skip { position: absolute; left: -999px; top: 0; background: var(--accent); color: var(--bg); padding: 8px 14px; z-index: 99; }
+  .skip:focus { left: 8px; top: 8px; }
+
+  /* ---- top bar ---- */
+  header.bar {
+    position: sticky; top: 0; z-index: 30;
+    backdrop-filter: blur(10px);
+    background: oklch(16% 0.02 265 / 0.8);
+    border-bottom: 1px solid var(--line);
+  }
+  .bar .wrap { display: flex; align-items: center; gap: 16px; padding-top: 12px; padding-bottom: 12px; }
+  .logo { display: flex; align-items: center; gap: 10px; font-weight: 650; letter-spacing: -0.01em; }
+  .logo svg { display: block; }
+  .bar nav { margin-left: auto; display: flex; gap: 18px; flex-wrap: wrap; align-items: center; }
+  .bar nav a { color: var(--ink-dim); text-decoration: none; font-size: 0.92rem; }
+  .bar nav a:hover { color: var(--ink); }
+  .ghbtn {
+    border: 1px solid var(--line); padding: 7px 13px; border-radius: 8px;
+    color: var(--ink); text-decoration: none; font-size: 0.9rem;
+  }
+  .ghbtn:hover { border-color: var(--accent); }
+
+  /* ---- hero / graph ---- */
+  .hero { position: relative; padding: 56px 0 24px; }
+  .hero h1 {
+    font-size: clamp(1.9rem, 4.6vw, 3.1rem);
+    line-height: 1.08; letter-spacing: -0.02em; margin: 0 0 14px; max-width: 18ch;
+  }
+  .hero h1 em { font-style: normal; color: var(--accent); }
+  .lede { font-size: clamp(1rem, 1.6vw, 1.18rem); color: var(--ink-dim); max-width: 56ch; margin: 0 0 22px; }
+  .cta-row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin-bottom: 6px; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 11px 18px; border-radius: 10px; text-decoration: none; font-weight: 560; font-size: 0.96rem;
+  }
+  .btn.primary { background: var(--accent); color: oklch(18% 0.03 200); }
+  .btn.primary:hover { background: oklch(84% 0.16 200); }
+  .btn.ghost { border: 1px solid var(--line); color: var(--ink); }
+  .btn.ghost:hover { border-color: var(--accent); }
+  .micro { font-size: 0.8rem; color: var(--ink-faint); margin-top: 10px; }
+
+  /* graph stage */
+  .stage {
+    position: relative; margin-top: 30px;
+    border: 1px solid var(--line); border-radius: 16px; overflow: hidden;
+    background:
+      radial-gradient(120% 80% at 30% 0%, oklch(24% 0.05 265 / 0.6), transparent 60%),
+      var(--bg-2);
+  }
+  .stage-head {
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    padding: 12px 16px; border-bottom: 1px solid var(--line); font-size: 0.84rem; color: var(--ink-dim);
+  }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--node); display: inline-block; }
+  .dot.lit { background: var(--accent); box-shadow: 0 0 10px var(--accent); }
+  .stage-head .hint { margin-left: auto; color: var(--ink-faint); }
+  #graphSvg { display: block; width: 100%; height: auto; cursor: crosshair; touch-action: pan-y; }
+  .edge { stroke: var(--edge); stroke-width: 1; transition: stroke .25s, stroke-width .25s, opacity .25s; }
+  .edge.lit { stroke: var(--accent); stroke-width: 1.8; opacity: 1; }
+  .node circle { fill: var(--node); transition: fill .25s, r .2s; }
+  .node text { fill: var(--ink-faint); font-size: 10px; pointer-events: none; opacity: 0; transition: opacity .25s; }
+  .node.lit circle { fill: var(--accent); }
+  .node.lit text { opacity: 1; fill: var(--ink); }
+  .node.seed circle { fill: var(--warm); }
+  .node { cursor: pointer; }
+
+  /* surfaced card */
+  .surface {
+    position: absolute; right: 16px; bottom: 16px; width: min(330px, 70%);
+    background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+    padding: 14px 15px; backdrop-filter: blur(8px);
+    opacity: 0; transform: translateY(8px); transition: opacity .3s, transform .3s; pointer-events: none;
+  }
+  .surface.show { opacity: 1; transform: translateY(0); }
+  .surface .tag { font-size: 0.72rem; color: var(--accent); letter-spacing: 0.04em; text-transform: uppercase; }
+  .surface h4 { margin: 4px 0 6px; font-size: 0.98rem; }
+  .surface p { margin: 0; font-size: 0.85rem; color: var(--ink-dim); }
+  .surface .meta { margin-top: 8px; font-size: 0.74rem; color: var(--ink-faint); }
+
+  /* graph text alternative */
+  .graph-alt {
+    border: 1px solid var(--line); border-radius: 12px; margin-top: 14px; padding: 14px 16px;
+    background: var(--bg-2); font-size: 0.88rem; color: var(--ink-dim);
+  }
+  .graph-alt summary { cursor: pointer; color: var(--ink); font-weight: 540; }
+  .graph-alt ul { margin: 10px 0 0; padding-left: 18px; }
+  .graph-alt li { margin: 3px 0; }
+
+  /* ---- sections ---- */
+  section { padding: 52px 0; border-top: 1px solid var(--line); }
+  h2 { font-size: clamp(1.4rem, 2.6vw, 1.9rem); letter-spacing: -0.015em; margin: 0 0 8px; }
+  .sub { color: var(--ink-dim); max-width: 60ch; margin: 0 0 26px; }
+
+  /* lens grid (six named vectors) */
+  .lens-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+  .lens {
+    border: 1px solid var(--line); border-radius: 12px; padding: 14px;
+    background: var(--bg-2); transition: border-color .2s, transform .2s;
+  }
+  .lens:hover { border-color: var(--accent); transform: translateY(-2px); }
+  .lens .name { font-weight: 600; font-size: 0.96rem; display: flex; align-items: center; gap: 7px; }
+  .lens .bar-track { height: 6px; border-radius: 4px; background: oklch(30% 0.02 265); margin: 10px 0 8px; overflow: hidden; }
+  .lens .bar-fill { height: 100%; border-radius: 4px; background: linear-gradient(90deg, var(--accent), var(--accent-2)); width: 0; transition: width 1s ease; }
+  .lens p { margin: 0; font-size: 0.82rem; color: var(--ink-faint); }
+  .lens .swatch { width: 10px; height: 10px; border-radius: 3px; }
+
+  /* surfaces list */
+  .surfaces { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; }
+  .scard { border: 1px solid var(--line); border-radius: 12px; padding: 16px; background: var(--bg-2); }
+  .scard h3 { margin: 0 0 6px; font-size: 1.02rem; }
+  .scard p { margin: 0; font-size: 0.88rem; color: var(--ink-dim); }
+  .scard .k { font-size: 0.74rem; color: var(--accent); letter-spacing: 0.03em; text-transform: uppercase; }
+
+  /* code block */
+  .codeblk {
+    background: oklch(13% 0.02 265); border: 1px solid var(--line); border-radius: 12px;
+    padding: 16px 18px; overflow-x: auto; font-size: 0.86rem; line-height: 1.7;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace; color: var(--ink-dim);
+  }
+  .codeblk .c { color: var(--ink-faint); }
+  .codeblk .p { color: var(--accent); }
+  .agent-grid { display: grid; grid-template-columns: 1.1fr 0.9fr; gap: 22px; align-items: start; }
+  .toollist { columns: 2; column-gap: 18px; font-size: 0.86rem; color: var(--ink-dim); margin: 0; padding-left: 18px; }
+  .toollist li { margin: 3px 0; break-inside: avoid; }
+
+  .why { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
+  .why .item { border-left: 2px solid var(--accent); padding-left: 14px; }
+  .why h3 { margin: 0 0 6px; font-size: 1rem; }
+  .why p { margin: 0; color: var(--ink-dim); font-size: 0.9rem; }
+
+  footer { border-top: 1px solid var(--line); padding: 34px 0 50px; color: var(--ink-faint); font-size: 0.88rem; }
+  footer .links { display: flex; gap: 20px; flex-wrap: wrap; margin-bottom: 14px; }
+  footer a { color: var(--ink-dim); text-decoration: none; }
+  footer a:hover { color: var(--ink); }
+  .badge { display: inline-block; border: 1px solid var(--line); border-radius: 20px; padding: 3px 11px; font-size: 0.78rem; color: var(--ink-dim); }
+
+  @media (max-width: 720px) {
+    .agent-grid { grid-template-columns: 1fr; }
+    .toollist { columns: 1; }
+    .surface { position: static; width: auto; margin: 14px 16px 16px; opacity: 1; transform: none; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    *, *::before, *::after { transition: none !important; animation: none !important; }
+  }
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="bar">
+  <div class="wrap">
+    <span class="logo" aria-hidden="true">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+        <circle cx="6" cy="7" r="2.4" fill="oklch(78% 0.15 200)"/>
+        <circle cx="18" cy="6" r="2" fill="oklch(72% 0.06 265)"/>
+        <circle cx="17" cy="17" r="2.4" fill="oklch(82% 0.14 70)"/>
+        <circle cx="7" cy="17" r="2" fill="oklch(72% 0.06 265)"/>
+        <path d="M6 7 L18 6 M18 6 L17 17 M17 17 L7 17 M7 17 L6 7 M6 7 L17 17" stroke="oklch(50% 0.04 265)" stroke-width="1"/>
+      </svg>
+    </span>
+    <span class="logo">Memex</span>
+    <nav aria-label="Primary">
+      <a href="#graph">The map</a>
+      <a href="#lenses">Lenses</a>
+      <a href="#surfaces">Surfaces</a>
+      <a href="#agents">Agents</a>
+      <a class="ghbtn" href="https://github.com/Two-Weeks-Team/memex">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+
+  <!-- HERO + LIVE GRAPH -->
+  <section class="hero" id="graph" aria-labelledby="h1">
+    <div class="wrap">
+      <h1 id="h1">You never wrote it down — yet the right thought <em>comes back</em>.</h1>
+      <p class="lede">
+        Memex turns your Claude Code &amp; Codex session history into a navigable
+        associative map backed by Qdrant. Not a search box, not a chatbot — a
+        <strong>topology you move through by similarity</strong>. Hover a session below; its
+        neighbors light up and surface on their own.
+      </p>
+      <div class="cta-row">
+        <a class="btn primary" href="https://github.com/Two-Weeks-Team/memex">Get Memex on GitHub</a>
+        <a class="btn ghost" href="https://two-weeks-team.github.io/memex/">See the live landing</a>
+      </div>
+      <p class="micro">Local-first &amp; LLM-free at runtime · built for Qdrant Vector Space Day 2026 — “Think Outside the Bot.”</p>
+
+      <!-- THE HERO: associative topology graph -->
+      <div class="stage" aria-hidden="true">
+        <div class="stage-head">
+          <span class="dot lit"></span> distance-matrix → minimum spanning tree
+          <span class="dot" style="background:var(--warm)"></span> the context you approach
+          <span class="hint">hover / tap a node — or use the list below</span>
+        </div>
+        <svg id="graphSvg" viewBox="0 0 760 360" role="img" aria-label="Associative topology graph of past sessions">
+          <g id="edges"></g>
+          <g id="nodes"></g>
+        </svg>
+        <div class="surface" id="surface" role="status">
+          <div class="tag" id="surfTag">surfaced</div>
+          <h4 id="surfTitle">Hover a node</h4>
+          <p id="surfBody">Related sessions appear here.</p>
+          <div class="meta" id="surfMeta"></div>
+        </div>
+      </div>
+
+      <!-- accessible text alternative for the graph -->
+      <details class="graph-alt">
+        <summary>Text alternative: what the map shows</summary>
+        <p>
+          Each node is one past coding session, placed by vector similarity. Edges are the
+          <strong>minimum spanning tree</strong> over the session-to-session distance matrix — the
+          shortest set of links that keeps every session connected to its nearest neighbours.
+          The graph below is an illustrative sample, not live data from your machine:
+        </p>
+        <ul id="graphAltList"></ul>
+      </details>
+    </div>
+  </section>
+
+  <!-- SIX NAMED-VECTOR LENSES -->
+  <section id="lenses" aria-labelledby="lensH">
+    <div class="wrap">
+      <h2 id="lensH">Six lenses, one corpus</h2>
+      <p class="sub">
+        Every session is embedded under several <strong>named vectors</strong>. The
+        <em>Lens</em> surface lets you re-weight them, so the same history can mean
+        different things depending on what you’re looking for. Weights below are an
+        example mix — yours are whatever you set.
+      </p>
+      <div class="lens-grid" id="lensGrid"></div>
+      <p class="micro" style="margin-top:14px">
+        Re-weighting changes which neighbours are “closest,” so the topology you walk through changes too.
+      </p>
+    </div>
+  </section>
+
+  <!-- SURFACES -->
+  <section id="surfaces" aria-labelledby="surfH">
+    <div class="wrap">
+      <h2 id="surfH">Ways to move through the memory</h2>
+      <p class="sub">All read your own corpus — no model runs at query time.</p>
+      <div class="surfaces">
+        <div class="scard"><div class="k">Time Machine</div><h3>Replay</h3><p>Step back through a session as it actually unfolded, message by message.</p></div>
+        <div class="scard"><div class="k">Lens</div><h3>Named-vector search</h3><p>Re-weight the six vectors to pull the corpus toward what matters right now.</p></div>
+        <div class="scard"><div class="k">Topology</div><h3>Distance-matrix → MST</h3><p>The graph above: sessions linked by similarity into a navigable tree.</p></div>
+        <div class="scard"><div class="k">Mix / Discovery</div><h3>Positive / negative steering</h3><p>“More like this, less like that” recommendations across the corpus.</p></div>
+        <div class="scard"><div class="k">Recall</div><h3>Proactive surfacing</h3><p>As context approaches a past thought, the relevant session offers itself.</p></div>
+        <div class="scard"><div class="k">Dashboard</div><h3>Overview</h3><p>The shape of your corpus at a glance, plus the Companion / Wrapped / Loop&nbsp;Breaker layer.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- AGENTS / MCP -->
+  <section id="agents" aria-labelledby="agentH">
+    <div class="wrap">
+      <h2 id="agentH">Give your agent the same map</h2>
+      <p class="sub">
+        Memex exposes <strong>11 MCP tools</strong> over stdio + HTTP, so Claude Code, Codex,
+        and Cursor can move through your memory the way you do. A server/Docker variant runs
+        Qdrant + web + MCP in a single image.
+      </p>
+      <div class="agent-grid">
+        <div>
+          <pre class="codeblk" aria-label="Add Memex as an MCP server"><span class="c"># add Memex as an MCP server</span>
+<span class="p">claude mcp add</span> memex -- memex-mcp
+
+<span class="c"># or run the all-in-one server variant</span>
+<span class="p">docker run</span> -p 8080:8080 \
+  ghcr.io/two-weeks-team/memex</pre>
+          <p class="micro">Commands shown for orientation — see the repo README for exact, current usage.</p>
+          <p style="margin-top:14px"><a href="https://github.com/Two-Weeks-Team/memex">Repo &amp; setup →</a> &nbsp; <a href="https://two-weeks-team.github.io/memex/">Live landing →</a></p>
+        </div>
+        <div>
+          <span class="badge">11 MCP tools</span>
+          <ul class="toollist" aria-label="Tool families exposed over MCP">
+            <li>Lens search</li>
+            <li>Topology / MST</li>
+            <li>Time Machine replay</li>
+            <li>Mix / Discovery</li>
+            <li>Proactive Recall</li>
+            <li>Dashboard stats</li>
+            <li>Companion</li>
+            <li>Wrapped</li>
+            <li>Loop Breaker</li>
+            <li>Session ingest</li>
+            <li>Corpus inspect</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- WHY -->
+  <section aria-labelledby="whyH">
+    <div class="wrap">
+      <h2 id="whyH">Why it exists</h2>
+      <p class="sub">
+        Inspired by Vannevar Bush’s 1945 <em>Memex</em> and its associative trails.
+      </p>
+      <div class="why">
+        <div class="item"><h3>Your history is fragile</h3><p>Claude Code can silently migrate or delete old sessions. Memex preserves a corpus you own.</p></div>
+        <div class="item"><h3>Keywords aren’t how you think</h3><p>You move by association. Memex lets you travel by similarity instead of exact text match.</p></div>
+        <div class="item"><h3>No model at query time</h3><p>Embeddings live in Qdrant; navigation is LLM-free at runtime, so it runs local-first.</p></div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="links">
+      <a href="https://github.com/Two-Weeks-Team/memex">GitHub repo</a>
+      <a href="https://two-weeks-team.github.io/memex/">Live landing</a>
+      <a href="#agents">Server / Docker variant</a>
+      <a href="#agents">MCP integration</a>
+    </div>
+    <p>Memex reads <code>~/.claude/projects/**/*.jsonl</code> (plus legacy transcripts &amp; <code>history.jsonl</code>) into Qdrant. Built for Qdrant Vector Space Day 2026 — “Think Outside the Bot.” Sample data on this page is illustrative, not your machine.</p>
+  </div>
+</footer>
+
+<script>
+(function () {
+  "use strict";
+  var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  /* ---- sample corpus: nodes placed in the 760x360 stage ---- */
+  var N = [
+    { id:0, x:130, y:80,  t:"Qdrant ingest pipeline", d:"Wired JSONL session files into Qdrant; named-vector schema first draft.", w:"3 weeks ago" },
+    { id:1, x:250, y:55,  t:"Named-vector lens",      d:"Re-weighting six vectors to bias retrieval toward intent vs. code.", w:"3 weeks ago" },
+    { id:2, x:200, y:170, t:"MST topology view",       d:"Built distance matrix → minimum spanning tree to lay sessions out.", w:"2 weeks ago" },
+    { id:3, x:360, y:120, t:"Proactive Recall",        d:"Surface a past session as context approaches it — no query typed.", w:"2 weeks ago" },
+    { id:4, x:500, y:70,  t:"Mix / Discovery",         d:"Positive + negative steering: more like A, less like B.", w:"10 days ago" },
+    { id:5, x:470, y:200, t:"MCP tools over stdio",    d:"Exposed the surfaces as 11 MCP tools for Claude Code & Codex.", w:"9 days ago" },
+    { id:6, x:620, y:140, t:"Server / Docker image",   d:"Qdrant + web + MCP packed into one runnable image.", w:"6 days ago" },
+    { id:7, x:330, y:280, t:"Time Machine replay",     d:"Step back through a session message-by-message.", w:"8 days ago" },
+    { id:8, x:600, y:280, t:"Companion / Wrapped",     d:"Agent-memory layer: Companion, Wrapped, Loop Breaker.", w:"4 days ago" },
+    { id:9, x:90,  y:230, t:"Dashboard overview",      d:"Shape of the corpus at a glance.", w:"5 days ago" }
+  ];
+  /* MST edges (precomputed nearest-neighbour tree over the sample) */
+  var E = [[0,1],[0,2],[2,3],[1,3],[3,4],[4,5],[5,6],[2,7],[6,8],[2,9],[5,8],[7,3]];
+  /* adjacency for "light up neighbours" */
+  var adj = {};
+  N.forEach(function (n) { adj[n.id] = []; });
+  E.forEach(function (e) { adj[e[0]].push(e[1]); adj[e[1]].push(e[0]); });
+
+  var svgNS = "http://www.w3.org/2000/svg";
+  var edgesG = document.getElementById("edges");
+  var nodesG = document.getElementById("nodes");
+  var edgeEls = [], nodeEls = [];
+
+  E.forEach(function (e) {
+    var a = N[e[0]], b = N[e[1]];
+    var ln = document.createElementNS(svgNS, "line");
+    ln.setAttribute("x1", a.x); ln.setAttribute("y1", a.y);
+    ln.setAttribute("x2", b.x); ln.setAttribute("y2", b.y);
+    ln.setAttribute("class", "edge");
+    ln.dataset.a = e[0]; ln.dataset.b = e[1];
+    edgesG.appendChild(ln);
+    edgeEls.push(ln);
+  });
+
+  N.forEach(function (n) {
+    var g = document.createElementNS(svgNS, "g");
+    g.setAttribute("class", "node");
+    g.setAttribute("transform", "translate(" + n.x + "," + n.y + ")");
+    g.setAttribute("tabindex", "0");
+    g.setAttribute("role", "button");
+    g.setAttribute("aria-label", n.t + " — " + n.d);
+    var c = document.createElementNS(svgNS, "circle");
+    c.setAttribute("r", "6");
+    var tx = document.createElementNS(svgNS, "text");
+    tx.setAttribute("x", "10"); tx.setAttribute("y", "4");
+    tx.textContent = n.t;
+    g.appendChild(c); g.appendChild(tx);
+    nodesG.appendChild(g);
+    nodeEls.push(g);
+
+    function activate() { light(n.id); }
+    g.addEventListener("mouseenter", activate);
+    g.addEventListener("focus", activate);
+    g.addEventListener("click", activate);
+    g.addEventListener("keydown", function (ev) {
+      if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); activate(); }
+    });
+  });
+
+  var surf = document.getElementById("surface");
+  var sTag = document.getElementById("surfTag");
+  var sTitle = document.getElementById("surfTitle");
+  var sBody = document.getElementById("surfBody");
+  var sMeta = document.getElementById("surfMeta");
+
+  function clearLit() {
+    nodeEls.forEach(function (g) { g.classList.remove("lit"); g.classList.remove("seed"); });
+    edgeEls.forEach(function (l) { l.classList.remove("lit"); });
+  }
+
+  function light(id) {
+    clearLit();
+    var seed = nodeEls[id];
+    seed.classList.add("lit"); seed.classList.add("seed");
+    adj[id].forEach(function (nb) { nodeEls[nb].classList.add("lit"); });
+    edgeEls.forEach(function (l) {
+      if (+l.dataset.a === id || +l.dataset.b === id) l.classList.add("lit");
+    });
+    var n = N[id];
+    var others = adj[id].map(function (i) { return N[i].t; }).join(", ");
+    sTag.textContent = "surfaced · " + adj[id].length + " neighbour" + (adj[id].length === 1 ? "" : "s");
+    sTitle.textContent = n.t;
+    sBody.textContent = n.d;
+    sMeta.textContent = n.w + (others ? " · near: " + others : "");
+    surf.classList.add("show");
+  }
+
+  /* idle ambient "thought coming back" — only if motion allowed */
+  if (!reduce) {
+    var seq = [2, 3, 5, 8, 0], i = 0, idle = true;
+    var stage = document.querySelector(".stage");
+    stage.addEventListener("mouseenter", function () { idle = false; });
+    stage.addEventListener("mouseleave", function () { idle = true; });
+    setInterval(function () {
+      if (idle) { light(seq[i % seq.length]); i++; }
+    }, 2600);
+    light(2);
+  } else {
+    light(2);
+  }
+
+  /* ---- six named-vector lenses ---- */
+  var hues = [200, 320, 70, 150, 265, 30];
+  var lenses = [
+    { name: "Intent",   w: 78, d: "What the session was trying to accomplish." },
+    { name: "Code",     w: 64, d: "Languages, files, and symbols touched." },
+    { name: "Error",    w: 41, d: "Failures, stack traces, and recoveries." },
+    { name: "Decision", w: 55, d: "Choices made and trade-offs weighed." },
+    { name: "Topic",    w: 70, d: "Subject matter and domain of the work." },
+    { name: "Temporal", w: 33, d: "When it happened, relative to neighbours." }
+  ];
+  var grid = document.getElementById("lensGrid");
+  lenses.forEach(function (L, idx) {
+    var el = document.createElement("div");
+    el.className = "lens";
+    var hue = hues[idx];
+    el.innerHTML =
+      '<div class="name"><span class="swatch" style="background:oklch(78% 0.13 ' + hue + ')"></span>' + L.name + '</div>' +
+      '<div class="bar-track"><div class="bar-fill"></div></div>' +
+      '<p>' + L.d + '</p>';
+    grid.appendChild(el);
+    var fill = el.querySelector(".bar-fill");
+    fill.style.background = "linear-gradient(90deg, oklch(78% 0.14 " + hue + "), oklch(80% 0.16 " + ((hue + 60) % 360) + "))";
+    if (reduce) {
+      fill.style.transition = "none";
+      fill.style.width = L.w + "%";
+    } else {
+      setTimeout(function () { fill.style.width = L.w + "%"; }, 200 + idx * 90);
+    }
+  });
+
+  /* ---- build graph text alternative ---- */
+  var altList = document.getElementById("graphAltList");
+  N.forEach(function (n) {
+    var li = document.createElement("li");
+    var names = adj[n.id].map(function (i) { return N[i].t; }).join(", ");
+    li.textContent = n.t + " — linked to: " + names + ".";
+    altList.appendChild(li);
+  });
+})();
+</script>
+</body>
+</html>

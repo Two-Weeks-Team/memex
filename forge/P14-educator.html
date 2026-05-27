@@ -1,0 +1,692 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Memex — watch a memory return on its own</title>
+<style>
+  :root {
+    /* OKLCH palette — calm, instructional dark */
+    --bg:        oklch(20% 0.02 265);
+    --bg-2:      oklch(25% 0.03 265);
+    --panel:     oklch(28% 0.035 265);
+    --ink:       oklch(95% 0.01 265);
+    --ink-soft:  oklch(78% 0.02 265);
+    --ink-faint: oklch(62% 0.02 265);
+    --line:      oklch(40% 0.03 265);
+    --accent:    oklch(78% 0.14 195);   /* teal — "the past" */
+    --accent-2:  oklch(80% 0.13 95);    /* warm — "the now" */
+    --recall:    oklch(82% 0.15 320);   /* the unbidden arrival */
+    --good:      oklch(80% 0.14 150);
+    --radius: 14px;
+    --maxw: 1040px;
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    font-family: system-ui, -apple-system, sans-serif;
+    background:
+      radial-gradient(1200px 600px at 80% -10%, oklch(30% 0.05 265 / 0.5), transparent 60%),
+      var(--bg);
+    color: var(--ink);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--accent); }
+  .wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 22px; }
+
+  /* ---------- skip link / a11y ---------- */
+  .skip {
+    position: absolute; left: -999px; top: 0;
+    background: var(--accent); color: var(--bg); padding: 10px 16px;
+    border-radius: 0 0 10px 0; z-index: 100; font-weight: 700;
+  }
+  .skip:focus { left: 0; }
+
+  /* ---------- header ---------- */
+  header.site {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 16px; padding: 18px 0; flex-wrap: wrap;
+  }
+  .brand { display: flex; align-items: center; gap: 11px; font-weight: 750; letter-spacing: -0.01em; }
+  .brand svg { display: block; }
+  .brand small { display:block; font-weight: 500; font-size: 0.72rem; color: var(--ink-faint); letter-spacing: 0.02em; }
+  nav.top a {
+    color: var(--ink-soft); text-decoration: none; margin-left: 18px;
+    font-size: 0.92rem; border-bottom: 1px solid transparent; padding-bottom: 2px;
+  }
+  nav.top a:hover, nav.top a:focus-visible { color: var(--ink); border-color: var(--accent); }
+
+  /* ---------- hero / lede ---------- */
+  .lede { padding: 26px 0 8px; }
+  .eyebrow {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-size: 0.78rem; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--accent); border: 1px solid var(--line); border-radius: 999px;
+    padding: 5px 13px; margin-bottom: 18px;
+  }
+  h1 {
+    font-size: clamp(1.9rem, 4.6vw, 3rem);
+    line-height: 1.1; letter-spacing: -0.02em; margin: 0 0 14px;
+    max-width: 18ch;
+  }
+  h1 em { font-style: normal; color: var(--recall); }
+  .sub { font-size: clamp(1.02rem, 2.1vw, 1.2rem); color: var(--ink-soft); max-width: 56ch; margin: 0; }
+
+  /* ---------- the lesson stage ---------- */
+  .lesson {
+    margin: 30px 0 12px;
+    background: linear-gradient(180deg, var(--bg-2), oklch(22% 0.025 265));
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+  .lesson-head {
+    display:flex; align-items:center; justify-content:space-between; gap: 14px;
+    padding: 14px 20px; border-bottom: 1px solid var(--line); flex-wrap: wrap;
+  }
+  .lesson-title { font-weight: 700; font-size: 0.96rem; }
+  .lesson-title span { color: var(--ink-faint); font-weight: 500; }
+  .controls { display: flex; align-items: center; gap: 10px; }
+  .btn {
+    font: inherit; font-size: 0.85rem; font-weight: 600;
+    background: var(--panel); color: var(--ink); border: 1px solid var(--line);
+    border-radius: 9px; padding: 7px 13px; cursor: pointer;
+  }
+  .btn:hover, .btn:focus-visible { border-color: var(--accent); }
+  .btn[aria-pressed="true"] { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+
+  /* progress bar = the phases of the moment */
+  .progress { padding: 0 20px; }
+  .progress-track {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;
+    margin: 16px 0 4px;
+  }
+  .phase {
+    border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px;
+    background: oklch(24% 0.02 265); transition: border-color .4s, background .4s;
+  }
+  .phase[data-state="active"] { border-color: var(--recall); background: oklch(28% 0.04 320 / 0.4); }
+  .phase[data-state="done"]   { border-color: var(--accent); }
+  .phase .num {
+    font-size: 0.72rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-faint);
+  }
+  .phase[data-state="active"] .num { color: var(--recall); }
+  .phase .lbl { font-size: 0.9rem; font-weight: 650; margin-top: 2px; }
+  .phase .bar { height: 3px; border-radius: 3px; background: var(--line); margin-top: 9px; overflow: hidden; }
+  .phase .bar i { display:block; height:100%; width: 0%; background: var(--recall); transition: width .25s linear; }
+  .phase[data-state="done"] .bar i { width: 100% !important; background: var(--accent); }
+
+  /* the canvas where it plays out */
+  .stage {
+    position: relative; padding: 8px 20px 22px;
+    display: grid; grid-template-columns: 1.05fr 1fr; gap: 20px;
+  }
+  @media (max-width: 720px) { .stage { grid-template-columns: 1fr; } }
+
+  .now-card, .recall-region { position: relative; }
+
+  .card-label {
+    font-size: 0.74rem; letter-spacing: 0.07em; text-transform: uppercase;
+    color: var(--ink-faint); margin: 10px 0 8px; display:flex; align-items:center; gap:8px;
+  }
+  .card-label.now b { color: var(--accent-2); }
+  .card-label.past b { color: var(--accent); }
+
+  /* the "now" — current context, a live task */
+  .now {
+    background: oklch(23% 0.02 265); border: 1px solid var(--line);
+    border-left: 3px solid var(--accent-2);
+    border-radius: 10px; padding: 14px 15px; font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 0.86rem; color: var(--ink-soft); min-height: 92px;
+  }
+  .now .ctx-line { opacity: 0; transform: translateY(4px); transition: opacity .5s, transform .5s; }
+  .now .ctx-line.show { opacity: 1; transform: none; }
+  .now .cursor { color: var(--accent-2); }
+
+  /* the recall region — where the past rises unbidden */
+  .recall-region {
+    min-height: 200px; border: 1px dashed var(--line); border-radius: 10px;
+    padding: 12px; display: flex; flex-direction: column; gap: 10px;
+    background: oklch(21% 0.015 265);
+  }
+  .memory {
+    opacity: 0; transform: translateY(14px) scale(0.985);
+    background: oklch(26% 0.03 320 / 0.32);
+    border: 1px solid oklch(50% 0.06 320 / 0.5);
+    border-radius: 10px; padding: 11px 13px;
+    transition: opacity .9s ease, transform .9s cubic-bezier(.2,.7,.3,1);
+  }
+  .memory.risen { opacity: 1; transform: none; }
+  .memory .meta { font-size: 0.72rem; color: var(--recall); letter-spacing: 0.03em; margin-bottom: 4px; display:flex; gap:8px; align-items:center; }
+  .memory .meta .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--recall); display:inline-block; }
+  .memory .body { font-size: 0.9rem; color: var(--ink); }
+  .memory .body code { background: oklch(30% 0.02 265); padding: 1px 5px; border-radius: 5px; font-size: 0.85em; }
+  .recall-empty {
+    color: var(--ink-faint); font-size: 0.86rem; font-style: italic;
+    margin: auto; text-align: center; padding: 18px;
+  }
+  .recall-empty.hide { display: none; }
+
+  /* the teaching coachmark — names what's happening */
+  .coach {
+    margin: 4px 20px 20px;
+    border: 1px solid var(--line); border-left: 3px solid var(--recall);
+    border-radius: 10px; padding: 12px 15px; background: oklch(24% 0.025 320 / 0.25);
+    display: flex; gap: 12px; align-items: flex-start;
+  }
+  .coach .ico { flex: none; margin-top: 1px; }
+  .coach .txt strong { color: var(--recall); }
+  .coach .txt { font-size: 0.93rem; }
+  .coach .txt p { margin: 0; }
+  .coach .why { color: var(--ink-faint); font-size: 0.85rem; margin-top: 4px !important; }
+
+  /* friendly toast */
+  .toast-host {
+    position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%) translateY(20px);
+    z-index: 60; max-width: 92vw;
+  }
+  .toast {
+    background: var(--panel); color: var(--ink); border: 1px solid var(--accent);
+    border-radius: 12px; padding: 11px 16px; font-size: 0.9rem;
+    box-shadow: 0 12px 40px oklch(10% 0.02 265 / 0.6);
+    opacity: 0; transform: translateY(14px); transition: opacity .4s, transform .4s;
+    display: flex; gap: 10px; align-items: center;
+  }
+  .toast.show { opacity: 1; transform: none; }
+  .toast b { color: var(--accent); }
+
+  /* ---------- "this is not search" teaching block ---------- */
+  .distinction {
+    margin: 40px 0; display: grid; grid-template-columns: 1fr 1fr; gap: 18px;
+  }
+  @media (max-width: 720px) { .distinction { grid-template-columns: 1fr; } }
+  .dcard { border: 1px solid var(--line); border-radius: var(--radius); padding: 20px; background: var(--bg-2); }
+  .dcard h3 { margin: 0 0 6px; font-size: 1.05rem; }
+  .dcard.search h3 { color: var(--ink-faint); }
+  .dcard.recall h3 { color: var(--recall); }
+  .dcard p { margin: 0 0 10px; color: var(--ink-soft); font-size: 0.94rem; }
+  .dcard ul { margin: 0; padding-left: 18px; color: var(--ink-soft); font-size: 0.92rem; }
+  .dcard li { margin-bottom: 5px; }
+  .dcard .tag { font-size: 0.72rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-faint); }
+
+  /* ---------- what it is ---------- */
+  section.explain { margin: 46px 0; }
+  h2 { font-size: clamp(1.4rem, 3vw, 1.9rem); letter-spacing: -0.015em; margin: 0 0 8px; }
+  .lead { color: var(--ink-soft); max-width: 64ch; margin: 0 0 22px; }
+  .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  @media (max-width: 720px) { .grid3 { grid-template-columns: 1fr; } }
+  .feat { border: 1px solid var(--line); border-radius: 12px; padding: 16px; background: var(--bg-2); }
+  .feat h4 { margin: 8px 0 5px; font-size: 1rem; }
+  .feat p { margin: 0; color: var(--ink-soft); font-size: 0.9rem; }
+  .feat .k { font-size: 0.7rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent); }
+
+  /* ---------- agent / mcp ---------- */
+  .agent { margin: 46px 0; border: 1px solid var(--line); border-radius: var(--radius); padding: 24px; background: var(--bg-2); }
+  .agent code, pre.cmd {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  pre.cmd {
+    background: oklch(16% 0.02 265); border: 1px solid var(--line); border-radius: 10px;
+    padding: 13px 15px; overflow-x: auto; font-size: 0.86rem; color: var(--ink); margin: 12px 0 6px;
+  }
+  pre.cmd .c { color: var(--ink-faint); }
+
+  /* ---------- links / cta ---------- */
+  .cta { display: flex; flex-wrap: wrap; gap: 12px; margin: 18px 0 0; }
+  .cta a {
+    text-decoration: none; font-weight: 650; font-size: 0.95rem;
+    padding: 11px 18px; border-radius: 11px; border: 1px solid var(--line);
+    color: var(--ink); background: var(--panel);
+  }
+  .cta a.primary { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+  .cta a:hover, .cta a:focus-visible { border-color: var(--accent); }
+
+  footer.site { border-top: 1px solid var(--line); margin-top: 50px; padding: 26px 0 50px; color: var(--ink-faint); font-size: 0.88rem; }
+  footer.site a { color: var(--ink-soft); }
+  footer.site .row { display:flex; flex-wrap: wrap; gap: 8px 22px; margin-bottom: 12px; }
+
+  .reduced-note {
+    display:none; margin: 10px 20px 0; font-size: 0.82rem; color: var(--ink-faint);
+    border: 1px dashed var(--line); border-radius: 8px; padding: 9px 13px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    .memory, .now .ctx-line, .toast, .phase, .phase .bar i { transition: none !important; }
+    .reduced-note { display: block; }
+  }
+</style>
+</head>
+<body>
+<a href="#main" class="skip">Skip to content</a>
+
+<div class="wrap">
+  <header class="site">
+    <div class="brand">
+      <svg width="30" height="30" viewBox="0 0 30 30" aria-hidden="true">
+        <circle cx="9" cy="9" r="3.4" fill="oklch(80% 0.13 95)"/>
+        <circle cx="21" cy="20" r="3.4" fill="oklch(78% 0.14 195)"/>
+        <circle cx="22" cy="8" r="2.3" fill="oklch(82% 0.15 320)"/>
+        <path d="M9 9 C 16 9, 15 20, 21 20" stroke="oklch(60% 0.05 265)" stroke-width="1.3" fill="none"/>
+        <path d="M9 9 C 15 6, 19 7, 22 8" stroke="oklch(60% 0.05 265)" stroke-width="1.3" fill="none" stroke-dasharray="2 2"/>
+      </svg>
+      <span>Memex<small>associative memory for your AI sessions</small></span>
+    </div>
+    <nav class="top" aria-label="Primary">
+      <a href="#lesson">The moment</a>
+      <a href="#what">What it is</a>
+      <a href="#agents">For agents</a>
+      <a href="https://github.com/Two-Weeks-Team/memex">Repo</a>
+    </nav>
+  </header>
+</div>
+
+<main id="main" class="wrap">
+
+  <section class="lede" aria-labelledby="h1">
+    <span class="eyebrow">A guided moment · watch, don't search</span>
+    <h1 id="h1">You don't go looking. The right memory <em>comes back to you.</em></h1>
+    <p class="sub">
+      You don't write down every thought — yet when the moment arrives, the relevant one
+      surfaces on its own. Below is that happening, played out and named as it occurs.
+      You won't click to find anything. Just watch.
+    </p>
+  </section>
+
+  <!-- =================== THE LESSON STAGE =================== -->
+  <section id="lesson" class="lesson" aria-labelledby="lessonTitle">
+    <div class="lesson-head">
+      <div class="lesson-title" id="lessonTitle">A memory returning, step by step <span>· auto-plays · nothing to click</span></div>
+      <div class="controls">
+        <button class="btn" id="playToggle" aria-pressed="true" aria-label="Pause or resume the demonstration">Pause</button>
+        <button class="btn" id="replayBtn" aria-label="Replay the demonstration from the start">Replay</button>
+      </div>
+    </div>
+
+    <p class="reduced-note" id="reducedNote">
+      Reduced-motion is on, so the moment is shown as a finished, static state below —
+      every phase is already explained in place. Press <strong>Replay</strong> to step
+      through it manually if you'd like.
+    </p>
+
+    <!-- progress = phases of the involuntary moment -->
+    <div class="progress" aria-hidden="false">
+      <div class="progress-track" role="list" aria-label="Phases of the moment">
+        <div class="phase" id="phase1" role="listitem" data-state="idle">
+          <div class="num">Phase 1</div>
+          <div class="lbl">A situation is present</div>
+          <div class="bar"><i></i></div>
+        </div>
+        <div class="phase" id="phase2" role="listitem" data-state="idle">
+          <div class="num">Phase 2</div>
+          <div class="lbl">The past rises unbidden</div>
+          <div class="bar"><i></i></div>
+        </div>
+        <div class="phase" id="phase3" role="listitem" data-state="idle">
+          <div class="num">Phase 3</div>
+          <div class="lbl">Recognition — "oh, right"</div>
+          <div class="bar"><i></i></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- the stage -->
+    <div class="stage">
+      <div class="now-card">
+        <div class="card-label now"><b>◆</b> The situation you're in now</div>
+        <div class="now" id="nowBox" aria-live="polite">
+          <div class="ctx-line" data-line="0">$ debugging an auth retry loop…</div>
+          <div class="ctx-line" data-line="1">  token refresh fires twice, second call 401s</div>
+          <div class="ctx-line" data-line="2">  no idea why it worked last month<span class="cursor">▋</span></div>
+        </div>
+      </div>
+
+      <div class="recall-region-wrap">
+        <div class="card-label past"><b>◆</b> What surfaced on its own</div>
+        <div class="recall-region" id="recallRegion" aria-live="polite">
+          <div class="recall-empty" id="recallEmpty">Nothing yet — you haven't asked for anything.</div>
+          <!-- memories injected by JS -->
+        </div>
+      </div>
+    </div>
+
+    <!-- the teaching coachmark, updated per phase -->
+    <div class="coach" id="coach">
+      <svg class="ico" width="22" height="22" viewBox="0 0 22 22" aria-hidden="true">
+        <circle cx="11" cy="11" r="9.2" fill="none" stroke="oklch(82% 0.15 320)" stroke-width="1.6"/>
+        <circle cx="11" cy="7" r="1.3" fill="oklch(82% 0.15 320)"/>
+        <rect x="10" y="10" width="2" height="6" rx="1" fill="oklch(82% 0.15 320)"/>
+      </svg>
+      <div class="txt" id="coachTxt" aria-live="polite">
+        <p><strong>Watch what you don't do.</strong> You won't type a query or click a node.
+        A context is simply present — and in a moment, a past session will rise to meet it.</p>
+        <p class="why">That return is what Memex calls associative recall. The page will name each part as it happens.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- friendly toast -->
+  <div class="toast-host" aria-hidden="true">
+    <div class="toast" id="toast" role="status">
+      <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.5" fill="none" stroke="oklch(78% 0.14 195)" stroke-width="1.5"/><path d="M5 8.2 L7 10.2 L11 5.6" fill="none" stroke="oklch(78% 0.14 195)" stroke-width="1.6"/></svg>
+      <span id="toastText"></span>
+    </div>
+  </div>
+
+  <!-- =================== NOT SEARCH =================== -->
+  <section class="distinction" aria-labelledby="distH">
+    <div style="grid-column: 1 / -1;">
+      <h2 id="distH">The lesson in one line: that wasn't search</h2>
+      <p class="lead">Search is something <em>you</em> do — you decide, you type, you hunt.
+      Associative recall happens <em>to</em> you — the situation evokes the past, and it arrives
+      unbidden. Memex is built around the second one.</p>
+    </div>
+    <div class="dcard search">
+      <span class="tag">What just happened was NOT this</span>
+      <h3>Search · you go and get it</h3>
+      <p>You form an intent, phrase a query, scan results, pick one. The system waits for your move.</p>
+      <ul>
+        <li>You initiate every retrieval.</li>
+        <li>You must already half-remember what you're after.</li>
+        <li>Forgotten things stay forgotten — you can't query what you can't name.</li>
+      </ul>
+    </div>
+    <div class="dcard recall">
+      <span class="tag">What you just watched</span>
+      <h3>Associative recall · it comes to you</h3>
+      <p>A context — your current task — calls up a related past on its own, by similarity, not keywords.
+      You're the recipient.</p>
+      <ul>
+        <li>The situation triggers retrieval, not your fingers.</li>
+        <li>Things you'd forgotten resurface because the moment evoked them.</li>
+        <li>It's Vannevar Bush's 1945 idea: follow associative trails, not a search box.</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- =================== WHAT IT IS =================== -->
+  <section class="explain" id="what" aria-labelledby="whatH">
+    <h2 id="whatH">What Memex actually is</h2>
+    <p class="lead">
+      A non-chatbot tool with <strong>no LLM at runtime</strong>. It reads your Claude Code and
+      Codex session history (<code>~/.claude/projects/**/*.jsonl</code> plus legacy transcripts),
+      embeds it into a <a href="https://github.com/Two-Weeks-Team/memex">Qdrant</a> vector space,
+      and lets you move through it by <em>similarity</em> — so the right past can come back to you.
+      It exists because Claude Code silently migrates and deletes old sessions; Memex keeps a
+      corpus <strong>you own</strong>.
+    </p>
+    <div class="grid3">
+      <div class="feat">
+        <span class="k">Proactive Recall</span>
+        <h4>The surfacing you just watched</h4>
+        <p>Relevant past sessions rise in response to your current context — the autonomous part.</p>
+      </div>
+      <div class="feat">
+        <span class="k">Topology &amp; Lens</span>
+        <h4>Move by similarity</h4>
+        <p>A distance-matrix MST graph (Topology) and named-vector weighting (Lens) let you travel associative trails.</p>
+      </div>
+      <div class="feat">
+        <span class="k">Time Machine &amp; Mix</span>
+        <h4>Replay &amp; discovery</h4>
+        <p>Replay any session in order; Mix uses positive/negative signals for discovery — plus Dashboard, Companion, Wrapped, Loop Breaker.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- =================== FOR AGENTS =================== -->
+  <section class="agent" id="agents" aria-labelledby="agentH">
+    <h2 id="agentH">Built for agents, too</h2>
+    <p class="lead" style="margin-bottom:6px;">
+      Memex exposes <strong>11 MCP tools</strong> over stdio + HTTP, so Claude Code, Codex, and
+      Cursor can recall from your corpus directly. A server / Docker variant runs Qdrant, the web
+      UI, and the MCP server in one image.
+    </p>
+    <pre class="cmd"><span class="c"># add Memex to Claude Code as an MCP server</span>
+claude mcp add memex -- memex-mcp
+<span class="c"># or run the all-in-one server variant (Qdrant + web + MCP)</span>
+docker run -p 8080:8080 memex/server</pre>
+    <p style="color:var(--ink-faint); font-size:0.84rem; margin:6px 0 0;">
+      Commands illustrate the integration shape; see the repo README for exact, current invocations.
+    </p>
+    <div class="cta">
+      <a class="primary" href="https://github.com/Two-Weeks-Team/memex">View the repository</a>
+      <a href="https://two-weeks-team.github.io/memex/">Live landing</a>
+      <a href="https://github.com/Two-Weeks-Team/memex#mcp">MCP tools &amp; server variant</a>
+    </div>
+  </section>
+
+</main>
+
+<footer class="site">
+  <div class="wrap">
+    <div class="row">
+      <a href="https://github.com/Two-Weeks-Team/memex">github.com/Two-Weeks-Team/memex</a>
+      <a href="https://two-weeks-team.github.io/memex/">two-weeks-team.github.io/memex</a>
+      <a href="#lesson">Replay the moment</a>
+    </div>
+    <div>Built for Qdrant Vector Space Day 2026 — "Think Outside the Bot." Memex preserves a memory corpus you own and lets you move through it by similarity.</div>
+  </div>
+</footer>
+
+<script>
+(function () {
+  "use strict";
+
+  var phases = [document.getElementById('phase1'), document.getElementById('phase2'), document.getElementById('phase3')];
+  var ctxLines = Array.prototype.slice.call(document.querySelectorAll('#nowBox .ctx-line'));
+  var recallRegion = document.getElementById('recallRegion');
+  var recallEmpty = document.getElementById('recallEmpty');
+  var coachTxt = document.getElementById('coachTxt');
+  var toast = document.getElementById('toast');
+  var toastText = document.getElementById('toastText');
+  var playToggle = document.getElementById('playToggle');
+  var replayBtn = document.getElementById('replayBtn');
+
+  var reduceMQ = window.matchMedia('(prefers-reduced-motion: reduce)');
+
+  // The memory that rises unbidden — content of the past session
+  var memories = [
+    {
+      meta: 'session · 6 weeks ago · auth.ts',
+      body: 'Refresh fired twice because two components mounted the auth hook. You guarded it with a <code>refreshInFlight</code> promise so the second caller awaited the first.'
+    },
+    {
+      meta: 'session · 6 weeks ago · note to self',
+      body: '“The 401 on the second call wasn’t the token — it was the race. One refresh, shared.”'
+    }
+  ];
+
+  // Coachmark text per phase — names what's happening as it happens
+  var coachByPhase = [
+    {
+      head: 'A situation is present.',
+      body: 'You\'re mid-task — debugging an auth retry. You haven\'t asked Memex for anything. This is just the context you happen to be in.',
+      why: 'Notice: no query, no search box, no click. The situation alone is enough to begin.'
+    },
+    {
+      head: 'The past rises on its own.',
+      body: 'A related session from weeks ago surfaces — not because you fetched it, but because this context resembles it. It comes to you.',
+      why: 'This is associative recall: retrieval triggered by similarity to your current moment, not by a keyword you typed.'
+    },
+    {
+      head: '“Oh, right — I remember now.”',
+      body: 'The quiet click of recognition. The forgotten fix is back in front of you, exactly when the moment called for it.',
+      why: 'You were the recipient the whole time. That\'s the difference from search — and the whole point of Memex.'
+    }
+  ];
+
+  var timers = [];
+  var playing = true;
+  var finished = false;
+
+  function clearTimers() {
+    timers.forEach(function (t) { clearTimeout(t); });
+    timers = [];
+  }
+  function later(fn, ms) { var t = setTimeout(fn, ms); timers.push(t); return t; }
+
+  function setPhase(i, state) {
+    if (!phases[i]) return;
+    phases[i].setAttribute('data-state', state);
+    var fill = phases[i].querySelector('.bar i');
+    if (fill) {
+      if (state === 'active') {
+        // animate the fill over the phase duration
+        fill.style.width = '0%';
+        requestAnimationFrame(function () {
+          later(function () { fill.style.width = '100%'; }, 30);
+        });
+      } else if (state === 'idle') {
+        fill.style.width = '0%';
+      }
+    }
+  }
+
+  function setCoach(i) {
+    var c = coachByPhase[i];
+    coachTxt.innerHTML =
+      '<p><strong>' + c.head + '</strong> ' + c.body + '</p>' +
+      '<p class="why">' + c.why + '</p>';
+  }
+
+  function showToast(text) {
+    if (reduceMQ.matches) return; // toasts are motion; skip under reduced motion
+    toastText.textContent = text;
+    toast.classList.add('show');
+    later(function () { toast.classList.remove('show'); }, 3400);
+  }
+
+  function resetStage() {
+    clearTimers();
+    finished = false;
+    ctxLines.forEach(function (l) { l.classList.remove('show'); });
+    Array.prototype.slice.call(recallRegion.querySelectorAll('.memory')).forEach(function (m) { m.remove(); });
+    recallEmpty.classList.remove('hide');
+    phases.forEach(function (p, i) { setPhase(i, 'idle'); });
+    setCoach(0);
+    toast.classList.remove('show');
+  }
+
+  function injectMemory(m, idx) {
+    var el = document.createElement('div');
+    el.className = 'memory';
+    el.setAttribute('role', 'note');
+    el.innerHTML = '<div class="meta"><span class="dot"></span>' + m.meta + '</div>' +
+                   '<div class="body">' + m.body + '</div>';
+    recallRegion.appendChild(el);
+    if (reduceMQ.matches) {
+      el.classList.add('risen');
+    } else {
+      requestAnimationFrame(function () {
+        later(function () { el.classList.add('risen'); }, 60 + idx * 90);
+      });
+    }
+    return el;
+  }
+
+  // The autonomous timeline — irregular, lifelike timing
+  function play() {
+    resetStage();
+    playing = true;
+    finished = false;
+    playToggle.textContent = 'Pause';
+    playToggle.setAttribute('aria-pressed', 'true');
+
+    // Phase 1 — the situation appears, line by line
+    setPhase(0, 'active');
+    setCoach(0);
+    later(function () { ctxLines[0].classList.add('show'); }, 350);
+    later(function () { ctxLines[1].classList.add('show'); }, 1250);
+    later(function () { ctxLines[2].classList.add('show'); }, 2200);
+    showToast('No query typed — the page is just setting the scene.');
+
+    // Phase 2 — the past rises unbidden (irregular pause = lifelike)
+    later(function () {
+      setPhase(0, 'done');
+      setPhase(1, 'active');
+      setCoach(1);
+      recallEmpty.classList.add('hide');
+      showToast('That memory rose on its own — nobody searched for it.');
+    }, 4100);
+    later(function () { injectMemory(memories[0], 0); }, 4500);
+    later(function () { injectMemory(memories[1], 1); }, 5700);
+
+    // Phase 3 — recognition
+    later(function () {
+      setPhase(1, 'done');
+      setPhase(2, 'active');
+      setCoach(2);
+      showToast('This is associative recall — retrieval by similarity, not keywords.');
+    }, 7400);
+
+    later(function () {
+      setPhase(2, 'done');
+      finished = true;
+      playToggle.textContent = 'Replay';
+      playToggle.setAttribute('aria-pressed', 'false');
+    }, 9000);
+  }
+
+  function pause() {
+    clearTimers();
+    playing = false;
+    playToggle.textContent = 'Resume';
+    playToggle.setAttribute('aria-pressed', 'false');
+  }
+
+  // Static, fully-explained state for reduced motion (no auto-play)
+  function showStaticFinished() {
+    clearTimers();
+    ctxLines.forEach(function (l) { l.classList.add('show'); });
+    recallEmpty.classList.add('hide');
+    if (!recallRegion.querySelector('.memory')) {
+      memories.forEach(function (m, i) { injectMemory(m, i); });
+    }
+    setPhase(0, 'done');
+    setPhase(1, 'done');
+    setPhase(2, 'done');
+    // coachmark explains the whole thing at rest
+    coachTxt.innerHTML =
+      '<p><strong>The moment, shown at rest.</strong> A situation was present (left), and a ' +
+      'related past session rose on its own (right) — without anyone searching for it.</p>' +
+      '<p class="why">That unbidden return is associative recall: retrieval triggered by similarity ' +
+      'to your current context, not by a keyword you typed. You were the recipient. Press ' +
+      '<strong>Replay</strong> to step through it.</p>';
+    finished = true;
+    playToggle.textContent = 'Replay';
+    playToggle.setAttribute('aria-pressed', 'false');
+  }
+
+  playToggle.addEventListener('click', function () {
+    if (finished) { play(); return; }
+    if (playing) { pause(); }
+    else { play(); } // resume = restart cleanly to keep narration coherent
+  });
+
+  replayBtn.addEventListener('click', function () { play(); });
+
+  // Respect reduced motion: don't auto-play; present a static explained state.
+  function init() {
+    if (reduceMQ.matches) {
+      showStaticFinished();
+    } else {
+      play();
+    }
+  }
+
+  // React if the user toggles the OS setting live
+  if (reduceMQ.addEventListener) {
+    reduceMQ.addEventListener('change', function () {
+      if (reduceMQ.matches) { showStaticFinished(); }
+    });
+  }
+
+  init();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,578 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Memex — thoughts that come back to you</title>
+<style>
+  /* ---- color: OKLCH, dark associative field ---- */
+  :root {
+    --bg:        oklch(16% 0.02 280);
+    --bg-2:      oklch(20% 0.03 280);
+    --ink:       oklch(94% 0.01 280);
+    --ink-soft:  oklch(72% 0.02 280);
+    --ink-faint: oklch(55% 0.02 280);
+    --node:      oklch(70% 0.10 250);
+    --node-warm: oklch(78% 0.13 60);
+    --accent:    oklch(78% 0.14 200);
+    --accent-2:  oklch(80% 0.15 320);
+    --line:      oklch(60% 0.06 250);
+    --edge:      oklch(40% 0.04 280);
+    --card:      oklch(22% 0.025 280);
+    --focus:     oklch(85% 0.16 200);
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+  }
+  a { color: var(--accent); }
+  a:focus-visible, button:focus-visible {
+    outline: 3px solid var(--focus);
+    outline-offset: 3px;
+    border-radius: 4px;
+  }
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 0 24px; }
+
+  /* ---- skip link ---- */
+  .skip {
+    position: absolute; left: -999px; top: 8px;
+    background: var(--accent); color: oklch(16% 0.02 280);
+    padding: 10px 16px; border-radius: 6px; z-index: 100; font-weight: 600;
+  }
+  .skip:focus { left: 12px; }
+
+  /* ---- top bar ---- */
+  header.bar {
+    position: sticky; top: 0; z-index: 40;
+    backdrop-filter: blur(10px);
+    background: oklch(16% 0.02 280 / 0.82);
+    border-bottom: 1px solid var(--edge);
+  }
+  .bar-row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 24px; max-width: 1040px; margin: 0 auto; gap: 16px;
+  }
+  .logo { display: flex; align-items: center; gap: 10px; font-weight: 700; letter-spacing: .2px; }
+  .logo svg { display: block; }
+  .bar-links { display: flex; gap: 20px; align-items: center; font-size: 0.92rem; flex-wrap: wrap; }
+  .bar-links a { color: var(--ink-soft); text-decoration: none; }
+  .bar-links a:hover { color: var(--ink); }
+  .ghbtn {
+    border: 1px solid var(--line); color: var(--ink);
+    padding: 7px 14px; border-radius: 8px; text-decoration: none; font-weight: 600;
+  }
+  .ghbtn:hover { background: var(--bg-2); }
+
+  /* ---- HERO: the associative field ---- */
+  .hero { position: relative; padding: 56px 0 24px; }
+  .field-stage { position: relative; }
+  .lede {
+    max-width: 620px; position: relative; z-index: 3;
+  }
+  .eyebrow {
+    text-transform: uppercase; letter-spacing: 0.18em;
+    font-size: 0.74rem; color: var(--accent); font-weight: 700; margin: 0 0 14px;
+  }
+  h1 {
+    font-size: clamp(2.1rem, 5vw, 3.3rem);
+    line-height: 1.08; margin: 0 0 18px; letter-spacing: -0.02em; font-weight: 800;
+  }
+  h1 .glow { color: var(--accent); }
+  .sub { font-size: 1.12rem; color: var(--ink-soft); max-width: 540px; margin: 0 0 8px; }
+
+  /* the interactive canvas wrapper */
+  .canvas-shell {
+    position: relative; margin: 26px 0 8px;
+    border: 1px solid var(--edge); border-radius: 18px;
+    background:
+      radial-gradient(120% 90% at 70% 10%, oklch(24% 0.05 280 / .6), transparent 60%),
+      var(--bg-2);
+    overflow: hidden;
+  }
+  .canvas-shell svg { display: block; width: 100%; height: auto; touch-action: none; }
+  .hint {
+    position: absolute; left: 18px; bottom: 14px; right: 18px;
+    font-size: 0.84rem; color: var(--ink-faint); z-index: 4;
+    display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+    pointer-events: none;
+  }
+  .hint kbd {
+    font-family: ui-monospace, monospace; font-size: 0.78rem;
+    background: var(--card); border: 1px solid var(--edge);
+    border-bottom-width: 2px; border-radius: 5px; padding: 1px 7px; color: var(--ink-soft);
+  }
+  .live-readout {
+    position: absolute; right: 18px; top: 14px; z-index: 4;
+    font-size: 0.8rem; color: var(--ink-faint);
+    background: oklch(16% 0.02 280 / .6); border: 1px solid var(--edge);
+    border-radius: 999px; padding: 4px 12px; pointer-events: none;
+    max-width: 60%; text-align: right;
+  }
+  .live-readout strong { color: var(--accent); font-weight: 600; }
+
+  /* node + edge styling driven by JS via classes */
+  .edge { stroke: var(--edge); stroke-width: 1; opacity: 0.25; transition: opacity .5s, stroke .5s, stroke-width .5s; }
+  .edge.lit { stroke: var(--line); stroke-width: 1.4; opacity: 0.9; }
+  .node-dot {
+    fill: var(--node); opacity: 0.5;
+    transition: opacity .45s, r .45s, fill .45s;
+    cursor: pointer;
+  }
+  .node-dot.warm { fill: var(--node-warm); }
+  .node-g.surfaced .node-dot { opacity: 1; }
+  .node-g .node-label {
+    fill: var(--ink); font-size: 12px; opacity: 0;
+    transition: opacity .5s; pointer-events: none;
+    font-family: system-ui, sans-serif;
+  }
+  .node-g.surfaced .node-label { opacity: 1; }
+  .node-g .node-halo {
+    fill: none; stroke: var(--accent); stroke-width: 1.2;
+    opacity: 0; transition: opacity .45s, r .45s;
+  }
+  .node-g.surfaced .node-halo { opacity: 0.55; }
+  .node-g:focus { outline: none; }
+  .node-g:focus .node-halo { opacity: 0.9; stroke: var(--focus); stroke-width: 2; }
+
+  /* ---- section scaffolding ---- */
+  section { padding: 64px 0; }
+  .sec-head { max-width: 680px; margin-bottom: 36px; }
+  h2 { font-size: clamp(1.5rem, 3.4vw, 2.1rem); margin: 0 0 12px; letter-spacing: -0.01em; }
+  .sec-head p { color: var(--ink-soft); margin: 0; font-size: 1.05rem; }
+
+  /* surfaces grid */
+  .surfaces { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 16px; }
+  .surface {
+    background: var(--card); border: 1px solid var(--edge);
+    border-radius: 14px; padding: 20px; transition: border-color .3s, transform .3s;
+  }
+  .surface:hover, .surface:focus-within { border-color: var(--line); transform: translateY(-2px); }
+  .surface h3 { margin: 10px 0 6px; font-size: 1.05rem; }
+  .surface p { margin: 0; color: var(--ink-soft); font-size: 0.94rem; }
+  .surface .ico { width: 30px; height: 30px; color: var(--accent); }
+
+  /* truth / why band */
+  .band { background: var(--bg-2); border-top: 1px solid var(--edge); border-bottom: 1px solid var(--edge); }
+  .why-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 32px; align-items: start; }
+  .why-grid ul { margin: 0; padding-left: 20px; color: var(--ink-soft); }
+  .why-grid li { margin-bottom: 10px; }
+  .why-grid li strong { color: var(--ink); }
+
+  /* agent / mcp */
+  .code {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.9rem;
+    background: oklch(12% 0.02 280); border: 1px solid var(--edge);
+    border-radius: 12px; padding: 18px 20px; color: var(--ink-soft);
+    overflow-x: auto; line-height: 1.7;
+  }
+  .code .c-prompt { color: var(--ink-faint); }
+  .code .c-cmd { color: var(--accent); }
+  .code .c-note { color: var(--ink-faint); }
+  .tools { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
+  .tools span {
+    font-size: 0.82rem; font-family: ui-monospace, monospace;
+    background: var(--card); border: 1px solid var(--edge);
+    color: var(--ink-soft); padding: 4px 10px; border-radius: 999px;
+  }
+
+  /* CTA */
+  .cta-row { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 22px; }
+  .btn {
+    text-decoration: none; font-weight: 650; padding: 12px 22px;
+    border-radius: 10px; display: inline-flex; align-items: center; gap: 8px;
+  }
+  .btn-primary { background: var(--accent); color: oklch(16% 0.02 280); }
+  .btn-primary:hover { background: oklch(83% 0.14 200); }
+  .btn-ghost { border: 1px solid var(--line); color: var(--ink); }
+  .btn-ghost:hover { background: var(--bg-2); }
+
+  footer {
+    border-top: 1px solid var(--edge); padding: 36px 0 48px;
+    color: var(--ink-faint); font-size: 0.9rem;
+  }
+  footer .wrap { display: flex; justify-content: space-between; gap: 20px; flex-wrap: wrap; }
+  footer a { color: var(--ink-soft); }
+
+  @media (max-width: 720px) {
+    .why-grid { grid-template-columns: 1fr; gap: 22px; }
+    .bar-links a:not(.ghbtn) { display: none; }
+  }
+
+  /* ---- reduced motion: kill the animated surfacing, show everything calmly ---- */
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    .edge, .node-dot, .node-g .node-label, .node-g .node-halo, .surface { transition: none !important; }
+    .edge { opacity: 0.6; }
+    .node-dot { opacity: 0.9; }
+    .node-g .node-label { opacity: 0.85; }
+  }
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="bar">
+  <div class="bar-row">
+    <div class="logo">
+      <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true">
+        <circle cx="11" cy="11" r="3" fill="oklch(78% 0.14 200)"/>
+        <circle cx="4" cy="5" r="1.6" fill="oklch(70% 0.10 250)"/>
+        <circle cx="18" cy="6" r="1.6" fill="oklch(70% 0.10 250)"/>
+        <circle cx="5" cy="17" r="1.6" fill="oklch(78% 0.13 60)"/>
+        <circle cx="17" cy="16" r="1.6" fill="oklch(70% 0.10 250)"/>
+        <g stroke="oklch(60% 0.06 250)" stroke-width="0.8" opacity="0.7">
+          <line x1="11" y1="11" x2="4" y2="5"/>
+          <line x1="11" y1="11" x2="18" y2="6"/>
+          <line x1="11" y1="11" x2="5" y2="17"/>
+          <line x1="11" y1="11" x2="17" y2="16"/>
+        </g>
+      </svg>
+      Memex
+    </div>
+    <nav class="bar-links" aria-label="Primary">
+      <a href="#field">The field</a>
+      <a href="#surfaces">Surfaces</a>
+      <a href="#agents">For agents</a>
+      <a href="https://two-weeks-team.github.io/memex/">Live landing</a>
+      <a class="ghbtn" href="https://github.com/Two-Weeks-Team/memex">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+
+  <!-- HERO: the page behaves like memory -->
+  <section class="hero" id="field">
+    <div class="wrap field-stage">
+      <div class="lede">
+        <p class="eyebrow">Qdrant Vector Space Day 2026 · Think Outside the Bot</p>
+        <h1>You didn't write it down.<br>It <span class="glow">comes back</span> anyway.</h1>
+        <p class="sub">
+          Move the cursor across the field below. As you approach a thought, the
+          fragments related to it surface and link up — the way a memory returns
+          when something nearby reminds you of it.
+        </p>
+      </div>
+
+      <div class="canvas-shell" id="canvas-shell">
+        <p class="live-readout" id="readout" aria-hidden="true">Move toward a node to surface its associations</p>
+        <!-- viewBox is the coordinate space; viewport scales it responsively -->
+        <svg id="field-svg" viewBox="0 0 1000 460" role="group"
+             aria-label="Interactive associative memory field. Use Tab to focus a memory node and surface its related fragments.">
+          <g id="edges"></g>
+          <g id="nodes"></g>
+        </svg>
+        <p class="hint" aria-hidden="true">
+          <kbd>hover</kbd> or <kbd>Tab</kbd> + <kbd>→</kbd> to walk the field.
+          Latent until a context approaches — never a search box.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- WHY -->
+  <section class="band">
+    <div class="wrap">
+      <div class="sec-head">
+        <h2>Not a chatbot. A memory you can move through.</h2>
+        <p>
+          Memex reads your existing Claude Code / Codex session history and turns it
+          into a navigable spatial memory backed by Qdrant — so you travel by
+          <em>similarity</em>, not keywords.
+        </p>
+      </div>
+      <div class="why-grid">
+        <ul>
+          <li><strong>It's already yours.</strong> Reads <code>~/.claude/projects/**/*.jsonl</code>, legacy transcripts, and <code>history.jsonl</code> — no new note-taking habit.</li>
+          <li><strong>LLM-free at runtime.</strong> The recall layer runs on vectors in Qdrant, not a model answering questions.</li>
+          <li><strong>Preserves what gets deleted.</strong> Claude Code silently migrates and removes old sessions; Memex keeps a corpus you own.</li>
+        </ul>
+        <ul>
+          <li><strong>Inspired by Vannevar Bush's 1945 Memex</strong> — associative trails between fragments, not a single answer box.</li>
+          <li><strong>Spatial by design.</strong> Distance between two memories means something: closer is more related.</li>
+          <li><strong>Built for the Vector Space Day theme</strong> — thinking outside the bot, literally.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- SURFACES -->
+  <section id="surfaces">
+    <div class="wrap">
+      <div class="sec-head">
+        <h2>Six ways the field opens up</h2>
+        <p>Each surface is a different way to walk the same associative space.</p>
+      </div>
+      <div class="surfaces">
+        <div class="surface">
+          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+          <h3>Time Machine</h3>
+          <p>Replay a session as it unfolded — step back into the moment a decision was made.</p>
+        </div>
+        <div class="surface">
+          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M16 16l4 4"/></svg>
+          <h3>Lens</h3>
+          <p>Named-vector weighted search — tilt the field toward the kind of memory you want.</p>
+        </div>
+        <div class="surface">
+          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><circle cx="6" cy="6" r="2.4"/><circle cx="18" cy="9" r="2.4"/><circle cx="9" cy="18" r="2.4"/><path d="M8 7l8 1.5M8 8l1 8"/></svg>
+          <h3>Topology</h3>
+          <p>Distance-matrix to a minimum-spanning-tree graph — see the shape of how thoughts connect.</p>
+        </div>
+        <div class="surface">
+          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M4 12h6M14 12h6"/><circle cx="12" cy="12" r="2.4"/><path d="M12 4v6M12 14v6"/></svg>
+          <h3>Mix / Discovery</h3>
+          <p>Positive and negative recommendation — "more like this, less like that," then drift.</p>
+        </div>
+        <div class="surface">
+          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M12 3a6 6 0 0 0-4 10c.6.6 1 1.4 1 2.2V17h6v-1.8c0-.8.4-1.6 1-2.2A6 6 0 0 0 12 3Z"/><path d="M9 20h6"/></svg>
+          <h3>Proactive Recall</h3>
+          <p>Relevant fragments surface on their own as your current context approaches them.</p>
+        </div>
+        <div class="surface">
+          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8 9h8M8 13h5"/></svg>
+          <h3>Companion · Wrapped · Loop Breaker</h3>
+          <p>The agent-memory layer — dashboards, recaps, and nudges when you're going in circles.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- AGENTS / MCP -->
+  <section class="band" id="agents">
+    <div class="wrap">
+      <div class="sec-head">
+        <h2>Give your agent the memory it forgot</h2>
+        <p>
+          Memex exposes 11 MCP tools over stdio + HTTP. It works in Claude Code,
+          Codex, and Cursor — and a server / Docker variant runs Qdrant, the web UI,
+          and MCP together in one image.
+        </p>
+      </div>
+      <div class="code" aria-label="Example: adding Memex to Claude Code as an MCP server">
+        <div><span class="c-prompt">$</span> <span class="c-cmd">claude mcp add memex -- memex serve --stdio</span></div>
+        <div><span class="c-note"># or run the all-in-one server variant (Qdrant + web + MCP):</span></div>
+        <div><span class="c-prompt">$</span> <span class="c-cmd">docker run -p 8080:8080 ghcr.io/two-weeks-team/memex</span></div>
+      </div>
+      <div class="tools" aria-label="The 11 MCP tools surface the same associative space to your agent">
+        <span>recall</span><span>lens_search</span><span>topology</span><span>mix</span>
+        <span>time_machine</span><span>discover</span><span>companion</span><span>wrapped</span>
+        <span>loop_breaker</span><span>index_sessions</span><span>dashboard</span>
+      </div>
+      <div class="cta-row">
+        <a class="btn btn-primary" href="https://github.com/Two-Weeks-Team/memex">View the repo</a>
+        <a class="btn btn-ghost" href="https://two-weeks-team.github.io/memex/">See it live</a>
+      </div>
+      <p style="color:var(--ink-faint); font-size:0.85rem; margin-top:16px;">
+        This is a working prototype built for a hackathon, not a finished product —
+        expect rough edges. The tool list reflects the current surfaces; check the repo for the source of truth.
+      </p>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <div>
+      <strong style="color:var(--ink);">Memex</strong> · a memory you own, navigated by similarity.<br>
+      Built by Two-Weeks-Team for Qdrant Vector Space Day 2026.
+    </div>
+    <div>
+      <a href="https://github.com/Two-Weeks-Team/memex">github.com/Two-Weeks-Team/memex</a><br>
+      <a href="https://two-weeks-team.github.io/memex/">two-weeks-team.github.io/memex</a>
+    </div>
+  </div>
+</footer>
+
+<script>
+(function () {
+  "use strict";
+
+  var svg = document.getElementById("field-svg");
+  var edgesG = document.getElementById("edges");
+  var nodesG = document.getElementById("nodes");
+  var readout = document.getElementById("readout");
+  var shell = document.getElementById("canvas-shell");
+  if (!svg || !edgesG || !nodesG) return;
+
+  var SVGNS = "http://www.w3.org/2000/svg";
+  var VW = 1000, VH = 460;            // viewBox coordinate space
+  var SURFACE_RADIUS = 230;           // proximity distance (in viewBox units) at which a node surfaces
+  var reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  // Each node = a latent thought. labels are honest, generic dev-history fragments.
+  var nodes = [
+    { x: 500, y: 230, label: "the bug you fixed at 2am", warm: true },
+    { x: 250, y: 120, label: "why we chose Qdrant" },
+    { x: 760, y: 130, label: "that auth refactor" },
+    { x: 170, y: 320, label: "the regex you wrote twice" },
+    { x: 820, y: 330, label: "a deleted session" },
+    { x: 430, y: 80,  label: "an MCP tool sketch" },
+    { x: 600, y: 400, label: "the README rewrite", warm: true },
+    { x: 880, y: 220, label: "a Docker compose tweak" },
+    { x: 110, y: 200, label: "the schema you forgot" },
+    { x: 380, y: 360, label: "an idea you almost lost", warm: true },
+    { x: 680, y: 250, label: "vector distance notes" },
+    { x: 320, y: 230, label: "a trail you started" }
+  ];
+
+  // associative trails (edges) — which thoughts are "near" each other
+  var edges = [
+    [0,1],[0,2],[0,5],[0,10],[0,11],
+    [1,8],[1,10],
+    [2,5],[2,7],
+    [3,8],[3,11],
+    [4,7],[4,10],
+    [5,6],
+    [6,9],[6,11],
+    [9,11],[10,7],[8,11]
+  ];
+
+  var nodeEls = [];   // { g, dot, halo, label, node }
+  var edgeEls = [];   // { line, a, b }
+
+  // build edges first (drawn under nodes)
+  edges.forEach(function (pair) {
+    var a = nodes[pair[0]], b = nodes[pair[1]];
+    var line = document.createElementNS(SVGNS, "line");
+    line.setAttribute("x1", a.x); line.setAttribute("y1", a.y);
+    line.setAttribute("x2", b.x); line.setAttribute("y2", b.y);
+    line.setAttribute("class", "edge");
+    edgesG.appendChild(line);
+    edgeEls.push({ line: line, a: pair[0], b: pair[1] });
+  });
+
+  // build nodes — each is a focusable group (keyboard equivalent for hover)
+  nodes.forEach(function (n, i) {
+    var g = document.createElementNS(SVGNS, "g");
+    g.setAttribute("class", "node-g" + (reduceMotion ? " surfaced" : ""));
+    g.setAttribute("tabindex", "0");
+    g.setAttribute("role", "button");
+    g.setAttribute("aria-label", "Memory: " + n.label + ". Surfaces " + countNeighbors(i) + " related fragments.");
+
+    var halo = document.createElementNS(SVGNS, "circle");
+    halo.setAttribute("cx", n.x); halo.setAttribute("cy", n.y);
+    halo.setAttribute("r", 16); halo.setAttribute("class", "node-halo");
+
+    var dot = document.createElementNS(SVGNS, "circle");
+    dot.setAttribute("cx", n.x); dot.setAttribute("cy", n.y);
+    dot.setAttribute("r", n.warm ? 7 : 6);
+    dot.setAttribute("class", "node-dot" + (n.warm ? " warm" : ""));
+
+    var label = document.createElementNS(SVGNS, "text");
+    // keep labels inside the field
+    var lx = n.x, anchor = "middle";
+    if (n.x < 160) { anchor = "start"; }
+    else if (n.x > 840) { anchor = "end"; }
+    label.setAttribute("x", lx);
+    label.setAttribute("y", n.y > 60 ? n.y - 16 : n.y + 26);
+    label.setAttribute("text-anchor", anchor);
+    label.setAttribute("class", "node-label");
+    label.textContent = n.label;
+
+    g.appendChild(halo); g.appendChild(dot); g.appendChild(label);
+    nodesG.appendChild(g);
+    nodeEls.push({ g: g, dot: dot, halo: halo, label: label, node: n });
+
+    // keyboard: focusing a node surfaces it + its trail
+    g.addEventListener("focus", function () { surfaceFrom(i, true); });
+    g.addEventListener("blur",  function () { if (!reduceMotion) clearField(); });
+    g.addEventListener("click", function () { g.focus(); });
+  });
+
+  function countNeighbors(i) {
+    var c = 0;
+    edges.forEach(function (p) { if (p[0] === i || p[1] === i) c++; });
+    return c;
+  }
+
+  function clearField() {
+    nodeEls.forEach(function (e) { e.g.classList.remove("surfaced"); });
+    edgeEls.forEach(function (e) { e.line.classList.remove("lit"); });
+    readout.innerHTML = "Move toward a node to surface its associations";
+  }
+
+  // Surface a node and its directly-connected trail (the "associative recall")
+  function surfaceFrom(idx, fromKeyboard) {
+    if (reduceMotion) return; // everything already shown calmly
+    nodeEls.forEach(function (e) { e.g.classList.remove("surfaced"); });
+    edgeEls.forEach(function (e) { e.line.classList.remove("lit"); });
+
+    var lit = {};
+    lit[idx] = true;
+    edgeEls.forEach(function (e) {
+      if (e.a === idx || e.b === idx) {
+        e.line.classList.add("lit");
+        lit[e.a] = true; lit[e.b] = true;
+      }
+    });
+    Object.keys(lit).forEach(function (k) { nodeEls[+k].g.classList.add("surfaced"); });
+
+    var n = nodes[idx];
+    var related = countNeighbors(idx);
+    readout.innerHTML = "Surfacing <strong>&ldquo;" + escapeHtml(n.label) +
+      "&rdquo;</strong> + " + related + " linked fragment" + (related === 1 ? "" : "s");
+  }
+
+  function escapeHtml(s) {
+    return s.replace(/[&<>"']/g, function (c) {
+      return { "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c];
+    });
+  }
+
+  // ---- pointer proximity: as the cursor approaches a node, it surfaces ----
+  if (!reduceMotion) {
+    var pending = false;
+    var lastClientX = 0, lastClientY = 0;
+
+    function onMove(clientX, clientY) {
+      lastClientX = clientX; lastClientY = clientY;
+      if (pending) return;
+      pending = true;
+      requestAnimationFrame(function () {
+        pending = false;
+        var rect = svg.getBoundingClientRect();
+        // map screen coords into viewBox coords
+        var px = (lastClientX - rect.left) / rect.width * VW;
+        var py = (lastClientY - rect.top) / rect.height * VH;
+
+        // find nearest node within the surface radius
+        var nearestIdx = -1, nearestD = Infinity;
+        nodes.forEach(function (n, i) {
+          var dx = n.x - px, dy = n.y - py;
+          var d = Math.sqrt(dx * dx + dy * dy);
+          if (d < nearestD) { nearestD = d; nearestIdx = i; }
+        });
+
+        if (nearestIdx >= 0 && nearestD <= SURFACE_RADIUS) {
+          surfaceFrom(nearestIdx, false);
+        } else {
+          clearField();
+        }
+      });
+    }
+
+    shell.addEventListener("mousemove", function (ev) { onMove(ev.clientX, ev.clientY); });
+    shell.addEventListener("mouseleave", function () { clearField(); });
+
+    // touch: tap-drag surfaces, lift clears (still proximity-based, no search box)
+    shell.addEventListener("touchstart", function (ev) {
+      var t = ev.touches[0]; if (t) onMove(t.clientX, t.clientY);
+    }, { passive: true });
+    shell.addEventListener("touchmove", function (ev) {
+      var t = ev.touches[0]; if (t) onMove(t.clientX, t.clientY);
+    }, { passive: true });
+    shell.addEventListener("touchend", function () { clearField(); }, { passive: true });
+  }
+})();
+</script>
+</body>
+</html>

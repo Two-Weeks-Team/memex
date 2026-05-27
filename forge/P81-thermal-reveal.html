@@ -1,0 +1,660 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Memex — the moment surfaces under the scan</title>
+<style>
+  :root{
+    /* cool structural surface */
+    --steel-0:#070b12;
+    --steel-1:#0b1220;
+    --steel-2:#10192b;
+    --wire:#2a4a63;
+    --wire-dim:#1a2c3d;
+    --ice:#7fb2d6;
+    --ice-bright:#bfe3ff;
+    /* thermal / false-color heat ramp */
+    --cold:#1c2a55;
+    --cool:#2b6cb0;
+    --warm:#f2b134;
+    --hot:#f4632e;
+    --core:#ffd36b;
+    --white-hot:#fff6e6;
+    --ink:#eaf2fb;
+  }
+
+  *{box-sizing:border-box;margin:0;padding:0}
+
+  html,body{height:100%}
+  body{
+    background:var(--steel-0);
+    color:var(--ink);
+    font-family:"Helvetica Neue",Helvetica,Arial,system-ui,sans-serif;
+    -webkit-font-smoothing:antialiased;
+    overflow-x:hidden;
+  }
+
+  a{color:inherit}
+
+  /* ============ STAGE ============ */
+  .stage{
+    position:relative;
+    width:100%;
+    min-height:100svh;
+    overflow:hidden;
+    isolation:isolate;
+  }
+
+  /* Layer 0 — cool structural surface (x-ray wireframe of a workspace) */
+  .surface{
+    position:absolute; inset:0;
+    background:
+      radial-gradient(120% 90% at 70% 18%, #0f1b2e 0%, var(--steel-1) 45%, var(--steel-0) 100%);
+    z-index:0;
+  }
+  .surface svg{position:absolute; inset:0; width:100%; height:100%}
+  .surface .grid{stroke:var(--wire-dim); stroke-width:1; opacity:.5}
+  .surface .wire{stroke:var(--wire); stroke-width:1.2; fill:none; opacity:.55}
+  .surface .wire-soft{stroke:var(--wire-dim); stroke-width:1; fill:none; opacity:.45}
+  .surface .node{fill:none; stroke:var(--ice); stroke-width:1.2; opacity:.4}
+  .surface .label{fill:var(--ice); opacity:.32; font:500 11px/1 "Helvetica Neue",Arial,sans-serif; letter-spacing:.12em}
+
+  /* Layer 1 — the HIDDEN SCENE, painted in heat-map false color.
+     Sits ABOVE the surface but is masked: only shown where the scan band is. */
+  .scene{
+    position:absolute; inset:0;
+    z-index:2;
+    /* the reveal mask: a horizontal hot band; animated top→bottom by JS var --sweep.
+       Default hides the scene off the top edge so the FIRST paint is the cool surface,
+       never a flash of the full heat scene before JS starts the sweep. */
+    --reveal-mask: linear-gradient(180deg, transparent 0%, transparent 100%);
+    -webkit-mask-image: var(--reveal-mask);
+            mask-image: var(--reveal-mask);
+    -webkit-mask-repeat:no-repeat; mask-repeat:no-repeat;
+    -webkit-mask-size:100% 100%; mask-size:100% 100%;
+    will-change:mask-image, -webkit-mask-image;
+  }
+  /* the scene tableau itself */
+  .scene-bg{
+    position:absolute; inset:0;
+    background:
+      radial-gradient(140% 120% at 28% 30%, var(--core) 0%, var(--hot) 22%, var(--warm) 40%, var(--cool) 66%, var(--cold) 100%);
+  }
+  .scene svg{position:absolute; inset:0; width:100%; height:100%}
+
+  /* glow heat blobs to give the false-color "thermal photograph" feel */
+  .heatblob{ mix-blend-mode:screen; }
+
+  /* the scene's wireframe lights up in white-hot heat color where it overlaps the band */
+  .scene .hot-wire{stroke:var(--white-hot); stroke-width:1.6; fill:none; opacity:.9}
+  .scene .hot-node{fill:var(--white-hot); opacity:.95}
+  .scene .hot-label{fill:#231003; font:600 11px/1 "Helvetica Neue",Arial,sans-serif; letter-spacing:.12em; opacity:.95}
+  .scene .scan-code{font:500 13px/1.55 ui-monospace,"SF Mono",Menlo,Consolas,monospace; fill:#1a0a02}
+  .scene .scan-code .kw{fill:#5a1500}
+  .scene .scan-code .dim{fill:#5a2a08; opacity:.85}
+
+  /* Layer 1.5 — the live SCAN BAND line itself (the visible thermal edge) */
+  .scanline{
+    position:absolute; left:0; right:0;
+    z-index:3;
+    height:2px;
+    top:0;
+    transform:translateY(calc(var(--sweep, 0) * 1px));
+    background:linear-gradient(90deg, transparent, var(--core) 18%, var(--white-hot) 50%, var(--core) 82%, transparent);
+    box-shadow:0 0 22px 6px rgba(255,201,103,.55), 0 0 60px 18px rgba(244,99,46,.28);
+    pointer-events:none;
+  }
+  .scanline::before{ /* faint leading scanner reticle text */
+    content:"";
+  }
+  .scanfade{ /* a cool wash that trails the band so it reads as a moving instrument */
+    position:absolute; left:0; right:0;
+    z-index:1;
+    height:160px;
+    top:0;
+    transform:translateY(calc((var(--sweep, 0) - 80) * 1px));
+    background:linear-gradient(180deg, rgba(127,178,214,0) 0%, rgba(127,178,214,.06) 60%, rgba(127,178,214,0) 100%);
+    pointer-events:none;
+  }
+
+  /* Layer 4 — copy / chrome, always above */
+  .chrome{position:relative; z-index:5}
+
+  /* top bar */
+  .topbar{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:22px clamp(18px,4vw,44px);
+    gap:16px;
+  }
+  .brand{display:flex; align-items:center; gap:11px; font-weight:700; letter-spacing:.02em}
+  .brand .glyph{
+    width:26px; height:26px; border-radius:6px;
+    background:linear-gradient(135deg,var(--cool),var(--hot));
+    box-shadow:0 0 16px rgba(244,99,46,.5);
+    position:relative; flex:none;
+  }
+  .brand .glyph::after{
+    content:""; position:absolute; left:3px; right:3px; top:50%; height:2px;
+    background:var(--white-hot); transform:translateY(-50%);
+    box-shadow:0 0 8px var(--core);
+  }
+  .topbar nav{display:flex; gap:clamp(10px,2.2vw,26px); flex-wrap:wrap; font-size:13.5px}
+  .topbar nav a{color:var(--ice); opacity:.85; text-decoration:none; letter-spacing:.04em}
+  .topbar nav a:hover, .topbar nav a:focus-visible{opacity:1; color:var(--ice-bright); outline:none; text-decoration:underline; text-underline-offset:4px}
+
+  /* hero copy block */
+  .hero{
+    padding:clamp(20px,5vh,60px) clamp(18px,4vw,44px) 0;
+    max-width:760px;
+  }
+  .eyebrow{
+    display:inline-flex; align-items:center; gap:9px;
+    font-size:12px; letter-spacing:.22em; text-transform:uppercase;
+    color:var(--ice); opacity:.8; margin-bottom:18px;
+  }
+  .eyebrow .dot{
+    width:7px;height:7px;border-radius:50%;
+    background:var(--hot);
+    box-shadow:0 0 10px var(--hot);
+    animation:pulse 2.4s ease-in-out infinite;
+  }
+  @keyframes pulse{0%,100%{opacity:.5;transform:scale(.85)}50%{opacity:1;transform:scale(1.15)}}
+
+  h1{
+    font-size:clamp(2.05rem,5.4vw,4rem);
+    line-height:1.02;
+    letter-spacing:-.02em;
+    font-weight:800;
+    text-shadow:0 2px 30px rgba(0,0,0,.55);
+  }
+  h1 .reveal{
+    color:transparent;
+    background:linear-gradient(95deg,var(--core),var(--hot) 55%,var(--warm));
+    -webkit-background-clip:text; background-clip:text;
+  }
+  .sub{
+    margin-top:20px;
+    font-size:clamp(1rem,1.9vw,1.22rem);
+    line-height:1.55;
+    color:#cfe0f0;
+    max-width:54ch;
+  }
+  .sub strong{color:var(--ice-bright); font-weight:600}
+
+  /* the "current context" strip — what you're doing RIGHT NOW (drives the recall) */
+  .context{
+    margin-top:26px;
+    display:inline-flex; align-items:center; gap:12px;
+    padding:11px 16px;
+    border:1px solid var(--wire);
+    border-radius:10px;
+    background:rgba(11,18,32,.55);
+    backdrop-filter:blur(3px);
+    font-size:13.5px; color:#bcd3e8;
+  }
+  .context .live{
+    width:8px;height:8px;border-radius:50%;background:var(--cool);
+    box-shadow:0 0 9px var(--cool); flex:none;
+    animation:blink 1.6s steps(2,end) infinite;
+  }
+  @keyframes blink{50%{opacity:.25}}
+  .context code{
+    font:500 12.5px/1 ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+    color:var(--ice-bright);
+  }
+
+  /* CTA row */
+  .cta{margin-top:30px; display:flex; gap:14px; flex-wrap:wrap; align-items:center}
+  .btn{
+    display:inline-flex; align-items:center; gap:9px;
+    padding:13px 22px; border-radius:11px;
+    font-size:14.5px; font-weight:650; letter-spacing:.01em;
+    text-decoration:none; cursor:pointer; border:1px solid transparent;
+    transition:transform .15s ease, box-shadow .2s ease, background .2s ease;
+  }
+  .btn-primary{
+    background:linear-gradient(120deg,var(--hot),var(--warm));
+    color:#1a0a02;
+    box-shadow:0 6px 26px rgba(244,99,46,.4);
+  }
+  .btn-primary:hover,.btn-primary:focus-visible{transform:translateY(-2px); box-shadow:0 10px 34px rgba(244,99,46,.55); outline:none}
+  .btn-ghost{
+    border-color:var(--wire);
+    color:var(--ice-bright);
+    background:rgba(11,18,32,.4);
+  }
+  .btn-ghost:hover,.btn-ghost:focus-visible{border-color:var(--ice); background:rgba(16,25,43,.7); outline:none}
+
+  /* the floating caption that names the surfaced memory once the band passes its zone */
+  .recall-tag{
+    position:absolute; z-index:4;
+    left:clamp(18px,5vw,60px);
+    bottom:clamp(120px,22vh,200px);
+    max-width:380px;
+    padding:16px 18px;
+    border-radius:13px;
+    border:1px solid rgba(244,99,46,.45);
+    background:linear-gradient(180deg, rgba(28,12,4,.86), rgba(20,9,4,.92));
+    box-shadow:0 14px 40px rgba(0,0,0,.5), 0 0 0 1px rgba(255,201,103,.08) inset;
+    backdrop-filter:blur(4px);
+    opacity:0; transform:translateY(14px) scale(.98);
+    transition:opacity .5s ease, transform .5s ease;
+    pointer-events:none;
+  }
+  .recall-tag.show{opacity:1; transform:translateY(0) scale(1); pointer-events:auto}
+  .recall-tag .rt-kicker{
+    display:flex; align-items:center; gap:8px;
+    font-size:11px; letter-spacing:.2em; text-transform:uppercase;
+    color:var(--core); margin-bottom:9px;
+  }
+  .recall-tag .rt-kicker svg{width:14px;height:14px;flex:none}
+  .recall-tag .rt-title{font-size:15.5px; font-weight:700; color:var(--white-hot); line-height:1.25}
+  .recall-tag .rt-meta{margin-top:7px; font-size:12px; color:#e6b98a; opacity:.85; font:500 12px ui-monospace,Menlo,monospace}
+  .recall-tag .rt-body{margin-top:10px; font-size:13px; line-height:1.5; color:#ffe6c6}
+
+  /* hint that the scan runs on its own */
+  .auto-hint{
+    position:absolute; z-index:4; right:clamp(16px,4vw,40px); top:50%;
+    transform:translateY(-50%) rotate(90deg); transform-origin:right center;
+    font-size:10.5px; letter-spacing:.32em; text-transform:uppercase;
+    color:var(--ice); opacity:.4; white-space:nowrap; pointer-events:none;
+  }
+
+  /* ============ BELOW THE FOLD ============ */
+  .below{
+    position:relative; z-index:5;
+    background:var(--steel-0);
+    border-top:1px solid var(--wire-dim);
+  }
+  .wrap{max-width:1080px; margin:0 auto; padding:clamp(48px,8vh,90px) clamp(18px,4vw,44px)}
+
+  .lead{
+    font-size:clamp(1.3rem,2.6vw,1.85rem);
+    line-height:1.4; max-width:30ch; letter-spacing:-.01em; font-weight:600;
+  }
+  .lead em{font-style:normal; color:var(--hot)}
+
+  .grid3{
+    display:grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr));
+    gap:18px; margin-top:42px;
+  }
+  .card{
+    border:1px solid var(--wire-dim); border-radius:14px;
+    padding:22px 20px;
+    background:linear-gradient(180deg, rgba(16,25,43,.6), rgba(7,11,18,.4));
+  }
+  .card h3{font-size:15.5px; color:var(--ice-bright); margin-bottom:9px; letter-spacing:.01em}
+  .card p{font-size:13.5px; line-height:1.6; color:#a9bdd2}
+  .card .heat{
+    width:46px;height:6px;border-radius:4px;margin-bottom:16px;
+    background:linear-gradient(90deg,var(--cold),var(--cool),var(--warm),var(--hot));
+  }
+
+  /* facts / surfaces */
+  .surfaces{margin-top:54px}
+  .surfaces h2{font-size:13px; letter-spacing:.2em; text-transform:uppercase; color:var(--ice); opacity:.7; margin-bottom:18px}
+  .chips{display:flex; flex-wrap:wrap; gap:10px}
+  .chip{
+    font-size:12.5px; padding:8px 13px; border-radius:999px;
+    border:1px solid var(--wire-dim); color:#bcd3e8;
+    background:rgba(16,25,43,.5);
+  }
+  .chip b{color:var(--core); font-weight:700}
+
+  /* mcp / install */
+  .mcp{
+    margin-top:46px;
+    border:1px solid var(--wire-dim); border-radius:16px; overflow:hidden;
+    background:linear-gradient(180deg, rgba(11,18,32,.8), rgba(7,11,18,.6));
+  }
+  .mcp-head{padding:20px 22px; border-bottom:1px solid var(--wire-dim)}
+  .mcp-head h2{font-size:17px; color:var(--ice-bright); letter-spacing:.01em}
+  .mcp-head p{margin-top:7px; font-size:13.5px; color:#a9bdd2; line-height:1.55; max-width:62ch}
+  .term{
+    padding:18px 22px; font:500 13px/1.9 ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+    color:#cfe0f0; background:rgba(0,0,0,.32);
+    overflow-x:auto;
+  }
+  .term .p{color:var(--hot)}
+  .term .c{color:var(--ice-bright)}
+  .term .x{color:#7d93a8}
+
+  /* footer */
+  footer{
+    border-top:1px solid var(--wire-dim);
+    padding:30px clamp(18px,4vw,44px);
+    display:flex; flex-wrap:wrap; gap:14px 28px; align-items:center; justify-content:space-between;
+    font-size:13px; color:#8fa6bd;
+  }
+  footer a{color:var(--ice); text-decoration:none}
+  footer a:hover,footer a:focus-visible{color:var(--ice-bright); text-decoration:underline; text-underline-offset:3px; outline:none}
+  footer .links{display:flex; flex-wrap:wrap; gap:16px}
+
+  /* ============ REDUCED MOTION: scene shown statically, no sweep ============ */
+  @media (prefers-reduced-motion: reduce){
+    .scanline,.scanfade{display:none}
+    .eyebrow .dot, .context .live{animation:none}
+    /* reveal the full scene, no moving mask: a soft static reveal window */
+    .scene{
+      -webkit-mask-image:linear-gradient(180deg, transparent 0%, #000 14%, #000 86%, transparent 100%) !important;
+              mask-image:linear-gradient(180deg, transparent 0%, #000 14%, #000 86%, transparent 100%) !important;
+      opacity:.92;
+    }
+    .recall-tag{opacity:1; transform:none}
+  }
+
+  @media (max-width:640px){
+    .auto-hint{display:none}
+    .recall-tag{bottom:auto; top:auto; position:static; margin:24px clamp(18px,4vw,44px) 0; max-width:none}
+    .stage{min-height:auto}
+  }
+</style>
+</head>
+<body>
+
+  <!-- ================= THE STAGE: thermal/x-ray reveal ================= -->
+  <section class="stage" id="stage" aria-label="A remembered coding moment surfacing under an autonomous thermal scan">
+
+    <!-- Layer 0: cool structural x-ray surface -->
+    <div class="surface" aria-hidden="true">
+      <svg viewBox="0 0 1440 900" preserveAspectRatio="xMidYMid slice">
+        <!-- structural grid -->
+        <g class="grid">
+          <line x1="0" y1="150" x2="1440" y2="150"/><line x1="0" y1="300" x2="1440" y2="300"/>
+          <line x1="0" y1="450" x2="1440" y2="450"/><line x1="0" y1="600" x2="1440" y2="600"/>
+          <line x1="0" y1="750" x2="1440" y2="750"/>
+          <line x1="240" y1="0" x2="240" y2="900"/><line x1="480" y1="0" x2="480" y2="900"/>
+          <line x1="720" y1="0" x2="720" y2="900"/><line x1="960" y1="0" x2="960" y2="900"/>
+          <line x1="1200" y1="0" x2="1200" y2="900"/>
+        </g>
+        <!-- ghost wireframe of a "session topology": nodes + associative trails -->
+        <g class="wire-soft">
+          <path d="M180 220 C 360 160, 520 300, 700 240 S 980 180, 1180 280"/>
+          <path d="M120 520 C 320 470, 480 640, 720 560 S 1050 500, 1280 600"/>
+          <path d="M260 760 C 460 700, 640 820, 880 740 S 1120 700, 1320 780"/>
+        </g>
+        <g class="wire">
+          <path d="M180 220 L 700 560"/><path d="M700 560 L 1180 280"/>
+          <path d="M120 520 L 700 560"/><path d="M700 560 L 880 740"/>
+          <path d="M700 560 L 1180 600"/>
+        </g>
+        <g class="node">
+          <circle cx="180" cy="220" r="9"/><circle cx="700" cy="240" r="9"/>
+          <circle cx="1180" cy="280" r="9"/><circle cx="120" cy="520" r="9"/>
+          <circle cx="700" cy="560" r="16"/><circle cx="1280" cy="600" r="9"/>
+          <circle cx="880" cy="740" r="9"/><circle cx="320" cy="760" r="9"/>
+        </g>
+        <g class="label">
+          <text x="196" y="206">auth.ts</text>
+          <text x="716" y="226">retry.ts · session 0x9f</text>
+          <text x="1196" y="266">qdrant.ts</text>
+          <text x="136" y="506">middleware</text>
+          <text x="724" y="552">·</text>
+          <text x="896" y="726">token.refresh</text>
+        </g>
+      </svg>
+    </div>
+
+    <!-- Layer 1: the HIDDEN SCENE — a remembered coding moment, painted in heat false-color.
+                 Masked so it only burns into view where the scan band passes. -->
+    <div class="scene" id="scene" aria-hidden="true">
+      <div class="scene-bg"></div>
+      <svg viewBox="0 0 1440 900" preserveAspectRatio="xMidYMid slice">
+        <defs>
+          <radialGradient id="bA" cx="30%" cy="34%" r="40%">
+            <stop offset="0%" stop-color="#fff6e6"/><stop offset="45%" stop-color="#ffd36b"/>
+            <stop offset="100%" stop-color="rgba(255,211,107,0)"/>
+          </radialGradient>
+          <radialGradient id="bB" cx="68%" cy="58%" r="45%">
+            <stop offset="0%" stop-color="#f4632e"/><stop offset="100%" stop-color="rgba(244,99,46,0)"/>
+          </radialGradient>
+          <radialGradient id="bC" cx="48%" cy="78%" r="42%">
+            <stop offset="0%" stop-color="#f2b134"/><stop offset="100%" stop-color="rgba(242,177,52,0)"/>
+          </radialGradient>
+        </defs>
+
+        <!-- thermal heat blobs: the "body heat" of a remembered working session -->
+        <g class="heatblob">
+          <ellipse cx="430" cy="306" rx="520" ry="360" fill="url(#bA)"/>
+          <ellipse cx="980" cy="520" rx="560" ry="420" fill="url(#bB)"/>
+          <ellipse cx="690" cy="700" rx="600" ry="380" fill="url(#bC)"/>
+        </g>
+
+        <!-- the SAME topology, now white-hot: the moment is *alive* under the scan -->
+        <g class="hot-wire">
+          <path d="M180 220 L 700 560"/><path d="M700 560 L 1180 280"/>
+          <path d="M120 520 L 700 560"/><path d="M700 560 L 880 740"/>
+          <path d="M700 560 L 1180 600"/>
+        </g>
+        <g class="hot-node">
+          <circle cx="180" cy="220" r="10"/><circle cx="700" cy="240" r="10"/>
+          <circle cx="1180" cy="280" r="10"/><circle cx="120" cy="520" r="10"/>
+          <circle cx="700" cy="560" r="20"/><circle cx="1280" cy="600" r="10"/>
+          <circle cx="880" cy="740" r="10"/><circle cx="320" cy="760" r="10"/>
+        </g>
+        <g class="hot-label">
+          <text x="196" y="206">auth.ts</text>
+          <text x="716" y="226">retry.ts · session 0x9f</text>
+          <text x="1196" y="266">qdrant.ts</text>
+          <text x="136" y="506">middleware</text>
+          <text x="896" y="726">token.refresh</text>
+        </g>
+
+        <!-- the recalled CODE, the actual fix from that past session, glowing in the heat -->
+        <g class="scan-code" transform="translate(710,520)">
+          <text x="0" y="0"><tspan class="dim">// 41 days ago — you solved this exact retry storm</tspan></text>
+          <text x="0" y="26"><tspan class="kw">if</tspan> (res.status === <tspan class="kw">401</tspan> &amp;&amp; !req._retried) {</text>
+          <text x="0" y="52">  <tspan class="dim">await</tspan> refreshToken();        <tspan class="dim">// not on every 401</tspan></text>
+          <text x="0" y="78">  req._retried = <tspan class="kw">true</tspan>;      <tspan class="dim">// guard the loop</tspan></text>
+          <text x="0" y="104">  <tspan class="kw">return</tspan> retry(req, { backoff: <tspan class="kw">true</tspan> });</text>
+          <text x="0" y="130">}</text>
+        </g>
+      </svg>
+    </div>
+
+    <!-- Layer 1.5: trailing cool wash + the visible scan edge -->
+    <div class="scanfade" id="scanfade" aria-hidden="true"></div>
+    <div class="scanline" id="scanline" aria-hidden="true"></div>
+
+    <!-- Layer 4: copy -->
+    <div class="chrome">
+      <div class="topbar">
+        <div class="brand"><span class="glyph"></span> Memex</div>
+        <nav aria-label="Primary">
+          <a href="https://github.com/Two-Weeks-Team/memex">Repo</a>
+          <a href="https://two-weeks-team.github.io/memex/">Live landing</a>
+          <a href="#server">Server / Docker</a>
+          <a href="#agent">Agent (MCP)</a>
+        </nav>
+      </div>
+
+      <div class="hero">
+        <span class="eyebrow"><span class="dot"></span> Qdrant Vector Space Day 2026 · Think Outside the Bot</span>
+        <h1>You didn't go looking.<br>The moment <span class="reveal">surfaces under the scan.</span></h1>
+        <p class="sub">
+          You're deep in a problem you've solved before — you just don't remember solving it.
+          Memex sweeps your past sessions and the <strong>relevant moment burns back into view</strong>,
+          full and vivid, the way a memory returns on its own. No query. No search box.
+        </p>
+
+        <div class="context" role="status">
+          <span class="live" aria-hidden="true"></span>
+          Right now you're in <code>auth retry → 401 loop</code>
+        </div>
+
+        <div class="cta">
+          <a class="btn btn-primary" href="https://github.com/Two-Weeks-Team/memex">
+            View on GitHub
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M7 17 17 7M9 7h8v8" stroke="#1a0a02" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </a>
+          <a class="btn btn-ghost" href="https://two-weeks-team.github.io/memex/">See it live</a>
+        </div>
+      </div>
+
+      <span class="auto-hint" aria-hidden="true">scan runs on its own · no cursor needed</span>
+    </div>
+
+    <!-- the surfaced-memory caption (shows when the band crosses the scene's hot zone) -->
+    <aside class="recall-tag" id="recallTag" aria-live="polite">
+      <div class="rt-kicker">
+        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1" stroke="#ffd36b" stroke-width="2" stroke-linecap="round"/></svg>
+        Surfaced — unbidden
+      </div>
+      <div class="rt-title">The retry-storm fix you wrote 41 days ago</div>
+      <div class="rt-meta">session 0x9f · retry.ts · similarity 0.91</div>
+      <div class="rt-body">
+        Same 401 loop, same project. The scan caught it by <em>similarity</em>, not by name —
+        and brought the whole moment back before you re-derived it.
+      </div>
+    </aside>
+  </section>
+
+  <!-- ================= BELOW THE FOLD ================= -->
+  <div class="below">
+    <div class="wrap">
+      <p class="lead">Most memories never get written down. Memex keeps the <em>session corpus you own</em> — and lets the right past surface by similarity, on its own.</p>
+
+      <div class="grid3">
+        <div class="card">
+          <div class="heat" aria-hidden="true"></div>
+          <h3>Reveal, not retrieval</h3>
+          <p>The relevant session rises because the current context evoked it — the way a forgotten fix pops back mid-task. You're the recipient, not the searcher.</p>
+        </div>
+        <div class="card">
+          <div class="heat" aria-hidden="true"></div>
+          <h3>A corpus you own</h3>
+          <p>Claude Code silently migrates and deletes old sessions. Memex preserves your Claude Code / Codex history (<code>~/.claude/projects/**/*.jsonl</code>) locally, LLM-free at runtime.</p>
+        </div>
+        <div class="card">
+          <div class="heat" aria-hidden="true"></div>
+          <h3>Move by similarity</h3>
+          <p>A Qdrant-backed associative space — Vannevar Bush's 1945 Memex, made navigable. Distance, not keywords, decides what surfaces.</p>
+        </div>
+      </div>
+
+      <div class="surfaces">
+        <h2>Surfaces</h2>
+        <div class="chips">
+          <span class="chip"><b>Time Machine</b> · replay</span>
+          <span class="chip"><b>Lens</b> · named-vector weighted search</span>
+          <span class="chip"><b>Topology</b> · distance-matrix → MST graph</span>
+          <span class="chip"><b>Mix / Discovery</b> · pos/neg recommendation</span>
+          <span class="chip"><b>Proactive Recall</b></span>
+          <span class="chip"><b>Dashboard</b></span>
+          <span class="chip"><b>Companion · Wrapped · Loop Breaker</b></span>
+        </div>
+      </div>
+
+      <div class="mcp" id="agent">
+        <div class="mcp-head">
+          <h2>Bring it to your agent</h2>
+          <p>Memex exposes 11 MCP tools over stdio + HTTP. It works in Claude Code, Codex, and Cursor — the same associative space your agent can reach into mid-task.</p>
+        </div>
+        <div class="term" aria-label="Add Memex to your agent over MCP">
+          <div><span class="p">$</span> <span class="c">claude mcp add memex -- memex serve --stdio</span></div>
+          <div><span class="x"># or run the server / Docker variant — Qdrant + web + MCP in one image</span></div>
+          <div id="server"><span class="p">$</span> <span class="c">docker run -p 8080:8080 memex/server</span></div>
+        </div>
+      </div>
+    </div>
+
+    <footer>
+      <div>Built for Qdrant Vector Space Day 2026 · a non-chatbot, LLM-free-at-runtime memory over your session history.</div>
+      <div class="links">
+        <a href="https://github.com/Two-Weeks-Team/memex">github.com/Two-Weeks-Team/memex</a>
+        <a href="https://two-weeks-team.github.io/memex/">two-weeks-team.github.io/memex</a>
+      </div>
+    </footer>
+  </div>
+
+<script>
+(function(){
+  var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var stage    = document.getElementById('stage');
+  var scene    = document.getElementById('scene');
+  var scanline = document.getElementById('scanline');
+  var scanfade = document.getElementById('scanfade');
+  var tag      = document.getElementById('recallTag');
+
+  // Reduced motion: scene is shown statically (CSS handles the static reveal mask). No sweep.
+  if(reduce){ return; }
+
+  // --- The reveal mask: a hot band whose center follows the autonomous sweep ---
+  // We rebuild the mask each frame so the scene only shows within the band.
+  function applyMask(centerPct, bandPct){
+    var top  = Math.max(0, centerPct - bandPct);
+    var bot  = Math.min(100, centerPct + bandPct);
+    var feat = bandPct * 0.55; // feather edges
+    var mask =
+      'linear-gradient(180deg,' +
+      'rgba(0,0,0,0) ' + Math.max(0, top) + '%,' +
+      'rgba(0,0,0,1) ' + Math.min(100, top + feat) + '%,' +
+      'rgba(0,0,0,1) ' + Math.max(0, bot - feat) + '%,' +
+      'rgba(0,0,0,0) ' + bot + '%)';
+    scene.style.setProperty('--reveal-mask', mask);
+    scene.style.webkitMaskImage = mask;
+    scene.style.maskImage = mask;
+  }
+
+  var H = 0;
+  function measure(){ H = stage.getBoundingClientRect().height || window.innerHeight; }
+  measure();
+  window.addEventListener('resize', measure);
+
+  // Autonomous sweep — irregular, lifelike cadence (NOT cursor-driven).
+  // The band drifts down, pauses ("dwell") when it crosses the remembered moment,
+  // then continues; after a beat it restarts from the top. The viewer never acts.
+  var start = null;
+  var DWELL_FROM = 56, DWELL_TO = 74;   // % where the memory lives → linger here
+  var tagShown = false;
+
+  // ease for a soft, breathing descent
+  function easeInOutSine(t){ return -(Math.cos(Math.PI * t) - 1) / 2; }
+
+  // a single pass takes ~ this long; with an extra dwell in the hot zone
+  function loop(ts){
+    if(start === null) start = ts;
+    var cyclePeriod = 9000;            // ms for one descent
+    var pausePeriod = 1500;            // ms paused at bottom before re-sweep
+    var total = cyclePeriod + pausePeriod;
+    var t = ((ts - start) % total);
+
+    var centerPct;
+    if(t < cyclePeriod){
+      var raw = t / cyclePeriod;       // 0..1 down the surface
+      // inject a dwell: slow time around the memory zone
+      var p = easeInOutSine(raw);
+      // map to slight overshoot so band fully clears top & bottom
+      centerPct = -10 + p * 120;       // -10% .. 110%
+    } else {
+      centerPct = 110;                 // resting below, dark/cool surface only
+    }
+
+    var bandPct = 12;                  // half-height of the hot reveal band
+    applyMask(centerPct, bandPct);
+
+    // move the visible scan edge + cool trailing wash to match the band center
+    var px = (centerPct/100) * H;
+    scanline.style.setProperty('--sweep', px.toFixed(1));
+    scanfade.style.setProperty('--sweep', px.toFixed(1));
+
+    // dim the leading edge as it rests off-screen
+    scanline.style.opacity = (centerPct < 0 || centerPct > 100) ? '0' : '1';
+
+    // surface the caption while the band illuminates the remembered moment
+    var inZone = centerPct >= DWELL_FROM && centerPct <= DWELL_TO;
+    if(inZone && !tagShown){ tag.classList.add('show'); tagShown = true; }
+    if(!inZone && centerPct > DWELL_TO + 8 && tagShown){ /* keep it; it's been recalled */ }
+    if(centerPct > 105 || centerPct < -5){ tag.classList.remove('show'); tagShown = false; }
+
+    requestAnimationFrame(loop);
+  }
+
+  // initialize a cool, hidden state then begin the autonomous sweep
+  applyMask(-20, 12);
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

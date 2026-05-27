@@ -1,0 +1,510 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Memex — the fix you already found comes back on its own</title>
+<style>
+  :root {
+    --bg:        oklch(18% 0.02 265);
+    --bg-2:      oklch(22% 0.03 265);
+    --panel:     oklch(24% 0.025 265);
+    --line:      oklch(34% 0.03 265);
+    --ink:       oklch(92% 0.01 265);
+    --ink-dim:   oklch(70% 0.02 265);
+    --ink-faint: oklch(55% 0.02 265);
+    --accent:    oklch(78% 0.16 145);   /* terminal green — the recall */
+    --accent-2:  oklch(72% 0.14 250);   /* the present-moment cursor */
+    --warn:      oklch(78% 0.15 70);
+    --radius: 10px;
+    --mono: ui-monospace, "SF Mono", "Cascadia Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--sans);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--accent); }
+  a:focus-visible, button:focus-visible {
+    outline: 2px solid var(--accent-2);
+    outline-offset: 3px;
+    border-radius: 4px;
+  }
+  .wrap { max-width: 920px; margin: 0 auto; padding: 0 20px; }
+  .skip {
+    position: absolute; left: -999px; top: 0;
+    background: var(--accent); color: var(--bg); padding: 8px 14px; z-index: 99;
+  }
+  .skip:focus { left: 8px; top: 8px; }
+
+  /* ---- top bar ---- */
+  header.bar {
+    display: flex; align-items: center; gap: 12px;
+    padding: 14px 20px; border-bottom: 1px solid var(--line);
+    position: sticky; top: 0; background: oklch(18% 0.02 265 / 0.92);
+    backdrop-filter: blur(8px); z-index: 10; flex-wrap: wrap;
+  }
+  .logo { display:flex; align-items:center; gap:9px; font-weight:650; letter-spacing:-0.01em; }
+  .logo svg { display:block; }
+  .bar nav { margin-left: auto; display:flex; gap: 4px; flex-wrap: wrap; }
+  .bar nav a {
+    color: var(--ink-dim); text-decoration: none; font-size: 0.86rem;
+    padding: 6px 10px; border-radius: 6px;
+  }
+  .bar nav a:hover { color: var(--ink); background: var(--bg-2); }
+  .tag {
+    font-size: 0.72rem; color: var(--ink-faint); border:1px solid var(--line);
+    padding: 2px 8px; border-radius: 99px; font-family: var(--mono);
+  }
+
+  /* ---- hero ---- */
+  .hero { padding: 64px 0 40px; }
+  .kicker {
+    font-family: var(--mono); font-size: 0.8rem; color: var(--accent);
+    letter-spacing: 0.02em; margin: 0 0 14px;
+  }
+  h1 {
+    font-size: clamp(1.9rem, 4.6vw, 3rem); line-height: 1.12;
+    letter-spacing: -0.025em; margin: 0 0 18px; font-weight: 680;
+  }
+  h1 .soft { color: var(--ink-dim); font-weight: 500; }
+  .lede { font-size: 1.12rem; color: var(--ink-dim); max-width: 640px; margin: 0 0 12px; }
+  .honest {
+    font-size: 0.9rem; color: var(--ink-faint); max-width: 640px;
+    border-left: 2px solid var(--line); padding-left: 14px; margin: 18px 0 0;
+  }
+
+  /* ---- the terminal scene (autonomous, NOT searchable) ---- */
+  .scene {
+    margin: 36px 0 8px; border: 1px solid var(--line);
+    border-radius: var(--radius); overflow: hidden; background: var(--bg-2);
+    box-shadow: 0 20px 50px oklch(10% 0.02 265 / 0.5);
+  }
+  .scene-top {
+    display: flex; align-items: center; gap: 8px;
+    padding: 9px 14px; border-bottom: 1px solid var(--line);
+    background: var(--panel);
+  }
+  .dot { width: 11px; height: 11px; border-radius: 50%; background: var(--line); }
+  .dot.r { background: oklch(64% 0.16 25); }
+  .dot.y { background: oklch(78% 0.14 80); }
+  .dot.g { background: oklch(74% 0.15 145); }
+  .scene-title {
+    margin-left: 6px; font-family: var(--mono); font-size: 0.78rem; color: var(--ink-faint);
+  }
+  .scene-status {
+    margin-left: auto; font-family: var(--mono); font-size: 0.72rem; color: var(--ink-faint);
+    display: flex; align-items: center; gap: 6px;
+  }
+  .pulse {
+    width: 7px; height: 7px; border-radius: 50%; background: var(--accent);
+    box-shadow: 0 0 0 0 oklch(78% 0.16 145 / 0.6);
+    animation: pulse 2.4s ease-out infinite;
+  }
+  @keyframes pulse {
+    0% { box-shadow: 0 0 0 0 oklch(78% 0.16 145 / 0.55); }
+    70% { box-shadow: 0 0 0 7px oklch(78% 0.16 145 / 0); }
+    100% { box-shadow: 0 0 0 0 oklch(78% 0.16 145 / 0); }
+  }
+
+  .scene-body {
+    display: grid; grid-template-columns: 1fr; gap: 0;
+    font-family: var(--mono); font-size: 0.88rem;
+  }
+  @media (min-width: 760px) {
+    .scene-body { grid-template-columns: 1.15fr 1fr; }
+  }
+
+  /* present moment (left): the wall you're hitting NOW */
+  .now {
+    padding: 18px; border-bottom: 1px solid var(--line);
+  }
+  @media (min-width: 760px) { .now { border-bottom: none; border-right: 1px solid var(--line); } }
+  .now-label, .recall-label {
+    font-size: 0.68rem; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--ink-faint); margin: 0 0 12px;
+  }
+  .log-line { margin: 0 0 7px; color: var(--ink-dim); white-space: pre-wrap; word-break: break-word; }
+  .log-line .p { color: var(--accent-2); }
+  .log-line.err { color: var(--warn); }
+  .log-line.cur::after {
+    content: "▋"; color: var(--accent-2); margin-left: 1px;
+    animation: blink 1.1s step-end infinite;
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  /* the unbidden recall (right): rises on its own */
+  .recall {
+    padding: 18px; position: relative; min-height: 188px;
+  }
+  .recall-stage { position: relative; }
+  .memory {
+    border: 1px solid var(--line); border-left: 3px solid var(--accent);
+    background: oklch(26% 0.03 145 / 0.25);
+    border-radius: 8px; padding: 12px 13px; margin: 0 0 11px;
+    opacity: 0; transform: translateY(10px);
+    transition: opacity .7s ease, transform .7s ease;
+  }
+  .memory.in { opacity: 1; transform: translateY(0); }
+  .memory .when {
+    font-size: 0.7rem; color: var(--accent); margin: 0 0 5px;
+    display: flex; justify-content: space-between; gap: 8px;
+  }
+  .memory .when .src { color: var(--ink-faint); }
+  .memory .what { color: var(--ink); margin: 0; font-size: 0.85rem; line-height: 1.5; }
+  .memory .trail {
+    margin: 8px 0 0; font-size: 0.72rem; color: var(--ink-faint);
+  }
+  .memory .trail b { color: var(--ink-dim); font-weight: 500; }
+  .recall-empty {
+    color: var(--ink-faint); font-size: 0.8rem; font-style: italic;
+  }
+  .scene-foot {
+    border-top: 1px solid var(--line); padding: 10px 16px;
+    font-family: var(--mono); font-size: 0.72rem; color: var(--ink-faint);
+    display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap;
+  }
+  .static-note { font-family: var(--sans); font-size: 0.84rem; color: var(--ink-faint); margin: 14px 0 0; }
+
+  /* ---- the four things (indie-hacker honesty: build, not bill) ---- */
+  section { padding: 48px 0; border-top: 1px solid var(--line); }
+  h2 { font-size: 1.5rem; letter-spacing: -0.02em; margin: 0 0 6px; }
+  .sub { color: var(--ink-dim); margin: 0 0 28px; max-width: 620px; }
+  .grid { display: grid; gap: 14px; grid-template-columns: 1fr; }
+  @media (min-width: 680px) { .grid { grid-template-columns: 1fr 1fr; } }
+  .card {
+    border: 1px solid var(--line); border-radius: var(--radius);
+    background: var(--bg-2); padding: 18px 18px 16px;
+  }
+  .card h3 { margin: 0 0 6px; font-size: 1.02rem; display:flex; align-items:center; gap:8px; }
+  .card h3 .n { font-family: var(--mono); color: var(--accent); font-size: 0.8rem; }
+  .card p { margin: 0; color: var(--ink-dim); font-size: 0.93rem; }
+
+  /* ---- how it runs (the scrappy setup) ---- */
+  .codeblock {
+    font-family: var(--mono); font-size: 0.84rem; background: var(--bg-2);
+    border: 1px solid var(--line); border-radius: var(--radius);
+    padding: 16px 18px; color: var(--ink-dim); overflow-x: auto;
+    line-height: 1.8;
+  }
+  .codeblock .c { color: var(--ink-faint); }
+  .codeblock .g { color: var(--accent); }
+  .runrow { display: grid; gap: 18px; grid-template-columns: 1fr; }
+  @media (min-width: 760px) { .runrow { grid-template-columns: 1fr 1fr; } }
+  .runrow h3 { font-size: 0.95rem; margin: 0 0 10px; color: var(--ink); }
+
+  /* ---- CTA ---- */
+  .cta { text-align: center; }
+  .btns { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; margin: 22px 0 10px; }
+  .btn {
+    display: inline-block; padding: 12px 20px; border-radius: 8px;
+    font-size: 0.95rem; text-decoration: none; font-weight: 560;
+  }
+  .btn.primary { background: var(--accent); color: oklch(16% 0.02 265); }
+  .btn.primary:hover { background: oklch(82% 0.16 145); }
+  .btn.ghost { border: 1px solid var(--line); color: var(--ink); }
+  .btn.ghost:hover { background: var(--bg-2); }
+
+  footer {
+    border-top: 1px solid var(--line); padding: 28px 0 48px;
+    color: var(--ink-faint); font-size: 0.85rem;
+  }
+  footer a { color: var(--ink-dim); }
+  footer .row { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 10px; }
+
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    .pulse, .log-line.cur::after { animation: none; }
+    .memory { transition: none; }
+  }
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="bar">
+  <span class="logo">
+    <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true">
+      <circle cx="11" cy="11" r="9" fill="none" stroke="oklch(78% 0.16 145)" stroke-width="1.4"/>
+      <circle cx="6.5" cy="8" r="1.7" fill="oklch(78% 0.16 145)"/>
+      <circle cx="15" cy="7" r="1.7" fill="oklch(72% 0.14 250)"/>
+      <circle cx="12.5" cy="15" r="1.7" fill="oklch(78% 0.16 145)"/>
+      <path d="M6.5 8 L15 7 M15 7 L12.5 15 M12.5 15 L6.5 8" stroke="oklch(55% 0.02 265)" stroke-width="0.8" fill="none"/>
+    </svg>
+    Memex
+  </span>
+  <span class="tag">no chatbot · no runtime LLM</span>
+  <nav aria-label="Primary">
+    <a href="#scene">How it surfaces</a>
+    <a href="#what">What it is</a>
+    <a href="#run">Run it</a>
+    <a href="#agents">Agents</a>
+    <a href="https://github.com/Two-Weeks-Team/memex">GitHub</a>
+  </nav>
+</header>
+
+<main id="main">
+<div class="wrap">
+
+  <section class="hero" style="border-top:none;">
+    <p class="kicker">// for the solo builder who has hit this exact wall before</p>
+    <h1>The fix you found at 2am<br><span class="soft">comes back on its own — right when you hit the wall again.</span></h1>
+    <p class="lede">
+      You don't remember writing it down — you didn't. But three months later you're staring
+      at the same auth retry loop, and the thing that worked last time just… surfaces.
+      Momentum preserved. Nothing re-solved.
+    </p>
+    <p class="honest">
+      No one searches their own past on purpose at 2am. So Memex doesn't make you search.
+      It watches the situation you're in and lets the relevant old session <em>rise unbidden</em>,
+      the way a forgotten answer comes back mid-task.
+    </p>
+  </section>
+
+  <!-- THE SCENE: autonomous surfacing. Visitor watches; does NOT drive. -->
+  <section id="scene" style="border-top:none; padding-top: 0;">
+    <div class="scene" aria-label="A live build session. As the current context unfolds, a past session surfaces on its own — you are not searching.">
+      <div class="scene-top">
+        <span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
+        <span class="scene-title">~/projects/payments — claude code</span>
+        <span class="scene-status"><span class="pulse" aria-hidden="true"></span> memex: watching</span>
+      </div>
+      <div class="scene-body">
+        <!-- NOW: the wall, unfolding by itself -->
+        <div class="now">
+          <p class="now-label">Right now · this session</p>
+          <div id="logFeed" role="log" aria-live="polite" aria-label="Current build session">
+            <!-- lines injected by script; static fallback below for no-JS -->
+            <noscript>
+              <p class="log-line"><span class="p">$</span> running webhook retry handler…</p>
+              <p class="log-line err">! 401 from gateway — token expired mid-retry</p>
+              <p class="log-line">…you've been here before.</p>
+            </noscript>
+          </div>
+        </div>
+        <!-- RECALL: rises on its own, no input from visitor -->
+        <div class="recall">
+          <p class="recall-label">Surfaced — you didn't ask</p>
+          <div class="recall-stage" id="recallStage" aria-live="polite" aria-label="A past session surfaces on its own">
+            <p class="recall-empty" id="recallEmpty">…</p>
+          </div>
+        </div>
+      </div>
+      <div class="scene-foot">
+        <span>recall triggered by similarity to current context — not by a query</span>
+        <span id="cadence">irregular timing, like real memory</span>
+      </div>
+    </div>
+    <p class="static-note">
+      This plays on its own. There is nothing to click, hover, or type — that's the point.
+      Memex retrieves <em>to</em> you, from your own Claude&nbsp;Code / Codex history.
+    </p>
+  </section>
+
+  <!-- The four things, indie-hacker framing: ship momentum, not feature bloat -->
+  <section id="what">
+    <h2>What it actually is</h2>
+    <p class="sub">
+      A small tool over your session history (<code>~/.claude/projects/**/*.jsonl</code> + legacy
+      transcripts). It turns that history into a navigable, associative memory backed by Qdrant —
+      so the corpus is <strong>yours</strong> and you move through it by similarity, not keywords.
+    </p>
+    <div class="grid">
+      <div class="card">
+        <h3><span class="n">01</span> Proactive Recall</h3>
+        <p>The old session surfaces because the current context evoked it — not because you went looking. The motif above, for real work.</p>
+      </div>
+      <div class="card">
+        <h3><span class="n">02</span> Lens &amp; Topology</h3>
+        <p>Named-vector weighted views and a distance-matrix MST graph — to wander your past by closeness instead of filenames.</p>
+      </div>
+      <div class="card">
+        <h3><span class="n">03</span> Time Machine</h3>
+        <p>Replay a session you'd otherwise lose. Claude Code silently migrates and deletes old sessions; Memex keeps the corpus.</p>
+      </div>
+      <div class="card">
+        <h3><span class="n">04</span> Companion / Wrapped / Loop Breaker</h3>
+        <p>An agent-memory layer that notices when you're circling the same problem — and brings back what already worked.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- The scrappy setup -->
+  <section id="run">
+    <h2>Run it the scrappy way</h2>
+    <p class="sub">No SaaS account, no runtime LLM bill. Self-host the whole thing in one Docker image (Qdrant + web + MCP), or wire it straight into your agent.</p>
+    <div class="runrow">
+      <div>
+        <h3>Server / Docker variant</h3>
+        <div class="codeblock">
+<span class="c"># Qdrant + web UI + MCP in one image</span><br>
+git clone https://github.com/Two-Weeks-Team/memex<br>
+cd memex<br>
+docker compose up <span class="g">-d</span><br>
+<span class="c"># then open the web UI &amp; index your history</span>
+        </div>
+      </div>
+      <div id="agents">
+        <h3>Wire it into your agent (MCP)</h3>
+        <div class="codeblock">
+<span class="c"># 11 MCP tools over stdio + HTTP</span><br>
+claude mcp add memex <span class="g">--</span> memex-mcp<br>
+<span class="c"># works in Claude Code / Codex / Cursor</span><br>
+<span class="c"># now Recall can surface mid-task, autonomously</span>
+        </div>
+      </div>
+    </div>
+    <p class="static-note">
+      Built for <strong>Qdrant Vector Space Day 2026 — "Think Outside the Bot."</strong>
+      It's a real repo, not a waitlist. Honest status: a hackathon project you can run today, not a polished product.
+    </p>
+  </section>
+
+  <section class="cta">
+    <h2>Stop re-solving what you already solved</h2>
+    <p class="sub" style="margin-left:auto;margin-right:auto;">
+      The past comes back on its own. You just keep building.
+    </p>
+    <div class="btns">
+      <a class="btn primary" href="https://github.com/Two-Weeks-Team/memex">Clone the repo</a>
+      <a class="btn ghost" href="https://two-weeks-team.github.io/memex/">See the live landing</a>
+    </div>
+  </section>
+
+</div>
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="row">
+      <a href="https://github.com/Two-Weeks-Team/memex">github.com/Two-Weeks-Team/memex</a>
+      <a href="https://two-weeks-team.github.io/memex/">two-weeks-team.github.io/memex</a>
+    </div>
+    <p style="margin:0;">
+      Memex · a navigable spatial memory over your own agent-session history, backed by Qdrant.
+      No chatbot, no runtime LLM. Vannevar Bush's 1945 idea — associative trails, not a search box.
+    </p>
+  </div>
+</footer>
+
+<script>
+(function () {
+  var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // The present-moment build log: the wall, unfolding by itself.
+  var logFeed = document.getElementById('logFeed');
+  var recallStage = document.getElementById('recallStage');
+  var recallEmpty = document.getElementById('recallEmpty');
+  var cadenceEl = document.getElementById('cadence');
+
+  var logScript = [
+    { t: '<span class="p">$</span> npm run dev', cls: '' },
+    { t: 'webhook → POST /payments/retry', cls: '' },
+    { t: '! 401 from gateway — token expired mid-retry', cls: 'err' },
+    { t: 'huh. this looks familiar…', cls: '' },
+    { t: '<span class="p">$</span> opening the retry handler again', cls: '' },
+    { t: '…still 401 on the second attempt', cls: 'err' }
+  ];
+
+  // The unbidden recall — surfaces because the situation called it up.
+  var memories = [
+    {
+      when: 'about 3 months ago',
+      src: 'session: stripe-dunning',
+      what: 'You refreshed the token <em>before</em> the retry, not after the 401. The retry loop was reusing the dead token.',
+      trail: ['401 retry', 'token refresh', 'dunning webhook']
+    },
+    {
+      when: 'last winter',
+      src: 'session: gateway-sandbox',
+      what: 'Gateway sandbox tokens expire in 5 min, not 60. Your assumption about TTL was the bug, both times.',
+      trail: ['token TTL', 'sandbox', 'expiry']
+    }
+  ];
+
+  function appendLog(line, isLast) {
+    if (!logFeed) return;
+    var p = document.createElement('p');
+    p.className = 'log-line ' + line.cls + (isLast ? ' cur' : '');
+    p.innerHTML = line.t;
+    // strip cursor from any previous last line
+    var prev = logFeed.querySelector('.log-line.cur');
+    if (prev) prev.classList.remove('cur');
+    logFeed.appendChild(p);
+  }
+
+  function surface(mem) {
+    if (!recallStage) return;
+    if (recallEmpty && recallEmpty.parentNode) recallEmpty.parentNode.removeChild(recallEmpty);
+    recallEmpty = null;
+    var box = document.createElement('div');
+    box.className = 'memory';
+    var trailHtml = mem.trail.map(function (x) { return '<b>' + x + '</b>'; }).join(' · ');
+    box.innerHTML =
+      '<p class="when"><span>' + mem.when + '</span><span class="src">' + mem.src + '</span></p>' +
+      '<p class="what">' + mem.what + '</p>' +
+      '<p class="trail">trail: ' + trailHtml + '</p>';
+    recallStage.appendChild(box);
+    // keep at most 2 surfaced memories so it stays readable
+    var all = recallStage.querySelectorAll('.memory');
+    if (all.length > 2) recallStage.removeChild(all[0]);
+    // trigger transition
+    if (reduce) {
+      box.classList.add('in');
+    } else {
+      requestAnimationFrame(function () {
+        requestAnimationFrame(function () { box.classList.add('in'); });
+      });
+    }
+  }
+
+  // Reduced-motion: render the whole scene at rest, no autonomous loop.
+  if (reduce) {
+    logScript.forEach(function (l, i) { appendLog(l, i === logScript.length - 1); });
+    surface(memories[0]);
+    if (cadenceEl) cadenceEl.textContent = 'motion reduced — shown at rest';
+    return;
+  }
+
+  // Irregular, lifelike timing — NOT a uniform tick.
+  var logDelays = [600, 1100, 1400, 900, 1300, 1500];
+  var li = 0;
+  function runLog() {
+    if (li >= logScript.length) return;
+    appendLog(logScript[li], li === logScript.length - 1);
+    // recall rises unbidden once the wall is recognised (after the "still 401" line)
+    if (li === 3) { setTimeout(function () { surface(memories[0]); }, 1700); }
+    if (li === 5) { setTimeout(function () { surface(memories[1]); }, 2400); }
+    var d = logDelays[li] || 1200;
+    li++;
+    setTimeout(runLog, d);
+  }
+
+  // Start only when the scene is on screen, so the surfacing isn't missed.
+  var started = false;
+  function begin() {
+    if (started) return;
+    started = true;
+    setTimeout(runLog, 700);
+  }
+  if ('IntersectionObserver' in window) {
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) {
+        if (e.isIntersecting) { begin(); io.disconnect(); }
+      });
+    }, { threshold: 0.4 });
+    var sc = document.getElementById('scene');
+    if (sc) io.observe(sc); else begin();
+  } else {
+    begin();
+  }
+})();
+</script>
+</body>
+</html>

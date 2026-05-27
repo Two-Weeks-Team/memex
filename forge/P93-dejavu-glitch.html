@@ -1,0 +1,771 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Memex — the moment skips a groove</title>
+<meta name="description" content="Memex turns your Claude Code / Codex session history into a navigable spatial memory. The present surface briefly stutters — and in that déjà-vu glitch, a remembered coding scene snaps into place, as if you've been here before. LLM-free at runtime, backed by Qdrant." />
+<style>
+  :root {
+    /* Cold CRT-adjacent dark; the glitch borrows RGB channel colors */
+    --bg:        oklch(11% 0.018 270);
+    --bg-2:      oklch(14% 0.022 272);
+    --ink:       oklch(95% 0.012 250);
+    --ink-soft:  oklch(80% 0.02 250);
+    --ink-faint: oklch(62% 0.022 252);
+    --accent:    oklch(80% 0.16 200);   /* cyan — the "you've been here" tone */
+    --accent-2:  oklch(72% 0.20 330);   /* magenta — the channel-split partner */
+    --rgb-r:     oklch(64% 0.24 25);
+    --rgb-g:     oklch(82% 0.22 150);
+    --rgb-b:     oklch(66% 0.22 265);
+    --line:      oklch(42% 0.02 270 / 0.42);
+    --glass:     oklch(20% 0.022 270 / 0.55);
+    --glass-edge:oklch(72% 0.04 250 / 0.16);
+    --focus:     oklch(85% 0.16 200);
+    --maxw: 1080px;
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+
+  body {
+    margin: 0;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    color: var(--ink);
+    background: var(--bg);
+    line-height: 1.6;
+    overflow-x: hidden;
+  }
+
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  :focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; border-radius: 6px; }
+
+  .wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 24px; }
+
+  /* ====================================================================
+     THE STAGE — the present surface; it stutters and a memory snaps in
+     ==================================================================== */
+  .stage {
+    position: relative;
+    min-height: 100svh;
+    display: flex;
+    align-items: center;
+    overflow: hidden;
+    background:
+      radial-gradient(130% 90% at 70% 18%, var(--bg-2) 0%, transparent 58%),
+      var(--bg);
+  }
+
+  /* faint horizontal interlace, like a screen at rest (very subtle, static) */
+  .stage::before {
+    content: "";
+    position: absolute; inset: 0; z-index: 0; pointer-events: none;
+    background: repeating-linear-gradient(
+      to bottom,
+      oklch(100% 0 0 / 0.018) 0px,
+      oklch(100% 0 0 / 0.018) 1px,
+      transparent 1px,
+      transparent 3px
+    );
+    opacity: 0.7;
+  }
+
+  /* the framed "surface" where the scene lives — full-bleed centerpiece */
+  .surface-shell {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+  }
+  .surface {
+    position: relative;
+    width: min(80vw, 800px);
+    aspect-ratio: 16 / 10;
+    will-change: transform, filter;
+  }
+
+  /* the THREE channel layers stacked — base (full color) + R + B ghosts.
+     At rest they sit perfectly aligned (no split). The glitch pulls them
+     apart for a few frames, then they re-converge as the scene snaps in. */
+  .layer {
+    position: absolute;
+    inset: 0;
+    will-change: transform, opacity, clip-path;
+  }
+  .layer svg { display: block; width: 100%; height: 100%; }
+
+  .layer.base { z-index: 3; }
+  /* red & blue ghost channels: hidden at rest, revealed only during glitch */
+  .layer.chan-r { z-index: 2; mix-blend-mode: screen; opacity: 0; }
+  .layer.chan-b { z-index: 2; mix-blend-mode: screen; opacity: 0; }
+  .layer.chan-r svg { filter: url(#tintR) brightness(1.1); }
+  .layer.chan-b svg { filter: url(#tintB) brightness(1.1); }
+
+  /* a frame-echo: a faded copy of the OUTGOING scene that lingers 1 beat */
+  .echo {
+    position: absolute; inset: 0; z-index: 1;
+    opacity: 0; will-change: opacity, transform, filter;
+    filter: saturate(0.5);
+  }
+  .echo svg { display: block; width: 100%; height: 100%; }
+
+  /* horizontal "tear" bars that displace during the skip (canvas-free, CSS) */
+  .tear {
+    position: absolute; inset: 0; z-index: 4; pointer-events: none;
+    opacity: 0;
+    background:
+      linear-gradient(to bottom,
+        transparent 0%, transparent 22%,
+        oklch(82% 0.22 150 / 0.05) 22%, oklch(82% 0.22 150 / 0.05) 24%,
+        transparent 24%, transparent 54%,
+        oklch(64% 0.24 25 / 0.06) 54%, oklch(64% 0.24 25 / 0.06) 56.5%,
+        transparent 56.5%, transparent 80%,
+        oklch(66% 0.22 265 / 0.05) 80%, oklch(66% 0.22 265 / 0.05) 82%,
+        transparent 82%);
+    mix-blend-mode: screen;
+  }
+
+  /* caption beneath the surface */
+  .scene-label {
+    position: absolute;
+    left: 0; right: 0;
+    bottom: -2.8rem;
+    text-align: center;
+    font-size: 0.92rem;
+    color: var(--ink-soft);
+    letter-spacing: 0.01em;
+    text-shadow: 0 1px 14px var(--bg);
+    z-index: 5;
+  }
+  .scene-label b { color: var(--accent); font-weight: 600; }
+  .scene-label .now { color: var(--ink-faint); font-weight: 500; }
+
+  /* copy column in the foreground */
+  .stage-copy {
+    position: relative;
+    z-index: 6;
+    max-width: 560px;
+    padding: 7rem 0 6rem;
+  }
+  .eyebrow {
+    font-size: 0.78rem;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    margin: 0 0 1.4rem;
+    display: flex; align-items: center; gap: 0.6rem;
+  }
+  .eyebrow .spark {
+    width: 7px; height: 7px; border-radius: 2px;
+    background: var(--accent);
+    box-shadow: 0 0 12px 2px oklch(80% 0.16 200 / 0.7);
+    animation: blip 5.6s ease-in-out infinite;
+  }
+  @keyframes blip { 0%,92%,100%{opacity:.4;} 94%{opacity:1; transform:translateX(1px);} 96%{transform:translateX(-1px);} }
+
+  h1 {
+    font-size: clamp(2.1rem, 5.6vw, 3.7rem);
+    line-height: 1.08;
+    font-weight: 600;
+    margin: 0 0 1.4rem;
+    letter-spacing: -0.015em;
+    text-shadow: 0 2px 30px var(--bg);
+  }
+  h1 .accent {
+    background: linear-gradient(98deg, var(--accent), var(--accent-2));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .lede {
+    font-size: clamp(1.04rem, 1.8vw, 1.24rem);
+    color: var(--ink-soft);
+    max-width: 47ch;
+    margin: 0 0 2.3rem;
+    text-shadow: 0 1px 20px var(--bg);
+  }
+  .actions { display: flex; flex-wrap: wrap; gap: 0.85rem; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 0.5rem;
+    padding: 0.8rem 1.45rem;
+    border-radius: 13px;
+    font-size: 0.95rem; font-weight: 500;
+    border: 1px solid var(--glass-edge);
+    background: var(--glass);
+    backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+    color: var(--ink);
+    transition: transform .25s ease, border-color .25s ease, box-shadow .25s ease;
+  }
+  .btn:hover {
+    text-decoration: none;
+    transform: translateY(-2px);
+    border-color: var(--accent);
+    box-shadow: 0 0 26px -6px oklch(80% 0.16 200 / 0.5);
+  }
+  .btn-primary {
+    border-color: oklch(80% 0.16 200 / 0.5);
+    background: linear-gradient(120deg, oklch(34% 0.10 210 / 0.55), oklch(30% 0.10 320 / 0.4));
+  }
+  .stage-foot {
+    margin: 2.6rem 0 0;
+    font-size: 0.85rem;
+    color: var(--ink-faint);
+  }
+
+  /* proscenium vignette */
+  .stage::after {
+    content: "";
+    position: absolute; inset: 0; z-index: 5;
+    pointer-events: none;
+    background: radial-gradient(120% 100% at 62% 45%, transparent 50%, oklch(8% 0.012 270 / 0.85) 100%);
+  }
+
+  /* ====================================================================
+     GLITCH CHOREOGRAPHY — short, controlled, NO strobing.
+     One ~520ms event: layers split → tear → re-converge as scene snaps.
+     Triggered by JS adding .glitching to .surface-shell.
+     ==================================================================== */
+  .surface-shell.glitching .surface { animation: surfaceSkip 520ms steps(1, end) 1; }
+  @keyframes surfaceSkip {
+    0%   { transform: translate(0,0)      scale(1);     }
+    14%  { transform: translate(-6px,2px) scale(1.004); }   /* the skip */
+    26%  { transform: translate(4px,-1px) scale(0.998); }
+    40%  { transform: translate(-2px,1px) scale(1);     }
+    100% { transform: translate(0,0)      scale(1);     }
+  }
+
+  /* RGB channel-split: the R/B ghosts fade in, slide apart, snap back */
+  .surface-shell.glitching .chan-r { animation: chanR 520ms ease-out 1; }
+  .surface-shell.glitching .chan-b { animation: chanB 520ms ease-out 1; }
+  @keyframes chanR {
+    0%   { opacity: 0; transform: translate(0,0); }
+    14%  { opacity: 0.9; transform: translate(-9px, 1px); }
+    34%  { opacity: 0.7; transform: translate(-5px, -1px); }
+    62%  { opacity: 0.35; transform: translate(-2px, 0); }
+    100% { opacity: 0; transform: translate(0,0); }
+  }
+  @keyframes chanB {
+    0%   { opacity: 0; transform: translate(0,0); }
+    14%  { opacity: 0.9; transform: translate(9px, -1px); }
+    34%  { opacity: 0.7; transform: translate(5px, 1px); }
+    62%  { opacity: 0.35; transform: translate(2px, 0); }
+    100% { opacity: 0; transform: translate(0,0); }
+  }
+
+  /* tear bars flash briefly with a slight horizontal shove */
+  .surface-shell.glitching .tear { animation: tearShove 520ms steps(1,end) 1; }
+  @keyframes tearShove {
+    0%   { opacity: 0;   transform: translateX(0); }
+    14%  { opacity: 1;   transform: translateX(-7px); }
+    26%  { opacity: 0.8; transform: translateX(5px); }
+    40%  { opacity: 0.5; transform: translateX(-2px); }
+    100% { opacity: 0;   transform: translateX(0); }
+  }
+
+  /* the frame-echo of the OUTGOING scene lingers, then fades */
+  .surface-shell.glitching .echo { animation: echoLinger 520ms ease-out 1; }
+  @keyframes echoLinger {
+    0%   { opacity: 0.55; transform: translate(3px,0) scale(1.01); }
+    30%  { opacity: 0.4;  transform: translate(-2px,0) scale(1.006); }
+    100% { opacity: 0;    transform: translate(0,0) scale(1); }
+  }
+
+  /* the incoming memory SNAPS in: a hard cut to full presence at mid-glitch,
+     then a tiny settle. No slow fade — it arrives like it was always there. */
+  .surface-shell.glitching .base { animation: snapIn 520ms ease-out 1; }
+  @keyframes snapIn {
+    0%   { opacity: 0.0; filter: brightness(1.8) contrast(1.4); transform: scale(1.012); }
+    13%  { opacity: 0.0; }
+    14%  { opacity: 1;   filter: brightness(1.5) contrast(1.3); transform: scale(1.008); } /* SNAP */
+    30%  { opacity: 1;   filter: brightness(1.06) contrast(1.04); transform: scale(1); }
+    100% { opacity: 1;   filter: brightness(1) contrast(1); transform: scale(1); }
+  }
+  /* between events the present scene just sits, fully present and stable */
+  .layer.base { opacity: 1; }
+
+  /* a barely-there "déjà-vu shimmer" idle on the surface so it feels alive
+     without ever flashing — a slow, low-contrast luminance breath */
+  .surface { animation: idleBreath 12s ease-in-out infinite; }
+  @keyframes idleBreath {
+    0%,100% { filter: brightness(1); }
+    50%     { filter: brightness(1.025); }
+  }
+
+  /* ====================================================================
+     PAGE BODY
+     ==================================================================== */
+  section { position: relative; z-index: 2; }
+  .panel { padding: 6rem 0; }
+  .panel h2 {
+    font-size: clamp(1.5rem, 3vw, 2.1rem);
+    font-weight: 600; margin: 0 0 0.8rem; letter-spacing: -0.01em;
+  }
+  .panel .sub { color: var(--ink-soft); max-width: 62ch; margin: 0 0 2.8rem; font-size: 1.05rem; }
+
+  .surfaces { display: grid; grid-template-columns: repeat(auto-fit, minmax(248px, 1fr)); gap: 1.1rem; }
+  .card {
+    padding: 1.6rem 1.5rem; border-radius: 16px;
+    border: 1px solid var(--glass-edge);
+    background: var(--glass);
+    backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+    opacity: 0; transform: translateY(22px);
+    transition: opacity .9s ease, transform .9s ease, border-color .4s ease, box-shadow .4s ease;
+  }
+  .card.surfaced { opacity: 1; transform: translateY(0); }
+  .card:hover { border-color: var(--accent); box-shadow: 0 0 30px -10px oklch(80% 0.16 200 / 0.5); }
+  .card h3 { font-size: 1.05rem; margin: 0 0 0.4rem; display: flex; align-items: center; gap: 0.55rem; }
+  .card p { margin: 0; color: var(--ink-soft); font-size: 0.94rem; }
+  .card .ic { width: 22px; height: 22px; flex: none; color: var(--accent); }
+
+  .truth { display: grid; gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 16px; overflow: hidden; }
+  .truth-row { display: grid; grid-template-columns: 200px 1fr; gap: 1.4rem; padding: 1.3rem 1.5rem; background: oklch(15% 0.02 270 / 0.85); }
+  .truth-row dt { color: var(--ink); font-weight: 600; font-size: 0.96rem; }
+  .truth-row dd { margin: 0; color: var(--ink-soft); font-size: 0.96rem; }
+  .truth-row code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.86em; color: var(--ink); }
+  @media (max-width: 620px) { .truth-row { grid-template-columns: 1fr; gap: 0.3rem; } }
+
+  .agent-card {
+    border: 1px solid var(--glass-edge); background: var(--glass);
+    backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+    border-radius: 18px; padding: 2.2rem;
+  }
+  pre {
+    margin: 1.2rem 0 0; padding: 1rem 1.2rem;
+    background: oklch(9% 0.012 270); border: 1px solid var(--line); border-radius: 12px;
+    overflow-x: auto; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.88rem; color: var(--ink-soft);
+  }
+  pre .c { color: var(--ink-faint); }
+  pre .k { color: var(--accent); }
+
+  footer { position: relative; z-index: 2; border-top: 1px solid var(--line); padding: 3rem 0 4rem; color: var(--ink-faint); font-size: 0.9rem; }
+  .foot-links { display: flex; flex-wrap: wrap; gap: 1.6rem; margin-bottom: 1.4rem; }
+  .foot-note { max-width: 62ch; line-height: 1.7; }
+
+  /* ====================================================================
+     prefers-reduced-motion — CRITICAL FOR PHOTOSENSITIVITY.
+     The scene is shown CLEAN and STABLE. No glitch, no channel-split,
+     no tear, no flashing, no idle breath, no skip. Just one remembered
+     scene, fully present. The JS sequencer is disabled entirely.
+     ==================================================================== */
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    .eyebrow .spark { animation: none; opacity: 0.9; }
+    .surface { animation: none !important; filter: none !important; }
+    .layer.base { opacity: 1 !important; }
+    .layer.chan-r, .layer.chan-b, .echo, .tear {
+      display: none !important; opacity: 0 !important; animation: none !important;
+    }
+    .surface-shell.glitching .surface,
+    .surface-shell.glitching .base,
+    .surface-shell.glitching .chan-r,
+    .surface-shell.glitching .chan-b,
+    .surface-shell.glitching .tear,
+    .surface-shell.glitching .echo { animation: none !important; }
+    .card { opacity: 1; transform: none; transition: none; }
+    .btn { transition: none; }
+  }
+</style>
+</head>
+<body>
+
+<!-- =================== THE STAGE =================== -->
+<header class="stage" aria-label="The present coding surface briefly stutters, and a remembered coding scene snaps into place like déjà vu">
+
+  <!-- SVG filters for tinting the R/B ghost channels -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <defs>
+      <filter id="tintR"><feColorMatrix type="matrix" values="1 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 1 0"/></filter>
+      <filter id="tintB"><feColorMatrix type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 1 0 0  0 0 0 1 0"/></filter>
+    </defs>
+  </svg>
+
+  <!-- the present surface; channel layers + echo + tear get scenes injected -->
+  <div class="surface-shell" id="shell" aria-hidden="true">
+    <figure class="surface" id="surface">
+      <div class="echo"  id="echo"></div>
+      <div class="layer chan-r" id="chanR"></div>
+      <div class="layer chan-b" id="chanB"></div>
+      <div class="layer base"  id="base"></div>
+      <div class="tear" id="tear"></div>
+      <figcaption class="scene-label" id="label"></figcaption>
+    </figure>
+  </div>
+
+  <div class="wrap">
+    <div class="stage-copy">
+      <p class="eyebrow"><span class="spark" aria-hidden="true"></span> Memex · associative memory</p>
+      <h1>Wait — <span class="accent">haven't you been here before?</span></h1>
+      <p class="lede">
+        You're deep in something new with Claude Code or Codex, and the surface skips a
+        groove. For a flickering instant the present stutters — and a coding moment you
+        never wrote down snaps into place, vivid, as if you'd lived it already. That's
+        recall arriving on its own, the way déjà vu does.
+      </p>
+      <div class="actions">
+        <a class="btn btn-primary" href="https://github.com/Two-Weeks-Team/memex">View the repository</a>
+        <a class="btn" href="https://two-weeks-team.github.io/memex/">Open the live landing</a>
+      </div>
+      <p class="stage-foot" id="stageFoot" role="status" aria-live="polite">A remembered moment is about to skip into place…</p>
+    </div>
+  </div>
+</header>
+
+<!-- =================== WHAT SURFACES =================== -->
+<section class="panel" aria-labelledby="surfaces-h">
+  <div class="wrap">
+    <h2 id="surfaces-h">The ways a memory skips back into the present</h2>
+    <p class="sub">
+      Each surface is a different groove for a dormant session to skip into — by time,
+      by meaning, by distance, or before you even think to ask.
+    </p>
+    <div class="surfaces" id="cards">
+      <div class="card">
+        <h3><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>Time Machine</h3>
+        <p>Replay a session as it unfolded — step back through how a thought actually came together.</p>
+      </div>
+      <div class="card">
+        <h3><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4-4"/></svg>Lens</h3>
+        <p>Named-vector weighted search. Tilt the field toward a meaning and watch related memories lean in.</p>
+      </div>
+      <div class="card">
+        <h3><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="6" cy="6" r="2.4"/><circle cx="18" cy="8" r="2.4"/><circle cx="9" cy="18" r="2.4"/><path d="M7.6 7.6 16 9M8 16l8.4-6.2"/></svg>Topology</h3>
+        <p>A distance matrix becomes a minimum-spanning-tree graph — the shape of how your work connects.</p>
+      </div>
+      <div class="card">
+        <h3><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M5 12h6M13 12h6"/><circle cx="5" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>Mix &amp; Discovery</h3>
+        <p>Pull toward what you like, push away what you don't. Recommendations follow the gradient.</p>
+      </div>
+      <div class="card">
+        <h3><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 3a6 6 0 0 0-6 6c0 3 2 4 2 7h8c0-3 2-4 2-7a6 6 0 0 0-6-6Z"/><path d="M10 19h4"/></svg>Proactive Recall</h3>
+        <p>When your current context resembles a past one, the older scene skips back in before you go looking.</p>
+      </div>
+      <div class="card">
+        <h3><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M9 9h6M9 13h6M9 17h3"/></svg>Companion · Wrapped · Loop Breaker</h3>
+        <p>An agent-memory layer that reflects patterns back, sums up where you've been, and flags loops you keep falling into.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- =================== THE HONEST GROUND =================== -->
+<section class="panel" aria-labelledby="truth-h">
+  <div class="wrap">
+    <h2 id="truth-h">What Memex actually is</h2>
+    <p class="sub">No magic claimed. Here is the plain shape of the thing.</p>
+    <dl class="truth">
+      <div class="truth-row">
+        <dt>The corpus</dt>
+        <dd>Your Claude Code / Codex session history (<code>~/.claude/projects/**/*.jsonl</code>), legacy transcripts, and <code>history.jsonl</code> — a record you own.</dd>
+      </div>
+      <div class="truth-row">
+        <dt>LLM-free at runtime</dt>
+        <dd>Recall runs on vector similarity, not a live model. No chatbot in the loop when a scene skips back.</dd>
+      </div>
+      <div class="truth-row">
+        <dt>Backed by Qdrant</dt>
+        <dd>History becomes a navigable spatial memory in a Qdrant vector store — you travel it by similarity, not keywords.</dd>
+      </div>
+      <div class="truth-row">
+        <dt>Why it exists</dt>
+        <dd>Claude Code silently migrates and deletes old sessions. Memex preserves the corpus and lets you return to it.</dd>
+      </div>
+      <div class="truth-row">
+        <dt>Built for</dt>
+        <dd>Qdrant Vector Space Day 2026 — <em>"Think Outside the Bot."</em></dd>
+      </div>
+    </dl>
+  </div>
+</section>
+
+<!-- =================== AGENT INTEGRATION =================== -->
+<section class="panel" aria-labelledby="agent-h">
+  <div class="wrap">
+    <h2 id="agent-h">It lives inside your agents</h2>
+    <p class="sub">
+      11 MCP tools over stdio + HTTP — works in Claude Code, Codex, and Cursor. A
+      server / Docker variant runs Qdrant, the web UI, and MCP together in one image.
+    </p>
+    <div class="agent-card">
+      <p style="margin:0;color:var(--ink-soft);">Add the memory layer to Claude Code:</p>
+<pre><span class="c"># register the Memex MCP server (stdio)</span>
+<span class="k">claude mcp add</span> memex -- memex-mcp
+
+<span class="c"># or run the all-in-one server / Docker variant</span>
+<span class="c"># (Qdrant + web + MCP in a single image)</span></pre>
+      <p style="margin:1.4rem 0 0;color:var(--ink-soft);font-size:0.94rem;">
+        The 11 tools let an agent recall, replay, and connect across your own history —
+        so the thread you had three weeks ago can skip back into the work you're doing
+        right now. See the
+        <a href="https://github.com/Two-Weeks-Team/memex">repository</a>
+        for the tool list and the server variant.
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- =================== FOOTER =================== -->
+<footer>
+  <div class="wrap">
+    <div class="foot-links">
+      <a href="https://github.com/Two-Weeks-Team/memex">Repository</a>
+      <a href="https://two-weeks-team.github.io/memex/">Live landing</a>
+      <a href="https://github.com/Two-Weeks-Team/memex">Server / Docker variant</a>
+      <a href="https://github.com/Two-Weeks-Team/memex">MCP integration · 11 tools</a>
+    </div>
+    <p class="foot-note">
+      Memex is a non-chatbot tool that turns your agent session history into a spatial,
+      associative memory — inspired by Vannevar Bush's 1945 essay and its idea of
+      associative trails. Built for Qdrant Vector Space Day 2026.
+    </p>
+  </div>
+</footer>
+
+<script>
+(function () {
+  "use strict";
+
+  var reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  /* ------------------------------------------------------------------
+     The scenes — each a vivid tableau of a remembered coding moment,
+     drawn entirely in hand-authored SVG. These are full SCENES that
+     SNAP into place through the glitch, never text snippets, never a
+     chat/feed/terminal. One "present" scene + several memories.
+     ------------------------------------------------------------------ */
+  var W = 800, H = 500;
+
+  function frame(inner, aria) {
+    return '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="' + aria + '">'
+      + '<defs>'
+      + '  <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">'
+      + '    <stop offset="0%" stop-color="oklch(18% 0.03 265)"/>'
+      + '    <stop offset="100%" stop-color="oklch(11% 0.018 270)"/>'
+      + '  </linearGradient>'
+      + '  <radialGradient id="glow" cx="50%" cy="42%" r="70%">'
+      + '    <stop offset="0%" stop-color="oklch(80% 0.14 200)" stop-opacity="0.5"/>'
+      + '    <stop offset="100%" stop-color="oklch(40% 0.08 240)" stop-opacity="0"/>'
+      + '  </radialGradient>'
+      + '</defs>'
+      + '<rect x="0" y="0" width="' + W + '" height="' + H + '" fill="url(#sky)"/>'
+      + inner
+      + '</svg>';
+  }
+
+  /* ---- PRESENT: where you are now — a calm, current desk surface ---- */
+  function scenePresent() {
+    return frame(''
+      + '<ellipse cx="400" cy="230" rx="380" ry="250" fill="url(#glow)" opacity="0.5"/>'
+      // a desk lit cool, a laptop open with a fresh, near-empty editor
+      + '<rect x="150" y="350" width="500" height="16" rx="4" fill="oklch(28% 0.02 250)"/>'
+      + '<rect x="270" y="170" width="260" height="170" rx="10" fill="oklch(16% 0.02 250)" stroke="oklch(50% 0.04 250)" stroke-width="2"/>'
+      + '<rect x="282" y="182" width="236" height="146" rx="6" fill="oklch(20% 0.03 240)"/>'
+      // a cursor blinking on an almost-empty file (the "now")
+      + '<rect x="300" y="206" width="120" height="7" rx="3" fill="oklch(60% 0.04 240)" opacity="0.5"/>'
+      + '<rect x="300" y="226" width="60" height="7" rx="3" fill="oklch(60% 0.04 240)" opacity="0.35"/>'
+      + '<rect x="366" y="224" width="3" height="11" fill="oklch(80% 0.14 200)"/>'
+      // laptop hinge + cool ambient
+      + '<rect x="262" y="340" width="276" height="12" rx="3" fill="oklch(22% 0.02 250)"/>'
+      , 'The present: a fresh editor open, the cursor blinking on a nearly empty file — the moment before recall arrives');
+  }
+
+  /* ---- MEMORY 1: the night a flaky retry test finally went green ---- */
+  function sceneGreen() {
+    return frame(''
+      + '<ellipse cx="400" cy="230" rx="380" ry="250" fill="url(#glow)" opacity="0.35"/>'
+      + '<rect x="150" y="350" width="500" height="16" rx="4" fill="oklch(28% 0.02 250)"/>'
+      + '<rect x="262" y="160" width="276" height="186" rx="10" fill="oklch(16% 0.02 250)" stroke="oklch(52% 0.04 250)" stroke-width="2"/>'
+      + '<rect x="274" y="172" width="252" height="162" rx="6" fill="oklch(20% 0.03 230)"/>'
+      // green-passing test block + a checkmark
+      + '<rect x="292" y="190" width="150" height="8" rx="4" fill="oklch(70% 0.05 230)" opacity="0.5"/>'
+      + '<rect x="292" y="208" width="200" height="8" rx="4" fill="oklch(70% 0.05 230)" opacity="0.4"/>'
+      + '<rect x="292" y="250" width="218" height="40" rx="8" fill="oklch(70% 0.17 150)" opacity="0.28"/>'
+      + '<path d="M310 270 l12 12 l24 -26" fill="none" stroke="oklch(86% 0.18 150)" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>'
+      + '<rect x="356" y="264" width="140" height="11" rx="5" fill="oklch(86% 0.16 150)" opacity="0.7"/>'
+      // mug + steam
+      + '<rect x="566" y="306" width="44" height="40" rx="6" fill="oklch(40% 0.06 40)"/>'
+      + '<path d="M610 314 q20 6 0 24" fill="none" stroke="oklch(45% 0.05 40)" stroke-width="6"/>'
+      + '<path d="M582 302 q-8 -20 6 -36 q9 -13 0 -26" fill="none" stroke="oklch(80% 0.06 200)" stroke-width="3" opacity="0.3" stroke-linecap="round"/>'
+      , 'A late-night monitor: a test block lit green with a bright checkmark, a coffee mug steaming beside it');
+  }
+
+  /* ---- MEMORY 2: the whiteboard where the architecture clicked ---- */
+  function sceneBoard() {
+    return frame(''
+      + '<ellipse cx="400" cy="230" rx="380" ry="250" fill="url(#glow)" opacity="0.3"/>'
+      + '<rect x="190" y="120" width="420" height="250" rx="8" fill="oklch(90% 0.01 90)" opacity="0.9"/>'
+      + '<rect x="190" y="120" width="420" height="250" rx="8" fill="none" stroke="oklch(58% 0.03 250)" stroke-width="3"/>'
+      + '<g stroke="oklch(30% 0.10 250)" stroke-width="3" fill="oklch(70% 0.10 250)" fill-opacity="0.18">'
+      + '  <rect x="225" y="158" width="92" height="48" rx="6"/>'
+      + '  <rect x="354" y="158" width="92" height="48" rx="6"/>'
+      + '  <rect x="483" y="158" width="92" height="48" rx="6"/>'
+      + '  <rect x="290" y="270" width="120" height="52" rx="6"/>'
+      + '</g>'
+      + '<g stroke="oklch(35% 0.10 250)" stroke-width="3" fill="none" stroke-linecap="round">'
+      + '  <path d="M317 182 h33"/>'
+      + '  <path d="M446 182 h33"/>'
+      + '  <path d="M271 206 q0 40 60 60"/>'
+      + '  <path d="M529 206 q0 40 -90 62"/>'
+      + '</g>'
+      + '<path d="M350 182 l-9 -5 v10 z" fill="oklch(35% 0.10 250)"/>'
+      + '<path d="M479 182 l-9 -5 v10 z" fill="oklch(35% 0.10 250)"/>'
+      + '<ellipse cx="350" cy="296" rx="74" ry="34" fill="none" stroke="oklch(62% 0.20 35)" stroke-width="4"/>'
+      + '<text x="350" y="303" font-family="ui-monospace, Menlo, monospace" font-size="20" fill="oklch(45% 0.18 35)" text-anchor="middle">Qdrant</text>'
+      , 'A whiteboard system diagram: boxes and arrows, with the word Qdrant circled in warm marker — the moment the architecture clicked');
+  }
+
+  /* ---- MEMORY 3: the tangle where one bright thread traced clear ---- */
+  function sceneThread() {
+    return frame(''
+      + '<ellipse cx="400" cy="240" rx="360" ry="220" fill="url(#glow)" opacity="0.4"/>'
+      + '<g stroke="oklch(52% 0.04 250)" stroke-width="2" fill="none" opacity="0.4" stroke-linecap="round">'
+      + '  <path d="M210 300 C 280 180, 360 360, 430 220 S 560 300, 600 200"/>'
+      + '  <path d="M230 240 C 300 320, 380 180, 460 320 S 540 200, 610 280"/>'
+      + '  <path d="M200 260 C 290 240, 350 300, 440 240 S 560 260, 600 240"/>'
+      + '  <path d="M250 320 C 320 220, 400 300, 470 200 S 540 320, 590 230"/>'
+      + '</g>'
+      + '<path d="M196 280 C 300 270, 360 250, 430 248 S 560 245, 612 244" fill="none" stroke="oklch(82% 0.16 200)" stroke-width="5" stroke-linecap="round" opacity="0.95"/>'
+      + '<circle cx="196" cy="280" r="9" fill="oklch(82% 0.16 200)"/>'
+      + '<circle cx="430" cy="248" r="11" fill="oklch(85% 0.16 195)"/>'
+      + '<circle cx="612" cy="244" r="9" fill="oklch(82% 0.16 200)"/>'
+      + '<circle cx="430" cy="248" r="30" fill="oklch(82% 0.16 200)" opacity="0.18"/>'
+      , 'A spotlit tangle of faint threads with one bright thread tracing a clear path through the knot — the moment a bug came clear');
+  }
+
+  var present = { svg: scenePresent };
+  var memories = [
+    { svg: sceneGreen,  label: 'The night that flaky retry test finally turned <b>green</b>.' },
+    { svg: sceneBoard,  label: 'The whiteboard where the architecture <b>clicked</b>.' },
+    { svg: sceneThread, label: 'The tangle where the bug <b>came clear</b>.' }
+  ];
+
+  var shell   = document.getElementById('shell');
+  var baseEl  = document.getElementById('base');
+  var rEl     = document.getElementById('chanR');
+  var bEl     = document.getElementById('chanB');
+  var echoEl  = document.getElementById('echo');
+  var labelEl = document.getElementById('label');
+  var footEl  = document.getElementById('stageFoot');
+
+  // paint a scene onto the three channel layers (same SVG, offset by CSS)
+  function paintBase(scene) {
+    var svg = scene.svg();
+    baseEl.innerHTML = svg;
+    rEl.innerHTML = svg;
+    bEl.innerHTML = svg;
+  }
+
+  /* ---------------- reduced motion: clean, stable, NO glitch ----------------
+     Show ONE memory scene, fully present, no flashing whatsoever. This is
+     the photosensitive-safe path and is mandatory per the brief. ---------- */
+  if (reduceMotion) {
+    paintBase(memories[0]);
+    labelEl.innerHTML = memories[0].label;
+    footEl.textContent = 'A scene from your own history, shown still.';
+  } else {
+    // Start on the PRESENT, stable.
+    paintBase(present);
+    labelEl.innerHTML = '<span class="now">Where you are now.</span>';
+
+    var idx = 0;          // which memory comes next
+    var showingMemory = false;
+    var timer = null;
+
+    /* one glitch event: split → tear → the memory SNAPS into place.
+       Brief (~520ms), controlled, no strobing. The echo carries the
+       OUTGOING scene for one beat so the swap reads as a "skip". */
+    function skip(toScene, label) {
+      // capture the currently-shown scene into the echo (frame-echo)
+      echoEl.innerHTML = baseEl.innerHTML;
+      // load the incoming scene onto base + channel ghosts
+      paintBase(toScene);
+      if (label) labelEl.innerHTML = label;
+
+      // retrigger the glitch animations cleanly
+      shell.classList.remove('glitching');
+      void shell.offsetWidth; // reflow
+      shell.classList.add('glitching');
+
+      footEl.textContent = label
+        ? 'A remembered moment skipped into place.'
+        : 'Back to where you are now.';
+    }
+
+    // irregular, lifelike cadence — recall doesn't arrive on a metronome
+    function nextDelay() {
+      // memory lingers a touch; present sits a bit longer before the skip
+      return showingMemory
+        ? 2600 + Math.random() * 900   // how long a memory stays
+        : 3200 + Math.random() * 1700; // how long the present sits, then skips
+    }
+
+    function tick() {
+      if (showingMemory) {
+        // skip back to the present
+        skip(present, '<span class="now">Where you are now.</span>');
+        showingMemory = false;
+      } else {
+        // a memory skips in
+        var m = memories[idx];
+        idx = (idx + 1) % memories.length;
+        skip(m, m.label);
+        showingMemory = true;
+      }
+      timer = setTimeout(tick, nextDelay());
+    }
+
+    // only run while the stage is on screen (kind to the laptop)
+    var running = false;
+    function start() {
+      if (running) return;
+      running = true;
+      timer = setTimeout(tick, 1800 + Math.random() * 700);
+    }
+    function stop() {
+      running = false;
+      if (timer) { clearTimeout(timer); timer = null; }
+    }
+
+    if ('IntersectionObserver' in window) {
+      var io = new IntersectionObserver(function (ents) {
+        ents.forEach(function (e) {
+          if (e.isIntersecting) start();
+          else stop();
+        });
+      }, { threshold: 0.2 });
+      io.observe(document.querySelector('.stage'));
+    } else {
+      start();
+    }
+
+    // pause the skips when the tab is hidden
+    document.addEventListener('visibilitychange', function () {
+      if (document.hidden) stop();
+      else if (document.querySelector('.stage')) start();
+    });
+  }
+
+  /* ---- surfacing cards on scroll (latent → present) ---- */
+  var cards = document.querySelectorAll('.card');
+  if (reduceMotion || !('IntersectionObserver' in window)) {
+    cards.forEach(function (c) { c.classList.add('surfaced'); });
+  } else {
+    var cio = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e, i) {
+        if (e.isIntersecting) {
+          var el = e.target;
+          setTimeout(function () { el.classList.add('surfaced'); }, i * 90);
+          cio.unobserve(el);
+        }
+      });
+    }, { threshold: 0.18 });
+    cards.forEach(function (c) { cio.observe(c); });
+  }
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,552 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Memex — the lesson you already paid for, returned for free</title>
+<style>
+  /* ---- OKLCH palette (2026), graceful sRGB fallback via @supports ----------- */
+  :root {
+    --bg: #0e0f12;
+    --panel: #16181d;
+    --line: #2a2d35;
+    --ink: #e7e9ee;
+    --ink-dim: #9aa0ad;
+    --ink-faint: #6b7280;
+    --accent: #7fd6c2;        /* "free / paid-off" green-teal */
+    --accent-warm: #e7b35a;   /* "the cost you already paid"  */
+    --tag: #1c2730;
+    --grid: #1b1d23;
+  }
+  @supports (color: oklch(0.5 0.1 200)) {
+    :root {
+      --bg: oklch(0.18 0.012 270);
+      --panel: oklch(0.22 0.014 270);
+      --line: oklch(0.32 0.016 270);
+      --ink: oklch(0.93 0.01 250);
+      --ink-dim: oklch(0.72 0.02 255);
+      --ink-faint: oklch(0.56 0.02 258);
+      --accent: oklch(0.82 0.10 175);
+      --accent-warm: oklch(0.80 0.12 75);
+      --tag: oklch(0.28 0.03 215);
+      --grid: oklch(0.24 0.012 270);
+    }
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+  }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    line-height: 1.5;
+    /* faint blueprint grid — this is a wireframe, on purpose */
+    background-image:
+      linear-gradient(var(--grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+    background-size: 28px 28px;
+  }
+
+  a { color: var(--accent); text-decoration: none; }
+  a:hover, a:focus-visible { text-decoration: underline; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  .wrap { max-width: 940px; margin: 0 auto; padding: 0 20px; }
+
+  /* skip link */
+  .skip {
+    position: absolute; left: -999px; top: 0;
+    background: var(--accent); color: #000; padding: 8px 12px; z-index: 50;
+  }
+  .skip:focus { left: 8px; top: 8px; }
+
+  /* ---- header ------------------------------------------------------------ */
+  header {
+    border-bottom: 1px dashed var(--line);
+    background: rgba(14,15,18,0.78);
+    backdrop-filter: blur(4px);
+    position: sticky; top: 0; z-index: 20;
+  }
+  .bar { display: flex; align-items: center; gap: 14px; padding: 12px 0; flex-wrap: wrap; }
+  .logo { font-weight: 700; letter-spacing: 0.04em; }
+  .logo b { color: var(--accent); }
+  .bar nav { margin-left: auto; display: flex; gap: 16px; font-size: 13px; }
+  .bar nav a { color: var(--ink-dim); }
+
+  /* ---- the running-total receipt chip ----------------------------------- */
+  .runtime-chip {
+    display: inline-flex; align-items: baseline; gap: 8px;
+    border: 1px solid var(--line); border-radius: 4px;
+    padding: 4px 10px; font-size: 12px; color: var(--ink-dim);
+  }
+  .runtime-chip b { color: var(--accent); font-size: 13px; }
+
+  /* ---- generic section --------------------------------------------------- */
+  section { padding: 56px 0; border-bottom: 1px dashed var(--line); }
+  h1 { font-size: clamp(28px, 5vw, 46px); line-height: 1.12; margin: 0 0 18px; letter-spacing: -0.01em; }
+  h1 .free { color: var(--accent); }
+  h1 .paid { color: var(--accent-warm); }
+  h2 { font-size: clamp(20px, 3vw, 28px); margin: 0 0 8px; }
+  .lede { color: var(--ink-dim); font-size: 17px; max-width: 62ch; }
+  .kicker { color: var(--ink-faint); font-size: 12px; letter-spacing: 0.18em; text-transform: uppercase; margin: 0 0 14px; }
+
+  /* a "cost sticker" — the signature P04 device */
+  .sticker {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 11px; letter-spacing: 0.04em;
+    border: 1px solid var(--line); border-radius: 3px;
+    padding: 2px 7px; color: var(--ink-dim);
+    background: var(--tag);
+    white-space: nowrap;
+  }
+  .sticker.zero { color: var(--accent); border-color: color-mix(in oklab, var(--accent) 40%, var(--line)); }
+  .sticker.paid { color: var(--accent-warm); border-color: color-mix(in oklab, var(--accent-warm) 40%, var(--line)); }
+
+  /* ---- the autonomous-recall console (the centerpiece) ------------------- */
+  .console {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 0;
+    border: 1px solid var(--line); border-radius: 6px; overflow: hidden;
+    background: var(--panel); margin-top: 28px;
+  }
+  @media (max-width: 760px) { .console { grid-template-columns: 1fr; } }
+
+  .pane { padding: 18px; }
+  .pane.left { border-right: 1px dashed var(--line); }
+  @media (max-width: 760px) { .pane.left { border-right: none; border-bottom: 1px dashed var(--line); } }
+
+  .pane h3 {
+    margin: 0 0 4px; font-size: 12px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--ink-faint);
+    display: flex; align-items: center; gap: 8px;
+  }
+  .pane .sub { color: var(--ink-faint); font-size: 11px; margin: 0 0 14px; }
+
+  /* the live "what you're doing right now" line */
+  .nowline {
+    font-size: 15px; color: var(--ink);
+    min-height: 3.4em;
+  }
+  .nowline .you { color: var(--ink-faint); }
+  .cursor { display: inline-block; width: 8px; background: var(--accent); animation: blink 1s steps(1) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+  @media (prefers-reduced-motion: reduce) { .cursor { animation: none; } }
+
+  .pulse {
+    margin-top: 16px; font-size: 11px; color: var(--ink-faint);
+    display: flex; align-items: center; gap: 8px;
+  }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+  .dot.live { animation: throb 2.4s ease-in-out infinite; }
+  @keyframes throb { 0%,100% { opacity: 0.35; } 50% { opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) { .dot.live { animation: none; opacity: 1; } }
+
+  /* the surfaced-memory cards rise here, on their own */
+  .recall-stack { display: flex; flex-direction: column; gap: 12px; min-height: 220px; }
+  .recall {
+    border: 1px solid var(--line); border-radius: 5px; padding: 12px 14px;
+    background: color-mix(in oklab, var(--accent) 7%, var(--panel));
+    border-left: 3px solid var(--accent);
+  }
+  /* entrance: the memory ARRIVES — it isn't fetched */
+  .recall {
+    opacity: 0; transform: translateY(8px);
+    animation: arrive 520ms cubic-bezier(.2,.7,.3,1) forwards;
+  }
+  @keyframes arrive { to { opacity: 1; transform: none; } }
+  @media (prefers-reduced-motion: reduce) {
+    .recall { animation: none; opacity: 1; transform: none; }
+  }
+  .recall .top { display: flex; align-items: center; gap: 8px; justify-content: space-between; margin-bottom: 6px; }
+  .recall .when { font-size: 10px; color: var(--ink-faint); letter-spacing: 0.04em; }
+  .recall .body { font-size: 13.5px; color: var(--ink); }
+  .recall .why { font-size: 11px; color: var(--ink-dim); margin-top: 7px; }
+  .recall .why b { color: var(--accent); font-weight: 600; }
+
+  .empty-note { color: var(--ink-faint); font-size: 12px; font-style: italic; }
+
+  /* ---- ledger / numbers grid -------------------------------------------- */
+  .ledger { width: 100%; border-collapse: collapse; margin-top: 22px; font-size: 14px; }
+  .ledger caption { text-align: left; color: var(--ink-faint); font-size: 12px; margin-bottom: 8px; }
+  .ledger th, .ledger td { text-align: left; padding: 10px 12px; border-bottom: 1px dashed var(--line); }
+  .ledger th { color: var(--ink-faint); font-weight: 500; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; }
+  .ledger td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .ledger td .ok { color: var(--accent); }
+  .ledger td .warm { color: var(--accent-warm); }
+  .ledger tr.total td { border-bottom: none; border-top: 1px solid var(--line); font-weight: 700; }
+
+  /* ---- 3-up spec cards --------------------------------------------------- */
+  .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 24px; }
+  @media (max-width: 760px) { .cards { grid-template-columns: 1fr; } }
+  .card { border: 1px solid var(--line); border-radius: 5px; padding: 16px; background: var(--panel); }
+  .card h3 { margin: 10px 0 6px; font-size: 15px; }
+  .card p { margin: 0; color: var(--ink-dim); font-size: 13px; }
+  .card .ico { color: var(--accent); }
+
+  /* ---- agent / mcp code block ------------------------------------------- */
+  pre {
+    background: #0b0c0f; border: 1px solid var(--line); border-radius: 5px;
+    padding: 14px 16px; overflow-x: auto; font-size: 13px; color: var(--ink);
+    margin: 16px 0 0;
+  }
+  pre .c { color: var(--ink-faint); }
+  pre .k { color: var(--accent); }
+
+  .pills { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+  .pill { border: 1px solid var(--line); border-radius: 3px; padding: 3px 9px; font-size: 11px; color: var(--ink-dim); background: var(--tag); }
+
+  /* ---- CTA --------------------------------------------------------------- */
+  .cta { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 24px; }
+  .btn {
+    border: 1px solid var(--accent); border-radius: 4px; padding: 11px 18px;
+    color: var(--accent); font-size: 14px; background: transparent;
+  }
+  .btn.primary { background: var(--accent); color: #06120f; font-weight: 700; }
+  .btn:hover, .btn:focus-visible { text-decoration: none; filter: brightness(1.08); }
+
+  footer { padding: 34px 0 60px; color: var(--ink-faint); font-size: 13px; }
+  footer .links { display: flex; gap: 18px; flex-wrap: wrap; margin-bottom: 10px; }
+  .note { color: var(--ink-faint); font-size: 12px; }
+  .mono-em { color: var(--accent-warm); }
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header>
+  <div class="wrap bar">
+    <span class="logo"><b>memex</b> · the lesson, returned</span>
+    <span class="runtime-chip" aria-label="Runtime cost of recall">
+      runtime recall cost <b>$0.00</b>
+    </span>
+    <nav aria-label="Primary">
+      <a href="#how">how</a>
+      <a href="#ledger">ledger</a>
+      <a href="#agent">agent</a>
+      <a href="https://github.com/Two-Weeks-Team/memex">repo</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+
+  <!-- ===================== HERO ===================== -->
+  <section aria-labelledby="hero-h">
+    <div class="wrap">
+      <p class="kicker">cost-conscious lens · paid once, returned free</p>
+      <h1 id="hero-h">
+        You already paid to learn this.<br />
+        It comes back <span class="free">for free</span> —
+        <span class="paid">on its own.</span>
+      </h1>
+      <p class="lede">
+        Every hard-won lesson cost you something the first time: an afternoon lost to a
+        retry loop, a migration that bit you, a flag you finally found at 1am. Memex doesn't
+        make you re-pay. The lesson <em>resurfaces unbidden</em> the next time the situation
+        calls for it — no re-searching, no re-asking, no model spend at the moment it lands.
+      </p>
+
+      <!-- The autonomous-recall console: the situation evokes the memory. -->
+      <div class="console" aria-label="Live demonstration of autonomous recall">
+        <div class="pane left">
+          <h3>What you're doing now <span class="dot live" aria-hidden="true"></span></h3>
+          <p class="sub">a context the page is presenting — you are not driving this</p>
+          <p class="nowline" id="nowline" aria-live="polite" aria-atomic="true">
+            <span class="you">…</span><span class="cursor" aria-hidden="true">&nbsp;</span>
+          </p>
+          <p class="pulse">
+            <span class="dot" aria-hidden="true"></span>
+            recall runs locally, on its own cadence — nothing was typed or clicked
+          </p>
+        </div>
+        <div class="pane">
+          <h3>It rose to meet you <span class="sticker zero">$0 to retrieve</span></h3>
+          <p class="sub">past lessons arrive because the moment evoked them</p>
+          <div class="recall-stack" id="stack" aria-live="polite">
+            <p class="empty-note" id="empty">waiting for a moment that calls something up…</p>
+          </div>
+        </div>
+      </div>
+      <p class="note" style="margin-top:14px;">
+        The cards above arrive on their own timing. There is no search box and nothing to
+        click here — the memory comes to you, the way a forgotten fact returns mid-task.
+      </p>
+    </div>
+  </section>
+
+  <!-- ===================== HOW (no-recurring-cost framing) ===================== -->
+  <section id="how" aria-labelledby="how-h">
+    <div class="wrap">
+      <p class="kicker">why it stays $0/mo to run</p>
+      <h2 id="how-h">No chatbot. No model call at recall time. Your corpus, on your disk.</h2>
+      <p class="lede">
+        Memex is <strong>LLM-free at runtime</strong>: it reads your Claude Code / Codex
+        session history and turns it into a navigable associative memory. The expensive
+        thinking already happened when you lived through the work — Memex just keeps it and
+        hands it back.
+      </p>
+
+      <div class="cards">
+        <div class="card">
+          <span class="ico" aria-hidden="true">◇</span>
+          <span class="sticker zero">$0 at recall</span>
+          <h3>Surfaces, not searches</h3>
+          <p>
+            Proactive Recall watches your current context and lets the relevant past rise on
+            its own. You're the recipient — there's no query to write and no token to spend
+            when it lands.
+          </p>
+        </div>
+        <div class="card">
+          <span class="ico" aria-hidden="true">▦</span>
+          <span class="sticker zero">self-host</span>
+          <h3>Local Qdrant, you own it</h3>
+          <p>
+            History becomes a vector space backed by <strong>Qdrant</strong> — Time Machine,
+            Lens, Topology, Mix/Discovery. Run it on your machine or the one-image server /
+            Docker variant. No SaaS seat to keep paying for.
+          </p>
+        </div>
+        <div class="card">
+          <span class="ico" aria-hidden="true">⟲</span>
+          <span class="sticker paid">paid once</span>
+          <h3>Preserves what gets deleted</h3>
+          <p>
+            Claude Code silently migrates and drops old sessions. Memex keeps a corpus you
+            own from <code>~/.claude/projects/**/*.jsonl</code> + legacy transcripts, so the
+            lesson you bought stays bought.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== LEDGER (numbers-centric P04 device) ===================== -->
+  <section id="ledger" aria-labelledby="ledger-h">
+    <div class="wrap">
+      <p class="kicker">the accounting</p>
+      <h2 id="ledger-h">First time vs. every time after</h2>
+      <p class="lede">
+        A wireframe ledger, not a price chart. The point isn't a dollar figure we invented —
+        it's the shape of the cost: you pay once, in the doing, and recall after that is free.
+      </p>
+
+      <table class="ledger" id="ledger-table">
+        <caption>recall economics — qualitative, no invented metrics</caption>
+        <thead>
+          <tr>
+            <th scope="col">item</th>
+            <th scope="col">the first time</th>
+            <th scope="col" class="num">every time it returns</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>learning the lesson</td>
+            <td><span class="warm">paid in full</span> (your time)</td>
+            <td class="num"><span class="ok">$0</span></td>
+          </tr>
+          <tr>
+            <td>finding it again</td>
+            <td>you went and dug for it</td>
+            <td class="num"><span class="ok">it finds you</span></td>
+          </tr>
+          <tr>
+            <td>model spend at recall</td>
+            <td>—</td>
+            <td class="num"><span class="ok">$0 · LLM-free</span></td>
+          </tr>
+          <tr>
+            <td>where it lives</td>
+            <td>your sessions, scattered</td>
+            <td class="num"><span class="ok">local Qdrant, owned</span></td>
+          </tr>
+          <tr class="total">
+            <td>cost to keep it coming back</td>
+            <td>—</td>
+            <td class="num"><span class="ok">$0 / mo</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ===================== AGENT / MCP ===================== -->
+  <section id="agent" aria-labelledby="agent-h">
+    <div class="wrap">
+      <p class="kicker">it works where you work</p>
+      <h2 id="agent-h">Wire it into your agent — 11 MCP tools over stdio + HTTP</h2>
+      <p class="lede">
+        The recall layer plugs into Claude Code / Codex / Cursor so a returning lesson can
+        reach your agent the moment the situation calls it. Add it once:
+      </p>
+      <pre aria-label="Add Memex as an MCP server"><span class="c"># add memex to your agent (one time)</span>
+<span class="k">claude mcp add</span> memex -- memex-mcp
+
+<span class="c"># 11 tools become available over stdio + HTTP:</span>
+<span class="c"># time-machine · lens · topology · mix/discovery · proactive-recall …</span></pre>
+      <div class="pills" aria-label="Surfaces and layers">
+        <span class="pill">Time Machine</span>
+        <span class="pill">Lens (named-vector)</span>
+        <span class="pill">Topology (MST graph)</span>
+        <span class="pill">Mix / Discovery</span>
+        <span class="pill">Proactive Recall</span>
+        <span class="pill">Companion · Wrapped · Loop Breaker</span>
+      </div>
+      <p class="note" style="margin-top:16px;">
+        Built for <span class="mono-em">Qdrant Vector Space Day 2026 — “Think Outside the Bot.”</span>
+        Not a search box. Not a chatbot.
+      </p>
+
+      <div class="cta">
+        <a class="btn primary" href="https://github.com/Two-Weeks-Team/memex">Get it on GitHub</a>
+        <a class="btn" href="https://two-weeks-team.github.io/memex/">See the live landing</a>
+        <a class="btn" href="https://github.com/Two-Weeks-Team/memex#server--docker">Server / Docker variant</a>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="links">
+      <a href="https://github.com/Two-Weeks-Team/memex">repo</a>
+      <a href="https://two-weeks-team.github.io/memex/">live landing</a>
+      <a href="https://github.com/Two-Weeks-Team/memex#server--docker">server / docker</a>
+      <a href="#agent">mcp setup</a>
+    </div>
+    <p>
+      Memex · a non-chatbot, LLM-free-at-runtime memory over your own session history,
+      backed by Qdrant. The lesson you earned once, returned for free — on its own.
+    </p>
+    <p class="note">Vannevar Bush’s 1945 Memex + associative trails. You own the corpus.</p>
+  </div>
+</footer>
+
+<script>
+(function () {
+  "use strict";
+
+  // The whole interaction is AUTONOMOUS. The visitor never drives recall.
+  // A current "situation" plays out on its own cadence; when a situation lands,
+  // a past lesson RISES UNBIDDEN to meet it. No hover, no click, no search.
+
+  var nowline = document.getElementById("nowline");
+  var stack = document.getElementById("stack");
+  var empty = document.getElementById("empty");
+  var chip = document.querySelector(".runtime-chip b"); // stays $0.00 — it's free
+
+  // Each scene: a present-moment situation + the lesson it evokes from your past.
+  var scenes = [
+    {
+      now: "you're debugging an auth retry that keeps 429-ing…",
+      recall: {
+        when: "3 weeks ago · project: gateway",
+        body: "“the retry storm was us — we weren't honoring Retry-After, so backoff did nothing.”",
+        why: "surfaced because the situation matches: <b>auth · retry · 429</b>"
+      }
+    },
+    {
+      now: "you're about to write a fresh DB migration…",
+      recall: {
+        when: "last month · project: billing",
+        body: "“the migration locked the table in prod; we should add the column nullable first, backfill, then constrain.”",
+        why: "surfaced because the situation matches: <b>migration · prod · lock</b>"
+      }
+    },
+    {
+      now: "you're reaching for a flag you half-remember…",
+      recall: {
+        when: "an afternoon you'd rather forget",
+        body: "“it was --no-verify-ssl on the internal mirror — found it after two hours.”",
+        why: "surfaced because the situation matches: <b>internal mirror · ssl · flag</b>"
+      }
+    },
+    {
+      now: "you're wiring a webhook signature check again…",
+      recall: {
+        when: "two projects ago",
+        body: "“compare the raw body, not the parsed JSON — re-serialization broke the HMAC.”",
+        why: "surfaced because the situation matches: <b>webhook · hmac · raw body</b>"
+      }
+    }
+  ];
+
+  var reduceMotion = window.matchMedia &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  // ---- type the "current situation" line, char by char (it's not you typing —
+  // it's the page presenting a context). Then the memory arrives on its own. ----
+  function setNowLine(text, done) {
+    if (reduceMotion) {
+      nowline.innerHTML = '<span class="you">' + escapeHtml(text) +
+        '</span><span class="cursor" aria-hidden="true">&nbsp;</span>';
+      done();
+      return;
+    }
+    var i = 0;
+    nowline.innerHTML = '<span class="you" id="typed"></span><span class="cursor" aria-hidden="true">&nbsp;</span>';
+    var typed = document.getElementById("typed");
+    var t = setInterval(function () {
+      typed.textContent = text.slice(0, i++);
+      if (i > text.length) {
+        clearInterval(t);
+        done();
+      }
+    }, 34);
+  }
+
+  function escapeHtml(s) {
+    return s.replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+
+  function surface(recall) {
+    if (empty) { empty.style.display = "none"; }
+    var el = document.createElement("div");
+    el.className = "recall";
+    el.innerHTML =
+      '<div class="top"><span class="when">' + recall.when + '</span>' +
+      '<span class="sticker zero">already paid · $0</span></div>' +
+      '<div class="body">' + recall.body + '</div>' +
+      '<div class="why">' + recall.why + '</div>';
+    stack.insertBefore(el, stack.firstChild);
+    // keep at most 3 on screen — older ones quietly drop off
+    while (stack.querySelectorAll(".recall").length > 3) {
+      stack.removeChild(stack.lastElementChild);
+    }
+    // recall is free at runtime — the chip never moves off $0.00
+    if (chip) { chip.textContent = "$0.00"; }
+  }
+
+  var idx = 0;
+  function cycle() {
+    var scene = scenes[idx % scenes.length];
+    idx++;
+    setNowLine(scene.now, function () {
+      // small, lifelike pause before the memory rises — recognition has a beat
+      var pause = reduceMotion ? 250 : 700 + Math.random() * 600;
+      setTimeout(function () {
+        surface(scene.recall);
+        // irregular cadence before the next situation — not a metronome
+        var gap = reduceMotion ? 2600 : 3200 + Math.random() * 1800;
+        setTimeout(cycle, gap);
+      }, pause);
+    });
+  }
+
+  // start on its own once the page is interactive
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", cycle);
+  } else {
+    cycle();
+  }
+})();
+</script>
+</body>
+</html>

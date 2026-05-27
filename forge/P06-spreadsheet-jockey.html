@@ -1,0 +1,543 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Memex — the grid that remembers for you</title>
+<style>
+  /* ---- OKLCH palette (2026 dark, calm terminal-grid) ---- */
+  :root {
+    --bg:        oklch(0.17 0.018 265);
+    --bg-2:      oklch(0.21 0.02 265);
+    --panel:     oklch(0.24 0.022 265);
+    --grid-line: oklch(0.32 0.02 265);
+    --ink:       oklch(0.93 0.01 255);
+    --ink-dim:   oklch(0.70 0.015 255);
+    --ink-faint: oklch(0.55 0.013 255);
+    --accent:    oklch(0.78 0.16 195);   /* recall cyan */
+    --accent-2:  oklch(0.80 0.15 95);    /* warm amber for "rising" */
+    --hot:       oklch(0.72 0.18 25);
+    --row-rise:  oklch(0.30 0.05 195);
+    --link:      oklch(0.82 0.13 210);
+    --mono: ui-monospace, "SF Mono", "Cascadia Code", "JetBrains Mono", Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 14px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--link); text-decoration: none; }
+  a:hover, a:focus-visible { text-decoration: underline; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .wrap { max-width: 1240px; margin: 0 auto; padding: 0 18px; }
+  .skip {
+    position: absolute; left: -999px; top: 0;
+    background: var(--accent); color: var(--bg); padding: 8px 12px; border-radius: 6px;
+  }
+  .skip:focus { left: 12px; top: 12px; z-index: 99; }
+
+  /* ---- top bar ---- */
+  header.topbar {
+    border-bottom: 1px solid var(--grid-line);
+    background: linear-gradient(180deg, var(--bg-2), var(--bg));
+    position: sticky; top: 0; z-index: 30;
+  }
+  .topbar .wrap { display: flex; align-items: center; gap: 14px; height: 52px; }
+  .logo { display: flex; align-items: center; gap: 9px; font-weight: 650; letter-spacing: .2px; }
+  .logo svg { display: block; }
+  .logo .tag { color: var(--ink-faint); font-weight: 400; font-size: 12px; font-family: var(--mono); }
+  .topnav { margin-left: auto; display: flex; gap: 4px; flex-wrap: wrap; }
+  .topnav a {
+    font-family: var(--mono); font-size: 12px; color: var(--ink-dim);
+    padding: 5px 9px; border: 1px solid transparent; border-radius: 6px;
+  }
+  .topnav a:hover { color: var(--ink); border-color: var(--grid-line); text-decoration: none; }
+
+  /* ---- intro strip ---- */
+  .intro { padding: 30px 0 8px; }
+  .intro h1 {
+    font-size: clamp(24px, 3.4vw, 38px); line-height: 1.12; margin: 0 0 10px;
+    font-weight: 700; letter-spacing: -0.4px; max-width: 22ch;
+  }
+  .intro h1 .em { color: var(--accent); }
+  .intro p.lede { color: var(--ink-dim); max-width: 64ch; margin: 0 0 6px; font-size: 15px; }
+  .intro .note { font-family: var(--mono); font-size: 11.5px; color: var(--ink-faint); }
+
+  /* ---- the live context bar (autonomous driver) ---- */
+  .contextbar {
+    margin: 18px 0 6px;
+    border: 1px solid var(--grid-line);
+    border-radius: 10px;
+    background: var(--panel);
+    overflow: hidden;
+  }
+  .ctx-head {
+    display: flex; align-items: center; gap: 10px;
+    padding: 9px 13px; border-bottom: 1px solid var(--grid-line);
+    background: var(--bg-2);
+    font-family: var(--mono); font-size: 11.5px; color: var(--ink-faint);
+  }
+  .ctx-head .dot {
+    width: 8px; height: 8px; border-radius: 50%; background: var(--accent);
+    box-shadow: 0 0 0 0 oklch(0.78 0.16 195 / 0.6);
+    animation: pulse 2.6s ease-out infinite;
+  }
+  @keyframes pulse {
+    0% { box-shadow: 0 0 0 0 oklch(0.78 0.16 195 / 0.55); }
+    70% { box-shadow: 0 0 0 9px oklch(0.78 0.16 195 / 0); }
+    100% { box-shadow: 0 0 0 0 oklch(0.78 0.16 195 / 0); }
+  }
+  .ctx-body { padding: 13px; display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .ctx-label { font-family: var(--mono); font-size: 11px; color: var(--ink-faint); white-space: nowrap; }
+  #ctxText {
+    font-size: 16px; color: var(--ink); font-weight: 550;
+    transition: opacity .45s ease;
+  }
+  #ctxText.fade { opacity: 0; }
+  .ctx-sub { font-family: var(--mono); font-size: 11.5px; color: var(--accent); margin-left: auto; }
+
+  /* ---- grid panel ---- */
+  .gridpanel { margin: 4px 0 26px; border: 1px solid var(--grid-line); border-radius: 10px; background: var(--panel); }
+  .grid-toolbar {
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    padding: 8px 13px; border-bottom: 1px solid var(--grid-line);
+    font-family: var(--mono); font-size: 11.5px; color: var(--ink-faint);
+  }
+  .grid-toolbar .col-state { color: var(--ink-dim); }
+  .grid-toolbar .col-state b { color: var(--accent-2); font-weight: 600; }
+  .pauseBtn {
+    margin-left: auto; font-family: var(--mono); font-size: 11px; cursor: pointer;
+    background: var(--bg-2); color: var(--ink-dim); border: 1px solid var(--grid-line);
+    padding: 4px 10px; border-radius: 6px;
+  }
+  .pauseBtn:hover { color: var(--ink); border-color: var(--ink-faint); }
+
+  .tablescroll { overflow-x: auto; }
+  table.grid { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 12.5px; min-width: 880px; }
+  table.grid thead th {
+    position: sticky; top: 52px; z-index: 10;
+    background: var(--bg-2); color: var(--ink-dim);
+    text-align: left; font-weight: 600; padding: 9px 11px;
+    border-bottom: 1px solid var(--grid-line);
+    white-space: nowrap; user-select: none;
+    font-size: 11px; letter-spacing: .3px; text-transform: uppercase;
+  }
+  table.grid thead th .resizer {
+    position: absolute; right: 0; top: 0; height: 100%; width: 6px;
+    cursor: col-resize; border-right: 1px solid var(--grid-line);
+  }
+  table.grid thead th { position: sticky; }
+  table.grid th.relcol { color: var(--accent); }
+  table.grid tbody td {
+    padding: 8px 11px; border-bottom: 1px solid oklch(0.27 0.02 265);
+    color: var(--ink-dim); white-space: nowrap; vertical-align: top;
+    overflow: hidden; text-overflow: ellipsis;
+  }
+  table.grid tbody td.subj { color: var(--ink); max-width: 360px; }
+  table.grid tbody td.tags { color: var(--ink-faint); }
+  table.grid tbody tr { transition: background-color .5s ease, transform .55s cubic-bezier(.2,.7,.2,1); }
+
+  /* the "rises unbidden" states — applied by JS on the page's cadence */
+  table.grid tbody tr.rising {
+    background: linear-gradient(90deg, var(--row-rise), transparent 80%);
+  }
+  table.grid tbody tr.rising td.subj { color: var(--accent); font-weight: 600; }
+  table.grid tbody tr.rising td.rel { color: var(--accent-2); }
+  table.grid tbody tr.flash td { animation: flashcell .9s ease; }
+  @keyframes flashcell {
+    0% { background: oklch(0.30 0.06 195 / .9); }
+    100% { background: transparent; }
+  }
+
+  /* relevance bar cell */
+  .relbar { display: inline-flex; align-items: center; gap: 7px; }
+  .relbar .track {
+    width: 64px; height: 7px; border-radius: 4px; background: var(--bg-2);
+    overflow: hidden; border: 1px solid var(--grid-line);
+  }
+  .relbar .fill {
+    height: 100%; width: 0%;
+    background: linear-gradient(90deg, var(--accent), var(--accent-2));
+    transition: width .6s ease;
+  }
+  .relbar .num { color: var(--ink-faint); min-width: 30px; }
+
+  caption.gridcap {
+    caption-side: bottom; text-align: left; padding: 9px 13px;
+    font-family: var(--mono); font-size: 11px; color: var(--ink-faint);
+    border-top: 1px solid var(--grid-line);
+  }
+
+  /* ---- explainer columns ---- */
+  .why { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin: 8px 0 26px; }
+  .why .card { border: 1px solid var(--grid-line); border-radius: 10px; background: var(--panel); padding: 15px; }
+  .why .card h3 { margin: 0 0 7px; font-size: 13px; font-family: var(--mono); color: var(--accent); letter-spacing: .3px; }
+  .why .card p { margin: 0; color: var(--ink-dim); font-size: 13px; }
+
+  /* ---- surfaces table (facts) ---- */
+  .facts { margin: 8px 0 26px; }
+  .facts h2 { font-size: 15px; font-family: var(--mono); color: var(--ink); margin: 0 0 10px; letter-spacing: .3px; }
+  table.facts-grid { width: 100%; border-collapse: collapse; font-size: 13px; }
+  table.facts-grid th, table.facts-grid td { text-align: left; padding: 8px 11px; border-bottom: 1px solid var(--grid-line); vertical-align: top; }
+  table.facts-grid th { font-family: var(--mono); font-size: 11px; text-transform: uppercase; letter-spacing: .3px; color: var(--ink-faint); background: var(--bg-2); }
+  table.facts-grid td:first-child { font-family: var(--mono); color: var(--accent); white-space: nowrap; }
+  table.facts-grid td { color: var(--ink-dim); }
+
+  /* ---- agent / cta strip ---- */
+  .agent { border: 1px solid var(--grid-line); border-radius: 10px; background: var(--panel); padding: 16px; margin: 8px 0 26px; }
+  .agent h2 { font-size: 15px; font-family: var(--mono); margin: 0 0 8px; color: var(--ink); }
+  .agent p { color: var(--ink-dim); margin: 0 0 12px; font-size: 13px; max-width: 70ch; }
+  pre.cmd {
+    background: var(--bg); border: 1px solid var(--grid-line); border-radius: 8px;
+    padding: 11px 13px; overflow-x: auto; font-family: var(--mono); font-size: 12.5px;
+    color: var(--ink); margin: 0 0 6px;
+  }
+  pre.cmd .c { color: var(--ink-faint); }
+  .ctarow { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 6px; }
+  .btn {
+    font-family: var(--mono); font-size: 12.5px; padding: 9px 14px; border-radius: 8px;
+    border: 1px solid var(--grid-line); color: var(--ink); background: var(--bg-2);
+  }
+  .btn:hover { border-color: var(--accent); text-decoration: none; }
+  .btn.primary { background: linear-gradient(180deg, oklch(0.34 0.07 195), oklch(0.28 0.05 195)); border-color: var(--accent); }
+
+  footer { border-top: 1px solid var(--grid-line); padding: 20px 0 40px; color: var(--ink-faint); font-family: var(--mono); font-size: 11.5px; }
+  footer .wrap { display: flex; gap: 18px; flex-wrap: wrap; align-items: center; }
+  footer .links { display: flex; gap: 14px; flex-wrap: wrap; margin-left: auto; }
+
+  @media (max-width: 760px) {
+    .why { grid-template-columns: 1fr; }
+    table.grid thead th { top: 0; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .ctx-head .dot { animation: none; }
+    table.grid tbody tr { transition: background-color .2s ease; }
+    table.grid tbody tr.flash td { animation: none; }
+    #ctxText { transition: none; }
+    .relbar .fill { transition: none; }
+  }
+</style>
+</head>
+<body>
+<a class="skip" href="#grid">Skip to the recall grid</a>
+
+<header class="topbar">
+  <div class="wrap">
+    <span class="logo">
+      <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true">
+        <rect x="1.5" y="1.5" width="19" height="19" rx="3" fill="none" stroke="oklch(0.78 0.16 195)" stroke-width="1.4"/>
+        <line x1="1.5" y1="8" x2="20.5" y2="8" stroke="oklch(0.32 0.02 265)" stroke-width="1"/>
+        <line x1="1.5" y1="14" x2="20.5" y2="14" stroke="oklch(0.32 0.02 265)" stroke-width="1"/>
+        <line x1="8" y1="1.5" x2="8" y2="20.5" stroke="oklch(0.32 0.02 265)" stroke-width="1"/>
+        <rect x="8.2" y="8.2" width="5.6" height="5.6" fill="oklch(0.80 0.15 95)" opacity="0.85"/>
+      </svg>
+      Memex
+      <span class="tag">// the grid that remembers for you</span>
+    </span>
+    <nav class="topnav" aria-label="primary">
+      <a href="#grid">grid</a>
+      <a href="#why">why</a>
+      <a href="#surfaces">surfaces</a>
+      <a href="#agent">agent</a>
+      <a href="https://github.com/Two-Weeks-Team/memex">repo</a>
+      <a href="https://two-weeks-team.github.io/memex/">live</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+<section class="intro wrap">
+  <h1>You didn't sort. You didn't filter. The row <span class="em">rose on its own.</span></h1>
+  <p class="lede">
+    A dense table of every Claude Code &amp; Codex session you've ever run. You don't
+    Ctrl-F it. As your <em>current</em> work shifts, the rows that match the moment
+    light up and climb to the top by themselves — the way a half-forgotten fact returns
+    mid-task. The grid recalls <em>for</em> you.
+  </p>
+  <p class="note">No search box below. Watch the context line change — the grid reorders itself in response.</p>
+</section>
+
+<section class="contextbar wrap" aria-live="polite">
+  <div class="ctx-head">
+    <span class="dot" aria-hidden="true"></span>
+    <span>LIVE&nbsp;CONTEXT&nbsp;·&nbsp;what you're doing right now (advances on its own)</span>
+  </div>
+  <div class="ctx-body">
+    <span class="ctx-label">situation&nbsp;»</span>
+    <span id="ctxText">opening a fresh terminal…</span>
+    <span class="ctx-sub" id="ctxSub">grid idle</span>
+  </div>
+</section>
+
+<section class="gridpanel wrap" id="grid" aria-label="recall grid">
+  <div class="grid-toolbar">
+    <span class="col-state">sorted by: <b id="sortState">recency</b></span>
+    <span>•</span>
+    <span>234 sessions in corpus <span style="color:var(--ink-faint)">(illustrative sample of 8 shown)</span></span>
+    <span>•</span>
+    <span>columns are resizable — drag the right edge of a header</span>
+    <button class="pauseBtn" id="pauseBtn" aria-pressed="false">⏸ pause auto-recall</button>
+  </div>
+  <div class="tablescroll">
+    <table class="grid" id="recallTable">
+      <thead>
+        <tr>
+          <th data-col="when">when<span class="resizer" aria-hidden="true"></span></th>
+          <th data-col="tool">tool<span class="resizer" aria-hidden="true"></span></th>
+          <th data-col="project">project<span class="resizer" aria-hidden="true"></span></th>
+          <th data-col="subj">what happened<span class="resizer" aria-hidden="true"></span></th>
+          <th data-col="tags">tags<span class="resizer" aria-hidden="true"></span></th>
+          <th class="relcol" data-col="rel">relevance to NOW<span class="resizer" aria-hidden="true"></span></th>
+        </tr>
+      </thead>
+      <tbody id="rows"><!-- rows injected by JS --></tbody>
+      <caption class="gridcap">
+        Relevance scores are <strong>illustrative</strong>, computed here from keyword overlap with the
+        context line for demo purposes. In the real tool, similarity is vector distance in Qdrant —
+        no LLM at query time, no keyword search.
+      </caption>
+    </table>
+  </div>
+</section>
+
+<section class="why wrap" id="why">
+  <div class="card">
+    <h3>// arrives unbidden</h3>
+    <p>You never type a query. The context line above changes on its own cadence, and the rows that
+       fit the moment surface themselves — recall happens <em>to</em> you, not <em>by</em> you.</p>
+  </div>
+  <div class="card">
+    <h3>// by similarity, not keywords</h3>
+    <p>Rows rise on vector distance in <a href="https://qdrant.tech/">Qdrant</a>, not string matching.
+       A session about "auth retry loop" surfaces when you touch token refresh — even with zero shared words.</p>
+  </div>
+  <div class="card">
+    <h3>// a corpus you own</h3>
+    <p>Claude Code silently migrates and deletes old sessions. Memex preserves your
+       <span style="font-family:var(--mono);color:var(--ink-faint)">~/.claude/projects/**/*.jsonl</span>
+       history as a navigable space you keep.</p>
+  </div>
+</section>
+
+<section class="facts wrap" id="surfaces">
+  <h2>// surfaces — the same corpus, six ways to move through it</h2>
+  <div class="tablescroll">
+    <table class="facts-grid">
+      <thead><tr><th>surface</th><th>what it does</th></tr></thead>
+      <tbody>
+        <tr><td>Proactive Recall</td><td>The behavior on this page: relevant past sessions rise on their own as your context shifts — no query.</td></tr>
+        <tr><td>Time Machine</td><td>Replay a session step by step, the way it actually unfolded.</td></tr>
+        <tr><td>Lens</td><td>Named-vector weighted retrieval — bias the space toward what matters to you.</td></tr>
+        <tr><td>Topology</td><td>Distance matrix → minimum spanning tree graph of how sessions relate.</td></tr>
+        <tr><td>Mix / Discovery</td><td>Positive / negative recommendation: "more like this, less like that."</td></tr>
+        <tr><td>Companion / Wrapped / Loop Breaker</td><td>An agent-memory layer over your working history.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="agent wrap" id="agent">
+  <h2>// wire it into your agent — 11 MCP tools over stdio + HTTP</h2>
+  <p>
+    Memex is a non-chatbot, LLM-free-at-runtime tool. It exposes 11 MCP tools that work in
+    Claude Code, Codex, and Cursor, so your agent can pull the relevant past into the present
+    without you searching. A server/Docker variant runs Qdrant + web + MCP in one image.
+  </p>
+  <pre class="cmd"><span class="c"># register the Memex MCP server with Claude Code</span>
+claude mcp add memex -- memex-mcp serve</pre>
+  <div class="ctarow">
+    <a class="btn primary" href="https://github.com/Two-Weeks-Team/memex">open the repo →</a>
+    <a class="btn" href="https://two-weeks-team.github.io/memex/">see it live</a>
+    <a class="btn" href="https://github.com/Two-Weeks-Team/memex#server-variant">server / Docker variant</a>
+  </div>
+</section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>Memex · built for Qdrant Vector Space Day 2026 — "Think Outside the Bot."</span>
+    <span class="links">
+      <a href="https://github.com/Two-Weeks-Team/memex">github</a>
+      <a href="https://two-weeks-team.github.io/memex/">live landing</a>
+      <a href="https://qdrant.tech/">qdrant</a>
+    </span>
+  </div>
+</footer>
+
+<script>
+(function () {
+  "use strict";
+
+  // ---- the corpus (illustrative sample) ----
+  // tokens drive demo relevance vs. the active context line.
+  var DATA = [
+    { when:"2026-05-22 14:08", tool:"Claude Code", project:"memex/web",     subj:"OAuth token refresh — silent 401 on expiry",        tags:"auth, retry, token", tok:["auth","token","retry","401","oauth","refresh","expire"] },
+    { when:"2026-05-19 09:41", tool:"Codex",        project:"qdrant-lab",    subj:"Tuning HNSW ef_search for recall vs latency",        tags:"qdrant, hnsw, recall", tok:["qdrant","hnsw","recall","vector","latency","search","index"] },
+    { when:"2026-05-17 21:55", tool:"Claude Code",  project:"memex/topology",subj:"MST graph from distance matrix kept disconnecting",  tags:"graph, mst, topology", tok:["graph","mst","topology","distance","matrix","node"] },
+    { when:"2026-05-15 11:12", tool:"Codex",        project:"infra/docker",  subj:"One-image Qdrant + web + MCP — port clash on 6333",   tags:"docker, port, mcp", tok:["docker","port","mcp","image","qdrant","6333","clash"] },
+    { when:"2026-05-12 16:30", tool:"Claude Code",  project:"memex/recall",  subj:"Debounce proactive recall so it isn't jumpy",        tags:"recall, ux, debounce", tok:["recall","ux","debounce","proactive","timing","jitter"] },
+    { when:"2026-05-09 08:03", tool:"Claude Code",  project:"memex/web",     subj:"CSS grid sticky header overlapping resizers",        tags:"css, grid, sticky", tok:["css","grid","sticky","header","resize","table","column"] },
+    { when:"2026-05-06 19:47", tool:"Codex",        project:"qdrant-lab",    subj:"Named-vector Lens weights drifting after reindex",   tags:"lens, vector, weights", tok:["lens","vector","weight","named","reindex","drift","qdrant"] },
+    { when:"2026-05-02 13:22", tool:"Claude Code",  project:"memex/mcp",     subj:"Wiring 11 MCP tools over stdio AND http transport",  tags:"mcp, stdio, http", tok:["mcp","stdio","http","tool","transport","11","agent"] }
+  ];
+
+  // ---- the autonomous context cycle (this is the driver, not the visitor) ----
+  // each step: a situation the page is "in", plus the tokens it evokes.
+  var CONTEXTS = [
+    { text:"opening a fresh terminal…",                                  cue:[],                              sub:"grid idle" },
+    { text:"you're debugging an auth retry that 401s on token refresh…", cue:["auth","token","retry","401","refresh"], sub:"recalling…" },
+    { text:"now you're staring at recall latency in Qdrant…",            cue:["qdrant","recall","latency","hnsw","vector","search"], sub:"recalling…" },
+    { text:"the topology graph keeps splitting into islands…",           cue:["graph","mst","topology","distance","node"], sub:"recalling…" },
+    { text:"spinning up the one-image Docker build…",                    cue:["docker","port","mcp","image","6333"], sub:"recalling…" },
+    { text:"the sticky header is overlapping the column resizers…",      cue:["css","grid","sticky","header","resize","column"], sub:"recalling…" },
+    { text:"wiring the agent's MCP tools over stdio + http…",            cue:["mcp","stdio","http","tool","agent","transport"], sub:"recalling…" }
+  ];
+
+  var rows = document.getElementById("rows");
+  var ctxText = document.getElementById("ctxText");
+  var ctxSub = document.getElementById("ctxSub");
+  var sortState = document.getElementById("sortState");
+  var pauseBtn = document.getElementById("pauseBtn");
+  var reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  // build initial rows (recency order = DATA order)
+  var trByKey = {};
+  function buildRows() {
+    rows.innerHTML = "";
+    DATA.forEach(function (d, i) {
+      var tr = document.createElement("tr");
+      tr.dataset.key = String(i);
+      tr.innerHTML =
+        '<td>' + d.when + '</td>' +
+        '<td>' + d.tool + '</td>' +
+        '<td>' + d.project + '</td>' +
+        '<td class="subj">' + d.subj + '</td>' +
+        '<td class="tags">' + d.tags + '</td>' +
+        '<td class="rel"><span class="relbar"><span class="track"><span class="fill"></span></span><span class="num">—</span></span></td>';
+      rows.appendChild(tr);
+      trByKey[i] = tr;
+    });
+  }
+  buildRows();
+
+  function score(d, cue) {
+    if (!cue.length) return 0;
+    var hits = 0;
+    for (var i = 0; i < d.tok.length; i++) {
+      if (cue.indexOf(d.tok[i]) !== -1) hits++;
+    }
+    // normalize against cue length, scale to 0..96 (never claim 100%)
+    return Math.min(96, Math.round((hits / cue.length) * 110));
+  }
+
+  function applyContext(ctx) {
+    // fade context text
+    if (!reduceMotion) {
+      ctxText.classList.add("fade");
+      setTimeout(function () { ctxText.textContent = ctx.text; ctxText.classList.remove("fade"); }, 220);
+    } else {
+      ctxText.textContent = ctx.text;
+    }
+    ctxSub.textContent = ctx.sub;
+
+    // score every row against the situation
+    var scored = DATA.map(function (d, i) { return { i: i, s: score(d, ctx.cue) }; });
+    // order: highest relevance first; ties keep recency (original index)
+    scored.sort(function (a, b) { return b.s - a.s || a.i - b.i; });
+
+    var anyRise = scored.some(function (x) { return x.s >= 35; });
+    sortState.textContent = anyRise ? "relevance to NOW (auto)" : "recency";
+
+    // reorder DOM so relevant rows climb to the top — on the page's cadence
+    scored.forEach(function (x) {
+      var tr = trByKey[x.i];
+      rows.appendChild(tr); // re-append in sorted order
+
+      var fill = tr.querySelector(".fill");
+      var num = tr.querySelector(".num");
+      fill.style.width = (x.s) + "%";
+      num.textContent = x.s ? x.s + "%" : "—";
+
+      var rising = x.s >= 35;
+      tr.classList.toggle("rising", rising);
+      if (rising && !reduceMotion) {
+        tr.classList.remove("flash");
+        // force reflow so the animation can retrigger
+        void tr.offsetWidth;
+        tr.classList.add("flash");
+      } else if (!rising) {
+        tr.classList.remove("flash");
+      }
+    });
+  }
+
+  // ---- the cycle runs itself; visitor can pause but never drives retrieval ----
+  var idx = 0;
+  var paused = false;
+  var timer = null;
+
+  function tick() {
+    applyContext(CONTEXTS[idx]);
+    idx = (idx + 1) % CONTEXTS.length;
+    // irregular, lifelike timing
+    var base = idx <= 1 ? 2600 : 4200;
+    var jitter = Math.floor(Math.random() * 1500);
+    timer = setTimeout(function () { if (!paused) tick(); }, base + jitter);
+  }
+
+  function start() { paused = false; pauseBtn.textContent = "⏸ pause auto-recall"; pauseBtn.setAttribute("aria-pressed","false"); if (!timer) tick(); }
+  function stop()  { paused = true; pauseBtn.textContent = "▶ resume auto-recall"; pauseBtn.setAttribute("aria-pressed","true"); if (timer) { clearTimeout(timer); timer = null; } }
+
+  pauseBtn.addEventListener("click", function () { paused ? start() : stop(); });
+
+  // pause when off-screen / tab hidden (don't churn unseen)
+  document.addEventListener("visibilitychange", function () {
+    if (document.hidden) { if (timer) { clearTimeout(timer); timer = null; } }
+    else if (!paused && !timer) { tick(); }
+  });
+
+  // first paint at recency, then begin the autonomous cycle shortly after load
+  applyContext(CONTEXTS[0]);
+  idx = 1;
+  setTimeout(function () { if (!paused) tick(); }, 1600);
+
+  // ---- column resizers (power-user touch; pure measurement, not retrieval) ----
+  var ths = document.querySelectorAll("#recallTable thead th");
+  ths.forEach(function (th) {
+    var grip = th.querySelector(".resizer");
+    if (!grip) return;
+    var startX, startW;
+    function onMove(e) {
+      var dx = (e.clientX || (e.touches && e.touches[0].clientX) || 0) - startX;
+      var w = Math.max(60, startW + dx);
+      th.style.width = w + "px";
+      th.style.minWidth = w + "px";
+    }
+    function onUp() {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+      document.removeEventListener("touchmove", onMove);
+      document.removeEventListener("touchend", onUp);
+    }
+    function onDown(e) {
+      startX = e.clientX || (e.touches && e.touches[0].clientX) || 0;
+      startW = th.getBoundingClientRect().width;
+      document.addEventListener("mousemove", onMove);
+      document.addEventListener("mouseup", onUp);
+      document.addEventListener("touchmove", onMove, { passive: true });
+      document.addEventListener("touchend", onUp);
+      e.preventDefault();
+    }
+    grip.addEventListener("mousedown", onDown);
+    grip.addEventListener("touchstart", onDown, { passive: false });
+  });
+})();
+</script>
+</body>
+</html>

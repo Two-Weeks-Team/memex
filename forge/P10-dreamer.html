@@ -1,0 +1,584 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Memex — a quiet field where memories surface</title>
+<meta name="description" content="Memex turns your Claude Code / Codex session history into a navigable spatial memory — move through it by similarity, not keywords. LLM-free at runtime, backed by Qdrant." />
+<style>
+  :root {
+    /* OKLCH palette — deep, calm field with faint AI glow */
+    --bg-0: oklch(16% 0.03 270);
+    --bg-1: oklch(20% 0.04 275);
+    --ink: oklch(94% 0.02 270);
+    --ink-soft: oklch(78% 0.03 270);
+    --ink-faint: oklch(60% 0.03 270);
+    --glow: oklch(82% 0.13 230);
+    --glow-2: oklch(80% 0.15 320);
+    --line: oklch(40% 0.04 270 / 0.4);
+    --glass: oklch(30% 0.04 275 / 0.32);
+    --glass-edge: oklch(70% 0.06 270 / 0.18);
+    --focus: oklch(88% 0.16 220);
+    --maxw: 1080px;
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+
+  body {
+    margin: 0;
+    font-family: system-ui, -apple-system, sans-serif;
+    color: var(--ink);
+    background:
+      radial-gradient(120% 90% at 20% 0%, oklch(24% 0.05 280) 0%, transparent 55%),
+      radial-gradient(110% 80% at 90% 20%, oklch(22% 0.05 320 / 0.7) 0%, transparent 50%),
+      var(--bg-0);
+    line-height: 1.6;
+    overflow-x: hidden;
+  }
+
+  a { color: var(--glow); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  :focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; border-radius: 6px; }
+
+  .wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 24px; }
+
+  /* ---------- The Field (hero) ---------- */
+  .field {
+    position: relative;
+    min-height: 100svh;
+    display: flex;
+    align-items: center;
+    overflow: hidden;
+  }
+  #memory-field {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 0;
+    display: block;
+  }
+  .field-copy {
+    position: relative;
+    z-index: 2;
+    max-width: 620px;
+    padding: 7rem 0 5rem;
+  }
+  .eyebrow {
+    font-size: 0.8rem;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    margin: 0 0 1.4rem;
+  }
+  h1 {
+    font-size: clamp(2.1rem, 5.4vw, 3.6rem);
+    line-height: 1.12;
+    font-weight: 600;
+    margin: 0 0 1.4rem;
+    letter-spacing: -0.01em;
+  }
+  h1 .accent {
+    background: linear-gradient(100deg, var(--glow), var(--glow-2));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .lede {
+    font-size: clamp(1.05rem, 1.8vw, 1.25rem);
+    color: var(--ink-soft);
+    max-width: 48ch;
+    margin: 0 0 2.4rem;
+  }
+  .hint {
+    font-size: 0.85rem;
+    color: var(--ink-faint);
+    margin: 2.6rem 0 0;
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+  }
+  .hint .dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--glow);
+    box-shadow: 0 0 10px 2px oklch(82% 0.13 230 / 0.6);
+    animation: breathe 4s ease-in-out infinite;
+  }
+  @keyframes breathe {
+    0%, 100% { opacity: 0.4; transform: scale(0.85); }
+    50% { opacity: 1; transform: scale(1.15); }
+  }
+
+  /* glass buttons — few buttons, lots of space */
+  .actions { display: flex; flex-wrap: wrap; gap: 0.9rem; }
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.8rem 1.4rem;
+    border-radius: 14px;
+    font-size: 0.95rem;
+    font-weight: 500;
+    border: 1px solid var(--glass-edge);
+    background: var(--glass);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    color: var(--ink);
+    transition: transform 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
+  }
+  .btn:hover {
+    text-decoration: none;
+    transform: translateY(-2px);
+    border-color: var(--glow);
+    box-shadow: 0 0 24px -6px oklch(82% 0.13 230 / 0.5);
+  }
+  .btn-primary {
+    border-color: oklch(82% 0.13 230 / 0.5);
+    background: linear-gradient(120deg, oklch(40% 0.08 250 / 0.5), oklch(38% 0.09 310 / 0.4));
+  }
+
+  /* ---------- Sections ---------- */
+  section { position: relative; z-index: 2; }
+  .panel { padding: 6rem 0; }
+  .panel h2 {
+    font-size: clamp(1.5rem, 3vw, 2.1rem);
+    font-weight: 600;
+    margin: 0 0 0.8rem;
+    letter-spacing: -0.01em;
+  }
+  .panel .sub {
+    color: var(--ink-soft);
+    max-width: 60ch;
+    margin: 0 0 2.8rem;
+    font-size: 1.05rem;
+  }
+
+  /* surfacing cards — latent until in view */
+  .surfaces {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(248px, 1fr));
+    gap: 1.1rem;
+  }
+  .card {
+    padding: 1.6rem 1.5rem;
+    border-radius: 18px;
+    border: 1px solid var(--glass-edge);
+    background: var(--glass);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    opacity: 0;
+    transform: translateY(22px);
+    transition: opacity 0.9s ease, transform 0.9s ease, border-color 0.4s ease, box-shadow 0.4s ease;
+  }
+  .card.surfaced { opacity: 1; transform: translateY(0); }
+  .card:hover {
+    border-color: var(--glow);
+    box-shadow: 0 0 30px -10px oklch(82% 0.13 230 / 0.55);
+  }
+  .card h3 {
+    font-size: 1.05rem;
+    margin: 0 0 0.4rem;
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+  }
+  .card p { margin: 0; color: var(--ink-soft); font-size: 0.94rem; }
+  .card .ic {
+    width: 22px; height: 22px; flex: none;
+    color: var(--glow);
+  }
+
+  /* how it stays honest — definition rows */
+  .truth {
+    display: grid;
+    gap: 1px;
+    background: var(--line);
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    overflow: hidden;
+  }
+  .truth-row {
+    display: grid;
+    grid-template-columns: 200px 1fr;
+    gap: 1.4rem;
+    padding: 1.3rem 1.5rem;
+    background: oklch(19% 0.035 275 / 0.7);
+  }
+  .truth-row dt { color: var(--ink); font-weight: 600; font-size: 0.96rem; }
+  .truth-row dd { margin: 0; color: var(--ink-soft); font-size: 0.96rem; }
+  @media (max-width: 620px) {
+    .truth-row { grid-template-columns: 1fr; gap: 0.3rem; }
+  }
+
+  /* agent / mcp block */
+  .agent-card {
+    border: 1px solid var(--glass-edge);
+    background: var(--glass);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border-radius: 20px;
+    padding: 2.2rem;
+  }
+  pre {
+    margin: 1.2rem 0 0;
+    padding: 1rem 1.2rem;
+    background: oklch(13% 0.025 270);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    overflow-x: auto;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.88rem;
+    color: var(--ink-soft);
+  }
+  pre .c { color: var(--ink-faint); }
+  pre .k { color: var(--glow); }
+
+  /* footer */
+  footer {
+    position: relative;
+    z-index: 2;
+    border-top: 1px solid var(--line);
+    padding: 3rem 0 4rem;
+    color: var(--ink-faint);
+    font-size: 0.9rem;
+  }
+  .foot-links { display: flex; flex-wrap: wrap; gap: 1.6rem; margin-bottom: 1.4rem; }
+  .foot-note { max-width: 58ch; line-height: 1.7; }
+
+  /* reduced-motion: calm the field entirely */
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    .hint .dot { animation: none; opacity: 0.8; }
+    .card { opacity: 1; transform: none; transition: none; }
+    .btn { transition: none; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ============ THE FIELD ============ -->
+<header class="field" aria-label="Memex — a field of latent memories">
+  <canvas id="memory-field" aria-hidden="true"></canvas>
+  <div class="wrap">
+    <div class="field-copy">
+      <p class="eyebrow">Memex · associative memory</p>
+      <h1>You don't remember everything.<br /><span class="accent">The right thought just surfaces.</span></h1>
+      <p class="lede">
+        Memex keeps your Claude Code and Codex sessions as a quiet field of memories.
+        Nothing is filed away by hand — when a context drifts close, the related thought
+        rises on its own. Not a search box. Not a chatbot.
+      </p>
+      <div class="actions">
+        <a class="btn btn-primary" href="https://github.com/Two-Weeks-Team/memex">View the repository</a>
+        <a class="btn" href="https://two-weeks-team.github.io/memex/">Open the live landing</a>
+      </div>
+      <p class="hint">
+        <span class="dot" aria-hidden="true"></span>
+        Move your cursor through the field — memories nearby will surface.
+      </p>
+    </div>
+  </div>
+</header>
+
+<!-- ============ WHAT SURFACES ============ -->
+<section class="panel" aria-labelledby="surfaces-h">
+  <div class="wrap">
+    <h2 id="surfaces-h">Ways the field gives memory back</h2>
+    <p class="sub">
+      Each surface is a different way of letting a dormant session re-emerge — by time,
+      by meaning, by distance, or before you even ask.
+    </p>
+    <div class="surfaces" id="surfaces">
+
+      <div class="card">
+        <h3><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>Time Machine</h3>
+        <p>Replay a session as it unfolded — step back through how a thought actually came together.</p>
+      </div>
+
+      <div class="card">
+        <h3><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4-4"/></svg>Lens</h3>
+        <p>Named-vector weighted search. Tilt the field toward a meaning and watch related memories lean in.</p>
+      </div>
+
+      <div class="card">
+        <h3><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="6" cy="6" r="2.4"/><circle cx="18" cy="8" r="2.4"/><circle cx="9" cy="18" r="2.4"/><path d="M7.6 7.6 16 9M8 16l8.4-6.2"/></svg>Topology</h3>
+        <p>A distance matrix becomes a minimum-spanning-tree graph — the shape of how your work connects.</p>
+      </div>
+
+      <div class="card">
+        <h3><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M5 12h6M13 12h6"/><circle cx="5" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>Mix &amp; Discovery</h3>
+        <p>Pull toward what you like, push away what you don't. Recommendations follow the gradient.</p>
+      </div>
+
+      <div class="card">
+        <h3><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 3a6 6 0 0 0-6 6c0 3 2 4 2 7h8c0-3 2-4 2-7a6 6 0 0 0-6-6Z"/><path d="M10 19h4"/></svg>Proactive Recall</h3>
+        <p>When your current context resembles a past one, the older memory surfaces before you go looking.</p>
+      </div>
+
+      <div class="card">
+        <h3><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M9 9h6M9 13h6M9 17h3"/></svg>Companion · Wrapped · Loop Breaker</h3>
+        <p>An agent-memory layer that reflects patterns back, sums up where you've been, and flags loops you keep falling into.</p>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- ============ THE HONEST GROUND ============ -->
+<section class="panel" aria-labelledby="truth-h">
+  <div class="wrap">
+    <h2 id="truth-h">What Memex actually is</h2>
+    <p class="sub">
+      No magic claimed. Here is the plain shape of the thing.
+    </p>
+    <dl class="truth">
+      <div class="truth-row">
+        <dt>The corpus</dt>
+        <dd>Your Claude Code / Codex session history (<code>~/.claude/projects/**/*.jsonl</code>), legacy transcripts, and <code>history.jsonl</code> — a record you own.</dd>
+      </div>
+      <div class="truth-row">
+        <dt>LLM-free at runtime</dt>
+        <dd>Recall runs on vector similarity, not a live model. No chatbot in the loop when you move through the field.</dd>
+      </div>
+      <div class="truth-row">
+        <dt>Backed by Qdrant</dt>
+        <dd>History becomes a navigable spatial memory in a Qdrant vector store — you travel it by similarity, not keywords.</dd>
+      </div>
+      <div class="truth-row">
+        <dt>Why it exists</dt>
+        <dd>Claude Code silently migrates and deletes old sessions. Memex preserves the corpus and lets you return to it.</dd>
+      </div>
+      <div class="truth-row">
+        <dt>Built for</dt>
+        <dd>Qdrant Vector Space Day 2026 — <em>"Think Outside the Bot."</em></dd>
+      </div>
+    </dl>
+  </div>
+</section>
+
+<!-- ============ AGENT INTEGRATION ============ -->
+<section class="panel" aria-labelledby="agent-h">
+  <div class="wrap">
+    <h2 id="agent-h">It lives inside your agents</h2>
+    <p class="sub">
+      11 MCP tools over stdio + HTTP — works in Claude Code, Codex, and Cursor. A
+      server / Docker variant runs Qdrant, the web UI, and MCP together in one image.
+    </p>
+    <div class="agent-card">
+      <p style="margin:0;color:var(--ink-soft);">Add the memory layer to Claude Code:</p>
+<pre><span class="c"># register the Memex MCP server (stdio)</span>
+<span class="k">claude mcp add</span> memex -- memex-mcp
+
+<span class="c"># or run the all-in-one server / Docker variant</span>
+<span class="c"># (Qdrant + web + MCP in a single image)</span></pre>
+      <p style="margin:1.4rem 0 0;color:var(--ink-soft);font-size:0.94rem;">
+        The 11 tools let an agent recall, replay, and connect across your own history —
+        so the thread you had three weeks ago can surface in the work you're doing now.
+        See the
+        <a href="https://github.com/Two-Weeks-Team/memex">repository</a>
+        for the tool list and the server variant.
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ FOOTER ============ -->
+<footer>
+  <div class="wrap">
+    <div class="foot-links">
+      <a href="https://github.com/Two-Weeks-Team/memex">Repository</a>
+      <a href="https://two-weeks-team.github.io/memex/">Live landing</a>
+      <a href="https://github.com/Two-Weeks-Team/memex">Server / Docker variant</a>
+      <a href="https://github.com/Two-Weeks-Team/memex">MCP integration · 11 tools</a>
+    </div>
+    <p class="foot-note">
+      Memex is a non-chatbot tool that turns your agent session history into a spatial,
+      associative memory — inspired by Vannevar Bush's 1945 essay and its idea of
+      associative trails. Built for Qdrant Vector Space Day 2026.
+    </p>
+  </div>
+</footer>
+
+<script>
+(function () {
+  "use strict";
+
+  var reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  /* ---- surfacing cards on scroll (latent → surfaced) ---- */
+  var cards = document.querySelectorAll(".card");
+  if (reduceMotion || !("IntersectionObserver" in window)) {
+    cards.forEach(function (c) { c.classList.add("surfaced"); });
+  } else {
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e, i) {
+        if (e.isIntersecting) {
+          var el = e.target;
+          // gentle stagger so memories rise one after another
+          setTimeout(function () { el.classList.add("surfaced"); }, i * 90);
+          io.unobserve(el);
+        }
+      });
+    }, { threshold: 0.18 });
+    cards.forEach(function (c) { io.observe(c); });
+  }
+
+  /* ---- the memory field: dormant motes that brighten near the cursor ---- */
+  var canvas = document.getElementById("memory-field");
+  if (!canvas) return;
+  var ctx = canvas.getContext("2d");
+  var motes = [];
+  var DPR = Math.min(window.devicePixelRatio || 1, 2);
+  var pointer = { x: -9999, y: -9999, active: false };
+  var W = 0, H = 0;
+  var rafId = null;
+
+  function size() {
+    W = canvas.clientWidth;
+    H = canvas.clientHeight;
+    canvas.width = Math.floor(W * DPR);
+    canvas.height = Math.floor(H * DPR);
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  }
+
+  function seed() {
+    motes = [];
+    var count = Math.max(28, Math.min(70, Math.round((W * H) / 22000)));
+    for (var i = 0; i < count; i++) {
+      motes.push({
+        x: Math.random() * W,
+        y: Math.random() * H,
+        r: 1.1 + Math.random() * 2.2,
+        // slow drift, like dust suspended in still air
+        vx: (Math.random() - 0.5) * 0.14,
+        vy: (Math.random() - 0.5) * 0.14,
+        base: 0.10 + Math.random() * 0.14,
+        glow: 0,
+        hue: Math.random() < 0.5 ? 230 : 320
+      });
+    }
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+
+    // draw faint associative threads between nearby motes that are awake
+    for (var i = 0; i < motes.length; i++) {
+      var a = motes[i];
+      for (var j = i + 1; j < motes.length; j++) {
+        var b = motes[j];
+        var dx = a.x - b.x, dy = a.y - b.y;
+        var d2 = dx * dx + dy * dy;
+        if (d2 < 16000) {
+          var wake = Math.min(a.glow, b.glow);
+          if (wake > 0.04) {
+            var alpha = wake * (1 - d2 / 16000) * 0.5;
+            ctx.strokeStyle = "oklch(82% 0.13 230 / " + alpha.toFixed(3) + ")";
+            ctx.lineWidth = 0.6;
+            ctx.beginPath();
+            ctx.moveTo(a.x, a.y);
+            ctx.lineTo(b.x, b.y);
+            ctx.stroke();
+          }
+        }
+      }
+    }
+
+    // draw the motes themselves
+    for (var k = 0; k < motes.length; k++) {
+      var m = motes[k];
+
+      // drift
+      m.x += m.vx; m.y += m.vy;
+      if (m.x < -10) m.x = W + 10; if (m.x > W + 10) m.x = -10;
+      if (m.y < -10) m.y = H + 10; if (m.y > H + 10) m.y = -10;
+
+      // proximity wakes a memory; absence lets it return to latency
+      if (pointer.active) {
+        var pdx = m.x - pointer.x, pdy = m.y - pointer.y;
+        var pd = Math.sqrt(pdx * pdx + pdy * pdy);
+        var reach = 150;
+        if (pd < reach) {
+          m.glow += (1 - pd / reach - m.glow) * 0.12;
+        } else {
+          m.glow += (0 - m.glow) * 0.05;
+        }
+      } else {
+        m.glow += (0 - m.glow) * 0.04;
+      }
+      if (m.glow < 0) m.glow = 0;
+
+      var op = m.base + m.glow * 0.65;
+      var r = m.r + m.glow * 3.2;
+
+      // soft halo when surfacing
+      if (m.glow > 0.05) {
+        var g = ctx.createRadialGradient(m.x, m.y, 0, m.x, m.y, r * 5);
+        g.addColorStop(0, "oklch(82% 0.13 " + m.hue + " / " + (m.glow * 0.35).toFixed(3) + ")");
+        g.addColorStop(1, "oklch(82% 0.13 " + m.hue + " / 0)");
+        ctx.fillStyle = g;
+        ctx.beginPath();
+        ctx.arc(m.x, m.y, r * 5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      ctx.fillStyle = "oklch(88% 0.06 " + m.hue + " / " + op.toFixed(3) + ")";
+      ctx.beginPath();
+      ctx.arc(m.x, m.y, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    rafId = requestAnimationFrame(draw);
+  }
+
+  function start() {
+    size();
+    seed();
+    if (rafId) cancelAnimationFrame(rafId);
+    if (reduceMotion) {
+      // render a single calm frame, no animation loop, no proximity reaction
+      ctx.clearRect(0, 0, W, H);
+      for (var k = 0; k < motes.length; k++) {
+        var m = motes[k];
+        ctx.fillStyle = "oklch(86% 0.05 " + m.hue + " / " + (m.base + 0.06).toFixed(3) + ")";
+        ctx.beginPath();
+        ctx.arc(m.x, m.y, m.r, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    } else {
+      draw();
+    }
+  }
+
+  if (!reduceMotion) {
+    window.addEventListener("pointermove", function (e) {
+      var rect = canvas.getBoundingClientRect();
+      pointer.x = e.clientX - rect.left;
+      pointer.y = e.clientY - rect.top;
+      pointer.active = pointer.y >= 0 && pointer.y <= rect.height;
+    }, { passive: true });
+    window.addEventListener("pointerleave", function () { pointer.active = false; });
+    // pause the loop when the field scrolls out of view (kindness to the laptop fan)
+    if ("IntersectionObserver" in window) {
+      var vis = new IntersectionObserver(function (ents) {
+        ents.forEach(function (en) {
+          if (en.isIntersecting) { if (!rafId) draw(); }
+          else if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+        });
+      }, { threshold: 0 });
+      vis.observe(canvas);
+    }
+  }
+
+  var resizeTimer;
+  window.addEventListener("resize", function () {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(start, 200);
+  });
+
+  start();
+})();
+</script>
+</body>
+</html>

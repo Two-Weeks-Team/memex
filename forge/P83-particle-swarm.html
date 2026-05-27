@@ -1,0 +1,836 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Memex — the swarm remembers the moment</title>
+<meta name="description" content="Memex turns your Claude Code & Codex session history into a navigable associative memory backed by Qdrant. Thousands of drifting points self-organize, unbidden, into the scene of a remembered coding moment — then scatter as the next one gathers." />
+<style>
+  :root{
+    --ink:#eef2ff;
+    --dim:#9aa6d6;
+    --faint:#5c6699;
+    --p-warm:#ffd79a;        /* lamp / monitor warmth */
+    --p-cool:#9fe8ff;        /* cool point-cloud highlight */
+    --p-green:#86f3b4;       /* "tests green" accent in the scene */
+    --accent:#b6c6ff;
+    --bg0:#04050d;
+    --bg1:#080a18;
+    --panel: rgba(11,14,30,.55);
+    --hair: rgba(160,178,255,.16);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    background:
+      radial-gradient(1300px 820px at 70% 22%, #0e1330 0%, transparent 60%),
+      radial-gradient(1500px 980px at 14% 92%, #0a0d22 0%, transparent 55%),
+      linear-gradient(180deg, var(--bg1), var(--bg0) 72%);
+    color:var(--ink);
+    font:16px/1.6 ui-sans-serif,-apple-system,"Segoe UI",Roboto,Inter,system-ui,sans-serif;
+    overflow-x:hidden;
+    -webkit-font-smoothing:antialiased;
+  }
+  a{color:var(--accent);text-decoration:none}
+  a:hover{text-decoration:underline}
+  code,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+
+  /* ---------- the swarm stage ---------- */
+  .stage{position:relative;width:100%;height:100svh;min-height:640px;overflow:hidden}
+  #swarm{position:absolute;inset:0;width:100%;height:100%;display:block}
+
+  /* vignette so type stays legible over the field */
+  .stage::after{
+    content:"";position:absolute;inset:0;pointer-events:none;
+    background:
+      radial-gradient(120% 82% at 50% 40%, transparent 36%, rgba(4,5,13,.6) 100%),
+      linear-gradient(180deg, rgba(4,5,13,.46) 0%, transparent 24%, transparent 62%, rgba(4,5,13,.88) 100%);
+  }
+
+  /* ---------- overlaid copy ---------- */
+  .hud{position:absolute;inset:0;display:flex;flex-direction:column;pointer-events:none;z-index:3}
+  .hud > *{pointer-events:auto}
+
+  .topbar{display:flex;align-items:center;justify-content:space-between;gap:16px;
+    padding:22px clamp(18px,5vw,56px)}
+  .brand{display:flex;align-items:center;gap:11px;font-weight:700;letter-spacing:.16em;
+    text-transform:uppercase;font-size:13px;color:var(--ink)}
+  .brand .dot{width:9px;height:9px;border-radius:50%;background:var(--p-cool);
+    box-shadow:0 0 10px 2px rgba(159,232,255,.7)}
+  .topbar nav{display:flex;gap:clamp(10px,2.4vw,26px);font-size:13px;color:var(--dim);
+    letter-spacing:.02em}
+  .topbar nav a{color:var(--dim)}
+  .topbar nav a:hover{color:var(--ink)}
+
+  .hero{margin-top:auto;padding:0 clamp(18px,5vw,56px) clamp(26px,6vh,64px);max-width:780px}
+
+  /* the "current situation" that calls the memory up */
+  .moment{display:inline-flex;align-items:center;gap:10px;margin-bottom:20px;
+    padding:8px 14px;border:1px solid var(--hair);border-radius:999px;
+    background:var(--panel);backdrop-filter:blur(6px);
+    font-size:12.5px;letter-spacing:.02em;color:var(--dim)}
+  .moment .pulse{width:7px;height:7px;border-radius:50%;background:var(--p-cool);
+    box-shadow:0 0 0 0 rgba(159,232,255,.6);animation:pulse 2.6s ease-out infinite}
+  .moment b{color:var(--ink);font-weight:600}
+  @keyframes pulse{
+    0%{box-shadow:0 0 0 0 rgba(159,232,255,.55)}
+    70%{box-shadow:0 0 0 9px rgba(159,232,255,0)}
+    100%{box-shadow:0 0 0 0 rgba(159,232,255,0)}
+  }
+
+  h1{margin:0;font-weight:680;font-size:clamp(33px,6vw,62px);line-height:1.04;
+    letter-spacing:-.018em;color:#fff;text-shadow:0 2px 40px rgba(8,12,30,.7)}
+  h1 .glow{color:var(--p-cool);text-shadow:0 0 26px rgba(159,232,255,.4)}
+  .lede{margin:18px 0 0;font-size:clamp(15px,2.1vw,18.5px);color:var(--dim);max-width:620px}
+  .lede b{color:var(--ink);font-weight:600}
+
+  .cta{display:flex;flex-wrap:wrap;gap:13px;margin-top:28px}
+  .btn{display:inline-flex;align-items:center;gap:9px;padding:12px 20px;border-radius:11px;
+    font-size:14.5px;font-weight:600;letter-spacing:.01em;border:1px solid transparent;
+    transition:transform .15s ease, box-shadow .25s ease, background .25s ease}
+  .btn:hover{text-decoration:none;transform:translateY(-1px)}
+  .btn-primary{background:linear-gradient(180deg,#d8e6ff,#9fe8ff);color:#06203a;
+    box-shadow:0 8px 30px rgba(159,232,255,.26)}
+  .btn-primary:hover{box-shadow:0 12px 36px rgba(159,232,255,.4)}
+  .btn-ghost{border-color:var(--hair);color:var(--ink);background:var(--panel);
+    backdrop-filter:blur(6px)}
+  .btn-ghost:hover{border-color:rgba(160,178,255,.42)}
+
+  .legend{margin-top:22px;font-size:12.5px;color:var(--faint);letter-spacing:.01em;
+    display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+  .legend .scene-label{color:var(--p-cool);font-weight:600;letter-spacing:.03em}
+
+  /* small replay control */
+  .replay{position:absolute;right:clamp(16px,4vw,40px);bottom:clamp(20px,5vh,40px);
+    display:inline-flex;align-items:center;gap:8px;padding:9px 14px;border-radius:999px;
+    border:1px solid var(--hair);background:var(--panel);backdrop-filter:blur(6px);
+    color:var(--dim);font-size:12.5px;cursor:pointer;z-index:4}
+  .replay:hover{color:var(--ink);border-color:rgba(160,178,255,.4)}
+  .replay svg{width:13px;height:13px;fill:currentColor}
+
+  /* ---------- the ground-truth section below the fold ---------- */
+  .below{position:relative;z-index:2;max-width:1080px;margin:0 auto;
+    padding:clamp(56px,10vh,110px) clamp(18px,5vw,40px) 40px}
+  .kicker{font-size:12px;letter-spacing:.22em;text-transform:uppercase;color:var(--faint);
+    margin:0 0 14px}
+  .below h2{font-size:clamp(24px,4vw,38px);line-height:1.12;margin:0;color:#fff;
+    letter-spacing:-.01em;font-weight:660;max-width:780px}
+  .below p.sub{color:var(--dim);max-width:700px;margin:16px 0 0;font-size:16px}
+
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(238px,1fr));gap:16px;
+    margin-top:42px}
+  .card{border:1px solid var(--hair);border-radius:16px;padding:22px 22px 24px;
+    background:linear-gradient(180deg, rgba(14,19,40,.6), rgba(8,11,24,.45));
+    transition:border-color .2s ease, transform .2s ease}
+  .card:hover{border-color:rgba(160,178,255,.4);transform:translateY(-2px)}
+  .card h3{margin:0 0 8px;font-size:16px;color:#fff;letter-spacing:.01em;
+    display:flex;align-items:center;gap:9px}
+  .card h3 .gp{width:8px;height:8px;border-radius:50%;background:var(--p-cool);
+    box-shadow:0 0 8px 1px rgba(159,232,255,.7);flex:0 0 auto}
+  .card p{margin:0;font-size:14px;color:var(--dim);line-height:1.55}
+
+  .facts{margin-top:44px;border:1px solid var(--hair);border-radius:16px;overflow:hidden;
+    background:rgba(8,11,24,.5)}
+  .facts .row{display:grid;grid-template-columns:160px 1fr;gap:18px;padding:16px 22px;
+    border-top:1px solid rgba(160,178,255,.08);font-size:14.5px}
+  .facts .row:first-child{border-top:0}
+  .facts .row .lab{color:var(--faint);letter-spacing:.04em;font-size:12.5px;
+    text-transform:uppercase;padding-top:2px}
+  .facts .row .val{color:var(--ink)}
+  .facts .row .val .mono{color:var(--p-cool);font-size:13.5px}
+
+  .addline{margin-top:34px;border:1px solid var(--hair);border-radius:14px;
+    background:#06091a;padding:16px 18px;font-size:13.5px;color:var(--dim);overflow-x:auto}
+  .addline .mono{color:var(--ink)}
+  .addline .c{color:var(--p-cool)}
+
+  footer{position:relative;z-index:2;border-top:1px solid var(--hair);margin-top:60px}
+  .foot{max-width:1080px;margin:0 auto;padding:28px clamp(18px,5vw,40px) 60px;
+    display:flex;flex-wrap:wrap;gap:18px;justify-content:space-between;align-items:center;
+    color:var(--faint);font-size:13px}
+  .foot a{color:var(--dim)}
+  .foot .links{display:flex;flex-wrap:wrap;gap:18px}
+
+  @media (prefers-reduced-motion: reduce){
+    .moment .pulse{animation:none}
+  }
+
+  @media (max-width:640px){
+    .topbar nav{display:none}
+    .facts .row{grid-template-columns:1fr;gap:4px}
+    .replay{display:none}
+  }
+</style>
+</head>
+<body>
+
+<section class="stage" aria-label="Thousands of drifting points self-organizing into the scene of a remembered coding moment, then scattering as the next one gathers">
+  <canvas id="swarm" aria-hidden="true"></canvas>
+
+  <div class="hud">
+    <header class="topbar">
+      <div class="brand"><span class="dot" aria-hidden="true"></span> Memex</div>
+      <nav aria-label="Primary">
+        <a href="https://github.com/Two-Weeks-Team/memex">Repo</a>
+        <a href="https://two-weeks-team.github.io/memex/">Live</a>
+        <a href="#how">How it works</a>
+        <a href="#agent">For agents</a>
+      </nav>
+    </header>
+
+    <div class="hero">
+      <span class="moment">
+        <span class="pulse" aria-hidden="true"></span>
+        Right now you're <b>chasing a flaky test that won't go green</b> &mdash; and the dust stirs&hellip;
+      </span>
+
+      <h1>You've been here before.<br>The scattered points <span class="glow">gather into&nbsp;it.</span></h1>
+
+      <p class="lede">
+        You never wrote it down. But thousands of stray points of an old session drift,
+        find each other, and settle &mdash; on their own &mdash; into the
+        <b>scene of the night your suite finally passed</b>: the desk, the screen, the
+        green bar. It holds for a breath, then scatters as the next memory gathers.
+      </p>
+
+      <div class="cta">
+        <a class="btn btn-primary" href="https://github.com/Two-Weeks-Team/memex">Get Memex on GitHub</a>
+        <a class="btn btn-ghost" href="https://two-weeks-team.github.io/memex/">See it live</a>
+      </div>
+
+      <p class="legend">
+        <span class="scene-label" id="sceneName">gathering&hellip;</span>
+        <span aria-hidden="true">&middot;</span>
+        an association settling into form, not a search
+      </p>
+    </div>
+
+    <button class="replay" id="replay" type="button" aria-label="Let the swarm gather again">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5V1L7 6l5 5V7a5 5 0 1 1-5 5H5a7 7 0 1 0 7-7z"/></svg>
+      Let it gather again
+    </button>
+  </div>
+</section>
+
+<main class="below">
+  <section id="how">
+    <p class="kicker">What just happened</p>
+    <h2>People don't document every memory &mdash; yet when the moment arrives,
+      the relevant thought surfaces on its own.</h2>
+    <p class="sub">
+      Memex is a non-chatbot, LLM-free-at-runtime tool that reads your existing
+      Claude&nbsp;Code and Codex session history and turns it into a navigable
+      associative memory backed by <b style="color:var(--ink)">Qdrant</b>. You move through your own past by
+      <i>similarity</i>, not keywords &mdash; and the relevant moment can rise to you proactively.
+    </p>
+
+    <div class="grid">
+      <article class="card">
+        <h3><span class="gp" aria-hidden="true"></span>Time Machine</h3>
+        <p>Replay any past session as it happened &mdash; the whole scene, not a snippet.</p>
+      </article>
+      <article class="card">
+        <h3><span class="gp" aria-hidden="true"></span>Lens</h3>
+        <p>Named-vector weighted search to look through your history from one angle at a time.</p>
+      </article>
+      <article class="card">
+        <h3><span class="gp" aria-hidden="true"></span>Topology</h3>
+        <p>A distance-matrix &rarr; MST graph: how your sessions actually connect to one another.</p>
+      </article>
+      <article class="card">
+        <h3><span class="gp" aria-hidden="true"></span>Mix &amp; Discovery</h3>
+        <p>Positive / negative recommendation to pull related work toward you and push noise away.</p>
+      </article>
+      <article class="card">
+        <h3><span class="gp" aria-hidden="true"></span>Proactive Recall</h3>
+        <p>The piece that gathered the dust above: a relevant past moment surfaces because the current one evoked it.</p>
+      </article>
+      <article class="card">
+        <h3><span class="gp" aria-hidden="true"></span>Companion · Wrapped · Loop&nbsp;Breaker</h3>
+        <p>An agent-memory layer over your corpus &mdash; recap what you've done, and catch yourself circling.</p>
+      </article>
+    </div>
+
+    <div class="facts" aria-label="What Memex is">
+      <div class="row"><div class="lab">Reads</div>
+        <div class="val"><span class="mono">~/.claude/projects/**/*.jsonl</span>, legacy transcripts, and <span class="mono">history.jsonl</span></div></div>
+      <div class="row"><div class="lab">Backed by</div>
+        <div class="val">Qdrant &mdash; navigate by vector similarity, no runtime LLM</div></div>
+      <div class="row"><div class="lab">Why</div>
+        <div class="val">Claude&nbsp;Code silently migrates and deletes old sessions. Memex keeps a corpus <b style="color:var(--ink)">you own.</b></div></div>
+      <div class="row"><div class="lab">Built for</div>
+        <div class="val">Qdrant Vector Space Day 2026 &mdash; <i>"Think Outside the Bot."</i></div></div>
+    </div>
+  </section>
+
+  <section id="agent">
+    <p class="kicker" style="margin-top:56px">For your agent</p>
+    <h2 style="font-size:clamp(20px,3vw,28px)">11 MCP tools over stdio + HTTP &mdash;
+      works in Claude&nbsp;Code, Codex, and Cursor.</h2>
+    <p class="sub">A server / Docker variant runs Qdrant, the web UI, and the MCP server in one image.
+      The tools let an agent recall, replay, and connect across your own history.</p>
+    <div class="addline mono">
+      <span class="c">$</span> claude mcp add memex -- memex-mcp
+    </div>
+    <p style="margin-top:18px;font-size:14px">
+      <a href="https://github.com/Two-Weeks-Team/memex#server--docker">Server / Docker variant</a>
+      &nbsp;&middot;&nbsp;
+      <a href="https://github.com/Two-Weeks-Team/memex">MCP integration &amp; the 11 tools</a>
+    </p>
+  </section>
+</main>
+
+<footer>
+  <div class="foot">
+    <div>Memex &mdash; a memory you own, surfaced by association.</div>
+    <div class="links">
+      <a href="https://github.com/Two-Weeks-Team/memex">GitHub</a>
+      <a href="https://two-weeks-team.github.io/memex/">Live landing</a>
+      <a href="https://github.com/Two-Weeks-Team/memex#server--docker">Docker</a>
+    </div>
+  </div>
+</footer>
+
+<script>
+(function(){
+  "use strict";
+
+  var canvas = document.getElementById('swarm');
+  var ctx = canvas.getContext('2d');
+  var sceneName = document.getElementById('sceneName');
+  var replayBtn = document.getElementById('replay');
+
+  var DPR = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+  var W = 0, H = 0;
+  var reduce = window.matchMedia &&
+               window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  /* ---------------------------------------------------------------------------
+     THE SCENE the swarm self-organizes into.
+     A SECOND, distinct coding moment (not P27's "the night you fixed it"):
+     "the night the suite finally went green." Read left to right —
+       • a PERSON leaning BACK in a chair, arms up behind their head (relief),
+       • a wide MONITOR showing a filled GREEN progress bar + a check,
+       • the DESK they sit at, a MUG, an angled LAMP.
+     The scene is authored as filled SHAPES (not just an outline) so that when
+     thousands of points are sprinkled across them, the crowd reads as a
+     recognizable point-cloud PORTRAIT of the tableau — the whole signature of
+     this concept. Authored in a normalized [0..1] box, aspect ~1.62:1.
+  --------------------------------------------------------------------------- */
+
+  // Each shape carries a "kind" that tints its points:
+  //   cool  → person / chair / desk structure
+  //   warm  → lamp + the warm desk pool
+  //   green → the monitor's passing test bar + check (the emotional payload)
+  //   screen→ the dim monitor body
+  var SCENE = {
+    aspect: 1.62,
+    shapes: [
+      /* ---- DESK: the horizon slab the whole scene rests on ---- */
+      { kind:'cool', w:0.18, poly:[
+        [0.06,0.70],[0.97,0.70],[0.97,0.745],[0.06,0.745]
+      ]},
+
+      /* ---- MONITOR body (right of center) ---- */
+      { kind:'screen', w:0.20, poly:[
+        [0.555,0.205],[0.875,0.205],[0.875,0.515],[0.555,0.515]
+      ]},
+      // monitor neck + foot
+      { kind:'cool', w:0.025, poly:[
+        [0.700,0.515],[0.730,0.515],[0.726,0.665],[0.704,0.665]
+      ]},
+      { kind:'cool', w:0.03, poly:[
+        [0.655,0.665],[0.775,0.665],[0.775,0.700],[0.655,0.700]
+      ]},
+
+      /* ---- GREEN PASSING BAR on the screen (filled) ---- */
+      { kind:'green', w:0.16, poly:[
+        [0.585,0.300],[0.845,0.300],[0.845,0.350],[0.585,0.350]
+      ]},
+      // a couple of "passing lines" under the bar
+      { kind:'green', w:0.05, poly:[
+        [0.585,0.385],[0.760,0.385],[0.760,0.405],[0.585,0.405]
+      ]},
+      { kind:'green', w:0.045, poly:[
+        [0.585,0.425],[0.700,0.425],[0.700,0.445],[0.585,0.445]
+      ]},
+      // a big check mark to the right of those lines (two strokes as quads)
+      { kind:'green', w:0.03, poly:[
+        [0.778,0.430],[0.800,0.418],[0.818,0.455],[0.800,0.466]
+      ]},
+      { kind:'green', w:0.04, poly:[
+        [0.815,0.452],[0.852,0.385],[0.838,0.376],[0.806,0.444]
+      ]},
+
+      /* ---- PERSON (left) leaning back, arms up behind head ---- */
+      // head (octagon → reads round)
+      { kind:'cool', w:0.05, poly:[
+        [0.250,0.230],[0.290,0.235],[0.305,0.270],[0.298,0.310],
+        [0.265,0.330],[0.228,0.322],[0.210,0.290],[0.218,0.250]
+      ]},
+      // torso leaning back (trapezoid tilted)
+      { kind:'cool', w:0.10, poly:[
+        [0.232,0.330],[0.300,0.345],[0.330,0.520],[0.225,0.560],
+        [0.185,0.520],[0.205,0.380]
+      ]},
+      // left arm up, elbow out, hand behind head
+      { kind:'cool', w:0.035, poly:[
+        [0.232,0.345],[0.150,0.300],[0.190,0.235],[0.235,0.262]
+      ]},
+      // right arm up, elbow out (mirror), hand behind head
+      { kind:'cool', w:0.035, poly:[
+        [0.298,0.350],[0.380,0.310],[0.350,0.245],[0.302,0.270]
+      ]},
+      // lap / thighs (seated, extending right toward desk)
+      { kind:'cool', w:0.06, poly:[
+        [0.225,0.520],[0.360,0.540],[0.365,0.600],[0.230,0.600]
+      ]},
+
+      /* ---- CHAIR back behind the person ---- */
+      { kind:'cool', w:0.04, poly:[
+        [0.150,0.330],[0.190,0.330],[0.196,0.600],[0.158,0.600]
+      ]},
+
+      /* ---- MUG on the desk between person & monitor ---- */
+      { kind:'warm', w:0.03, poly:[
+        [0.450,0.560],[0.500,0.560],[0.498,0.700],[0.452,0.700]
+      ]},
+
+      /* ---- DESK LAMP (far right), arm bent over the desk ---- */
+      // base
+      { kind:'cool', w:0.025, poly:[
+        [0.890,0.660],[0.940,0.660],[0.940,0.700],[0.890,0.700]
+      ]},
+      // arm (lower segment)
+      { kind:'cool', w:0.02, poly:[
+        [0.908,0.660],[0.926,0.660],[0.952,0.470],[0.934,0.466]
+      ]},
+      // arm (upper segment, bending left over the desk)
+      { kind:'cool', w:0.02, poly:[
+        [0.952,0.470],[0.934,0.466],[0.840,0.330],[0.860,0.318]
+      ]},
+      // lamp head (warm)
+      { kind:'warm', w:0.04, poly:[
+        [0.838,0.300],[0.878,0.318],[0.862,0.360],[0.812,0.350]
+      ]}
+    ]
+  };
+
+  // ---- build target points by sampling each shape's filled area ----
+  var TARGETS = [];      // {x,y in [0..1], kind}
+  var WARM_CENTERS = []; // for glow blooms in absolute coords (computed at layout)
+
+  function pointInPoly(px, py, poly){
+    var inside = false, n = poly.length;
+    for (var i=0, j=n-1; i<n; j=i++){
+      var xi=poly[i][0], yi=poly[i][1], xj=poly[j][0], yj=poly[j][1];
+      var hit = ((yi>py)!==(yj>py)) &&
+                (px < (xj-xi)*(py-yi)/((yj-yi)||1e-9)+xi);
+      if (hit) inside = !inside;
+    }
+    return inside;
+  }
+  function polyBounds(poly){
+    var x0=1,y0=1,x1=0,y1=0;
+    for (var i=0;i<poly.length;i++){
+      var p=poly[i];
+      if(p[0]<x0)x0=p[0]; if(p[0]>x1)x1=p[0];
+      if(p[1]<y0)y0=p[1]; if(p[1]>y1)y1=p[1];
+    }
+    return [x0,y0,x1,y1];
+  }
+
+  // budget = total target points wanted (the "thousands" of the swarm).
+  // Points are distributed across shapes proportional to their *filled* area
+  // (sampled), so big regions (torso, monitor, desk) get a dense crowd while
+  // thin strokes (lamp arm, check) still get a readable minimum.
+  function buildTargets(budget){
+    TARGETS.length = 0;
+
+    // 1) sample each shape's filled area to estimate relative coverage
+    var fills = [];        // per-shape arrays of accepted [x,y]
+    var weights = [];      // per-shape area*emphasis weight
+    var wSum = 0;
+    var SAMP = 240;        // probes per shape to estimate fill ratio
+    for (var s=0;s<SCENE.shapes.length;s++){
+      var sh = SCENE.shapes[s];
+      var b = polyBounds(sh.poly);
+      var bw = (b[2]-b[0]), bh = (b[3]-b[1]);
+      var hits = 0;
+      for (var t=0;t<SAMP;t++){
+        var rx = b[0] + Math.random()*bw;
+        var ry = b[1] + Math.random()*bh;
+        if (pointInPoly(rx, ry, sh.poly)) hits++;
+      }
+      var fillArea = (hits / SAMP) * bw * bh;          // true filled area
+      // emphasis: the green payload and the person read as the focal point
+      var emph = (sh.kind === 'green') ? 1.6 : (sh.kind === 'screen' ? 1.15 : 1.0);
+      var w = Math.pow(fillArea, 0.92) * emph;          // slight de-bias of huge slabs
+      weights.push(w); wSum += w;
+      fills.push({ b:b, poly:sh.poly, kind:sh.kind });
+    }
+
+    // 2) allocate the budget and rejection-sample that many points per shape
+    for (var s2=0;s2<fills.length;s2++){
+      var f = fills[s2];
+      var n = Math.max(14, Math.round(budget * (weights[s2] / wSum)));
+      var got = 0, guard = 0, lim = n*40;
+      var bb = f.b, w0 = (bb[2]-bb[0]), h0 = (bb[3]-bb[1]);
+      while (got < n && guard < lim){
+        guard++;
+        var px = bb[0] + Math.random()*w0;
+        var py = bb[1] + Math.random()*h0;
+        if (pointInPoly(px, py, f.poly)){
+          TARGETS.push({ x:px, y:py, kind:f.kind });
+          got++;
+        }
+      }
+    }
+  }
+
+  // ---- particles --------------------------------------------------------
+  var P = [];            // particles
+  function buildParticles(){
+    // one particle per target so the crowd exactly fills the scene
+    P.length = 0;
+    for (var i=0;i<TARGETS.length;i++){
+      P.push({
+        // start scattered all over the field
+        x: Math.random()*W, y: Math.random()*H,
+        vx: 0, vy: 0,
+        // home (filled in at layout)
+        hx: 0, hy: 0,
+        kind: TARGETS[i].kind,
+        // wander phase for the drift + scatter look
+        ph: Math.random()*Math.PI*2,
+        spd: 0.5 + Math.random()*1.0,
+        r: 0.6 + Math.random()*0.9,
+        // a little per-particle stiffness variety
+        k: 0.012 + Math.random()*0.016
+      });
+    }
+  }
+
+  // place scene + particle homes into device space
+  var T = {ox:0, oy:0, s:1, ah:0};
+  function layout(){
+    var narrow = W < 820;
+    var byW = W * (narrow ? 0.92 : 0.62);
+    var byH = (H * (narrow ? 0.46 : 0.60)) * SCENE.aspect;
+    T.s = Math.min(byW, byH);
+    T.ah = T.s / SCENE.aspect;
+    if (narrow){
+      T.ox = (W - T.s) * 0.5;
+      T.oy = H*0.05;
+    } else {
+      T.ox = W - T.s - W*0.045;
+      T.oy = H*0.075;
+    }
+    // assign homes
+    for (var i=0;i<P.length && i<TARGETS.length;i++){
+      P[i].hx = T.ox + TARGETS[i].x * T.s;
+      P[i].hy = T.oy + TARGETS[i].y * T.ah;
+    }
+    // warm-glow source = lamp head + mug, in absolute coords (last warm shapes)
+    WARM_CENTERS.length = 0;
+    for (var s=0;s<SCENE.shapes.length;s++){
+      if (SCENE.shapes[s].kind === 'warm'){
+        var b = polyBounds(SCENE.shapes[s].poly);
+        WARM_CENTERS.push({
+          x: T.ox + ((b[0]+b[2])/2)*T.s,
+          y: T.oy + ((b[1]+b[3])/2)*T.ah
+        });
+      }
+    }
+    // green payload center for a subtle pulse when formed
+    for (var s2=0;s2<SCENE.shapes.length;s2++){
+      if (SCENE.shapes[s2].kind === 'green'){
+        var bb = polyBounds(SCENE.shapes[s2].poly);
+        GREEN_C.x = T.ox + ((bb[0]+bb[2])/2)*T.s;
+        GREEN_C.y = T.oy + ((bb[1]+bb[3])/2)*T.ah;
+        break;
+      }
+    }
+  }
+  var GREEN_C = {x:0,y:0};
+
+  // ---- swarm cycle state machine ----------------------------------------
+  // SCATTER → GATHER → HOLD → DISPERSE → (repeat)
+  var phase = 'gather';
+  var phaseStart = 0;
+  var GATHER_MS  = 3200;   // points migrate into the scene
+  var HOLD_MS    = 3400;   // scene holds, lit
+  var DISPERSE_MS= 1700;   // scene blows apart
+  var formed = 0;          // 0..1 "how formed" the scene is (for glow + label)
+
+  function setPhase(name, now){ phase = name; phaseStart = now; }
+
+  function colorFor(kind, a){
+    switch(kind){
+      case 'warm':  return 'rgba(255,215,154,'+a+')';
+      case 'green': return 'rgba(134,243,180,'+a+')';
+      case 'screen':return 'rgba(150,176,235,'+a+')';
+      default:      return 'rgba(159,232,255,'+a+')'; // cool
+    }
+  }
+
+  function resize(){
+    var box = canvas.parentElement.getBoundingClientRect();
+    W = Math.max(1, Math.round(box.width));
+    H = Math.max(1, Math.round(box.height));
+    canvas.style.width = W + 'px';
+    canvas.style.height = H + 'px';
+    canvas.width = Math.round(W*DPR);
+    canvas.height = Math.round(H*DPR);
+    ctx.setTransform(DPR,0,0,DPR,0,0);
+
+    // particle budget scales with screen so we don't melt phones, but stays
+    // in the "thousands" on desktop so the crowd reads as a true point-cloud.
+    var px = W*H;
+    var budget = px < 360000 ? 1500 : (px < 900000 ? 2600 : 3400);
+    buildTargets(budget);
+    buildParticles();
+    layout();
+  }
+
+  function easeInOut(t){ return t<0.5 ? 2*t*t : 1-Math.pow(-2*t+2,2)/2; }
+
+  var rafId = 0;
+  var running = false;      // true while the rAF loop should keep ticking
+  var lastDrift = 0;
+  var pausedAt = 0;         // timestamp when the loop was last paused
+
+  function startLoop(){
+    if (running) return;
+    running = true; lastDrift = 0;
+    // if we were mid-cycle and paused, shift the phase clock forward by the
+    // gap so the state machine resumes where it left off (no jump).
+    if (pausedAt && phaseStart){
+      var gap = performance.now() - pausedAt;
+      phaseStart += gap;
+    }
+    pausedAt = 0;
+    rafId = requestAnimationFrame(frame);
+  }
+  function stopLoop(){
+    if (running) pausedAt = performance.now();
+    running = false;
+    cancelAnimationFrame(rafId);
+    rafId = 0;
+  }
+
+  function frame(now){
+    if (!running) return;     // honor pause even if a frame was already queued
+    if (!phaseStart) phaseStart = now;
+    var el = now - phaseStart;
+    var dt = Math.min(2.2, (now - lastDrift) / 16.7 || 1);
+    lastDrift = now;
+
+    ctx.clearRect(0,0,W,H);
+    // additive blending so overlapping points bloom into a luminous cloud
+    ctx.globalCompositeOperation = 'lighter';
+
+    // ---- compute the "pull" toward home based on phase ----
+    var pull;        // 0 = free drift, 1 = strongly held to home
+    if (phase === 'gather'){
+      pull = easeInOut(Math.min(1, el / GATHER_MS));
+      formed = pull;
+      if (el >= GATHER_MS){ setPhase('hold', now); formed = 1; }
+    } else if (phase === 'hold'){
+      pull = 1; formed = 1;
+      if (el >= HOLD_MS){ setPhase('disperse', now); }
+    } else { // disperse
+      var d = Math.min(1, el / DISPERSE_MS);
+      pull = 1 - easeInOut(d);
+      formed = 1 - d;
+      if (el >= DISPERSE_MS){
+        // rename scene + start the next gather (same scene, lifelike re-arrival)
+        setPhase('gather', now);
+      }
+    }
+
+    // a one-shot outward shove at the very start of disperse
+    var disperseKick = (phase === 'disperse' && el < 40);
+
+    for (var i=0;i<P.length;i++){
+      var p = P[i];
+
+      // gentle, ever-present wander (so even when held, the cloud breathes)
+      p.ph += 0.012 * p.spd;
+      var wanderX = Math.cos(p.ph) * 0.10 * p.spd;
+      var wanderY = Math.sin(p.ph*1.3) * 0.10 * p.spd;
+
+      // spring toward home, scaled by pull
+      var k = p.k * pull;
+      var ax = (p.hx - p.x) * k + wanderX * (1 - pull*0.85);
+      var ay = (p.hy - p.y) * k + wanderY * (1 - pull*0.85);
+
+      if (disperseKick){
+        // shove away from the scene's center → satisfying scatter
+        var dx = p.x - GREEN_C.x, dy = p.y - GREEN_C.y;
+        var dlen = Math.hypot(dx,dy) || 1;
+        p.vx += (dx/dlen) * (2.2 + Math.random()*2.6);
+        p.vy += (dy/dlen) * (2.2 + Math.random()*2.6);
+      }
+
+      p.vx = (p.vx + ax) * 0.90;   // damping
+      p.vy = (p.vy + ay) * 0.90;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+
+      // wrap stray particles back into view during free drift so the field
+      // always feels populated (never an empty stage)
+      if (pull < 0.25){
+        if (p.x < -20) p.x = W+20; else if (p.x > W+20) p.x = -20;
+        if (p.y < -20) p.y = H+20; else if (p.y > H+20) p.y = -20;
+      }
+
+      // alpha + size: brighter & crisper as the scene forms
+      var a = 0.10 + 0.55*pull;
+      var rr = p.r * (0.85 + 0.7*pull);
+      // green payload gets an extra shimmer once mostly formed
+      if (p.kind === 'green' && formed > 0.6){
+        a += 0.18 * Math.sin(now*0.006 + p.ph);
+      }
+      a = Math.max(0.05, Math.min(0.95, a));
+
+      ctx.fillStyle = colorFor(p.kind, a);
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, rr, 0, Math.PI*2);
+      ctx.fill();
+    }
+
+    // ---- glow blooms once the scene is mostly formed ----
+    if (formed > 0.45){
+      var gA = (formed - 0.45) / 0.55;
+      // warm pools (lamp + mug)
+      for (var w=0; w<WARM_CENTERS.length; w++){
+        var c = WARM_CENTERS[w];
+        var rad = T.s * (w===0 ? 0.16 : 0.07);
+        var g = ctx.createRadialGradient(c.x,c.y,0, c.x,c.y, rad);
+        g.addColorStop(0, 'rgba(255,215,154,'+(0.22*gA)+')');
+        g.addColorStop(0.5,'rgba(255,180,110,'+(0.07*gA)+')');
+        g.addColorStop(1, 'rgba(255,180,110,0)');
+        ctx.fillStyle = g;
+        ctx.beginPath(); ctx.arc(c.x,c.y, rad, 0, Math.PI*2); ctx.fill();
+      }
+      // green payload glow (the emotional beat: it passed)
+      var gg = ctx.createRadialGradient(GREEN_C.x,GREEN_C.y,0, GREEN_C.x,GREEN_C.y, T.s*0.14);
+      gg.addColorStop(0, 'rgba(134,243,180,'+(0.20*gA)+')');
+      gg.addColorStop(0.55,'rgba(110,230,170,'+(0.06*gA)+')');
+      gg.addColorStop(1, 'rgba(110,230,170,0)');
+      ctx.fillStyle = gg;
+      ctx.beginPath(); ctx.arc(GREEN_C.x,GREEN_C.y, T.s*0.14, 0, Math.PI*2); ctx.fill();
+    }
+
+    ctx.globalCompositeOperation = 'source-over';
+
+    // ---- scene label tracks the phase ----
+    if (formed > 0.7 && sceneName.textContent !== 'the night the suite went green'){
+      sceneName.textContent = 'the night the suite went green';
+    } else if (formed <= 0.25 && phase === 'gather' &&
+               sceneName.textContent !== 'gathering…'){
+      sceneName.textContent = 'gathering…';
+    } else if (phase === 'disperse' && formed < 0.5 &&
+               sceneName.textContent !== 'scattering…'){
+      sceneName.textContent = 'scattering…';
+    }
+
+    if (running) rafId = requestAnimationFrame(frame);
+  }
+
+  // ---- reduced motion: render the formed scene once, static, no swarm ----
+  function renderStatic(){
+    stopLoop();
+    ctx.clearRect(0,0,W,H);
+    ctx.globalCompositeOperation = 'lighter';
+    for (var i=0;i<P.length;i++){
+      var p = P[i];
+      // snap to home; small deterministic jitter so it reads as a crowd, not a stencil
+      var jx = (Math.sin(i*12.9898)*43758.5453 % 1) * 2.0;
+      var jy = (Math.sin(i*78.233)*12543.123 % 1) * 2.0;
+      var x = p.hx + jx, y = p.hy + jy;
+      var rr = p.r * 1.4;
+      ctx.fillStyle = colorFor(p.kind, p.kind==='green' ? 0.85 : 0.6);
+      ctx.beginPath(); ctx.arc(x, y, rr, 0, Math.PI*2); ctx.fill();
+    }
+    // static glow
+    for (var w=0; w<WARM_CENTERS.length; w++){
+      var c = WARM_CENTERS[w]; var rad = T.s*(w===0?0.16:0.07);
+      var g = ctx.createRadialGradient(c.x,c.y,0,c.x,c.y,rad);
+      g.addColorStop(0,'rgba(255,215,154,0.2)');
+      g.addColorStop(1,'rgba(255,180,110,0)');
+      ctx.fillStyle=g; ctx.beginPath(); ctx.arc(c.x,c.y,rad,0,Math.PI*2); ctx.fill();
+    }
+    var gg = ctx.createRadialGradient(GREEN_C.x,GREEN_C.y,0,GREEN_C.x,GREEN_C.y,T.s*0.14);
+    gg.addColorStop(0,'rgba(134,243,180,0.2)'); gg.addColorStop(1,'rgba(110,230,170,0)');
+    ctx.fillStyle=gg; ctx.beginPath(); ctx.arc(GREEN_C.x,GREEN_C.y,T.s*0.14,0,Math.PI*2); ctx.fill();
+    ctx.globalCompositeOperation = 'source-over';
+    sceneName.textContent = 'the night the suite went green';
+  }
+
+  function start(){
+    stopLoop();
+    resize();
+    if (reduce){
+      // formed scene, no motion: snap particles onto homes
+      for (var i=0;i<P.length;i++){ P[i].x = P[i].hx; P[i].y = P[i].hy; }
+      renderStatic();
+    } else {
+      // start scattered, then gather
+      for (var j=0;j<P.length;j++){ P[j].x = Math.random()*W; P[j].y = Math.random()*H; }
+      phase = 'gather'; phaseStart = 0; formed = 0; pausedAt = 0;
+      sceneName.textContent = 'gathering…';
+      startLoop();
+    }
+  }
+
+  // ---- controls / lifecycle ----
+  replayBtn.addEventListener('click', function(){
+    reduce = window.matchMedia &&
+             window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (reduce){ start(); return; }
+    stopLoop();
+    for (var j=0;j<P.length;j++){ P[j].x = Math.random()*W; P[j].y = Math.random()*H; P[j].vx=0; P[j].vy=0; }
+    phase = 'gather'; phaseStart = 0; formed = 0; pausedAt = 0;
+    sceneName.textContent = 'gathering…';
+    startLoop();
+  });
+
+  var rT;
+  window.addEventListener('resize', function(){
+    clearTimeout(rT);
+    rT = setTimeout(function(){
+      resize();
+      if (reduce){
+        for (var i=0;i<P.length;i++){ P[i].x = P[i].hx; P[i].y = P[i].hy; }
+        renderStatic();
+      }
+    }, 160);
+  });
+
+  // pause when the stage scrolls out of view (perf + battery)
+  if ('IntersectionObserver' in window){
+    var io = new IntersectionObserver(function(entries){
+      entries.forEach(function(e){
+        if (reduce) return;
+        if (e.isIntersecting){ startLoop(); }
+        else { stopLoop(); }
+      });
+    }, {threshold:0.02});
+    io.observe(canvas);
+  }
+
+  // honor live changes to the motion preference
+  if (window.matchMedia){
+    try {
+      window.matchMedia('(prefers-reduced-motion: reduce)')
+        .addEventListener('change', function(e){ reduce = e.matches; start(); });
+    } catch(_){}
+  }
+
+  start();
+})();
+</script>
+</body>
+</html>

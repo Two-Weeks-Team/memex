@@ -1,0 +1,977 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Memex — the front rolls in, and the memory rains down</title>
+<meta name="description" content="Memex turns your Claude Code / Codex session history into a navigable spatial memory backed by Qdrant. Not a chatbot, not a search box — when the moment is right, the relevant past surfaces on its own." />
+<style>
+  :root {
+    --sky-hi: #2a3d5a;
+    --sky-lo: #0c1320;
+    --ink: #e8eef7;
+    --muted: #9fb0c8;
+    --faint: #6b7d99;
+    --rain: #aebfd6;
+    --warm: #ffd9a8;
+    --warm-deep: #ffb066;
+    --line: rgba(174, 191, 214, 0.18);
+    --panel: rgba(12, 19, 32, 0.62);
+    --maxw: 1100px;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body { margin: 0; padding: 0; }
+
+  body {
+    background: #070b13;
+    color: var(--ink);
+    font-family: "Iowan Old Style", "Palatino Linotype", "Georgia", serif;
+    -webkit-font-smoothing: antialiased;
+    line-height: 1.55;
+    overflow-x: hidden;
+  }
+
+  .ui-sans {
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+
+  a { color: inherit; }
+
+  /* ---------- The sky stage ---------- */
+  .stage {
+    position: relative;
+    width: 100%;
+    height: 100vh;
+    min-height: 600px;
+    overflow: hidden;
+    background:
+      radial-gradient(120% 80% at 50% 8%, var(--sky-hi), var(--sky-lo) 70%, #060a12 100%);
+  }
+
+  #sky {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+  }
+
+  /* HUD copy over the sky */
+  .overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 5;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    padding: clamp(20px, 4vw, 48px);
+    pointer-events: none;
+  }
+  .overlay > * { pointer-events: auto; }
+
+  .masthead {
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+    flex-wrap: wrap;
+  }
+  .wordmark {
+    font-family: ui-sans-serif, system-ui, sans-serif;
+    font-weight: 800;
+    letter-spacing: 0.5px;
+    font-size: clamp(20px, 2.4vw, 26px);
+    color: var(--ink);
+  }
+  .wordmark b { color: var(--warm-deep); }
+  .kicker {
+    font-family: ui-sans-serif, system-ui, sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 2.6px;
+    font-size: 11px;
+    color: var(--faint);
+  }
+
+  .stage-foot {
+    max-width: 760px;
+  }
+  .now-bar {
+    font-family: ui-sans-serif, system-ui, sans-serif;
+    font-size: 12.5px;
+    letter-spacing: 0.4px;
+    color: var(--muted);
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 7px 15px;
+    backdrop-filter: blur(6px);
+  }
+  .now-bar .pulse {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--warm-deep);
+    box-shadow: 0 0 0 0 rgba(255,176,102,0.5);
+    animation: pulse 2.6s ease-out infinite;
+  }
+  @keyframes pulse {
+    0% { box-shadow: 0 0 0 0 rgba(255,176,102,0.5); }
+    70% { box-shadow: 0 0 0 9px rgba(255,176,102,0); }
+    100% { box-shadow: 0 0 0 0 rgba(255,176,102,0); }
+  }
+  .now-ctx { color: var(--ink); }
+
+  .lede {
+    margin: 16px 0 0;
+    font-size: clamp(26px, 4.6vw, 50px);
+    line-height: 1.08;
+    font-weight: 500;
+    letter-spacing: -0.5px;
+    max-width: 16ch;
+    text-shadow: 0 2px 30px rgba(0,0,0,0.55);
+  }
+  .lede .em { color: var(--warm); font-style: italic; }
+  .sub {
+    margin: 14px 0 0;
+    font-family: ui-sans-serif, system-ui, sans-serif;
+    font-size: clamp(14px, 1.6vw, 16px);
+    color: var(--muted);
+    max-width: 52ch;
+  }
+
+  /* tiny forecast strip — shows what the front is bringing in, autonomously */
+  .forecast {
+    position: absolute;
+    z-index: 6;
+    top: clamp(18px, 4vw, 46px);
+    right: clamp(20px, 4vw, 48px);
+    width: 232px;
+    max-width: 44vw;
+    font-family: ui-sans-serif, system-ui, sans-serif;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 13px 15px 14px;
+    backdrop-filter: blur(7px);
+  }
+  .forecast h4 {
+    margin: 0 0 9px;
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    color: var(--faint);
+    font-weight: 700;
+  }
+  .forecast .row {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    font-size: 12.5px;
+    color: var(--muted);
+    padding: 3px 0;
+    opacity: 0.45;
+    transition: opacity 0.5s, color 0.5s;
+  }
+  .forecast .row.active { opacity: 1; color: var(--ink); }
+  .forecast .row .dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--faint);
+    flex: 0 0 auto;
+    transition: background 0.5s, box-shadow 0.5s;
+  }
+  .forecast .row.active .dot {
+    background: var(--warm-deep);
+    box-shadow: 0 0 8px var(--warm-deep);
+  }
+
+  .scroll-cue {
+    position: absolute;
+    z-index: 6;
+    bottom: 18px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-family: ui-sans-serif, system-ui, sans-serif;
+    font-size: 11px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--faint);
+    animation: bob 2.4s ease-in-out infinite;
+  }
+  @keyframes bob { 0%,100% { transform: translateX(-50%) translateY(0);} 50% { transform: translateX(-50%) translateY(6px);} }
+
+  /* ---------- Below-the-fold content ---------- */
+  .doc {
+    max-width: var(--maxw);
+    margin: 0 auto;
+    padding: clamp(56px, 8vw, 110px) clamp(20px, 5vw, 40px);
+  }
+  .doc-head {
+    font-family: ui-sans-serif, system-ui, sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 2.6px;
+    font-size: 11px;
+    color: var(--faint);
+    margin: 0 0 14px;
+  }
+  .doc h2 {
+    font-size: clamp(24px, 3.4vw, 36px);
+    line-height: 1.18;
+    font-weight: 500;
+    letter-spacing: -0.4px;
+    margin: 0 0 18px;
+    max-width: 22ch;
+  }
+  .doc p.body {
+    font-family: ui-sans-serif, system-ui, sans-serif;
+    color: var(--muted);
+    font-size: clamp(15px, 1.7vw, 17px);
+    max-width: 62ch;
+    margin: 0 0 18px;
+  }
+  .doc p.body strong { color: var(--ink); font-weight: 600; }
+
+  .surfaces {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 16px;
+    margin: 38px 0 8px;
+  }
+  .surface {
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 18px 18px 20px;
+    background: linear-gradient(180deg, rgba(42,61,90,0.18), rgba(12,19,32,0.4));
+  }
+  .surface h3 {
+    font-family: ui-sans-serif, system-ui, sans-serif;
+    font-size: 14.5px;
+    letter-spacing: 0.2px;
+    margin: 0 0 7px;
+    color: var(--warm);
+  }
+  .surface p {
+    font-family: ui-sans-serif, system-ui, sans-serif;
+    font-size: 13.5px;
+    color: var(--faint);
+    margin: 0;
+    line-height: 1.5;
+  }
+
+  .codecard {
+    margin: 40px 0 0;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    overflow: hidden;
+    background: #0a0f1a;
+  }
+  .codecard .bar {
+    font-family: ui-sans-serif, system-ui, sans-serif;
+    font-size: 11.5px;
+    letter-spacing: 1.4px;
+    text-transform: uppercase;
+    color: var(--faint);
+    padding: 11px 16px;
+    border-bottom: 1px solid var(--line);
+  }
+  .codecard pre {
+    margin: 0;
+    padding: 16px 18px;
+    overflow-x: auto;
+    font-family: "SF Mono", ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace;
+    font-size: 13px;
+    line-height: 1.7;
+    color: #cdd8ea;
+  }
+  .codecard .tok-flag { color: var(--warm-deep); }
+  .codecard .tok-cmd { color: #9fd0ff; }
+  .codecard .tok-com { color: var(--faint); }
+
+  .cta-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin: 40px 0 0;
+  }
+  .btn {
+    font-family: ui-sans-serif, system-ui, sans-serif;
+    font-size: 14px;
+    font-weight: 600;
+    text-decoration: none;
+    padding: 12px 20px;
+    border-radius: 10px;
+    border: 1px solid var(--line);
+    transition: transform 0.15s, border-color 0.2s, background 0.2s;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .btn:hover { transform: translateY(-1px); }
+  .btn:focus-visible { outline: 2px solid var(--warm-deep); outline-offset: 3px; }
+  .btn.primary {
+    background: linear-gradient(180deg, var(--warm), var(--warm-deep));
+    color: #2a1c08;
+    border-color: transparent;
+  }
+  .btn.primary:hover { border-color: transparent; }
+  .btn.ghost { color: var(--ink); }
+  .btn.ghost:hover { border-color: var(--warm-deep); background: rgba(255,176,102,0.06); }
+
+  footer.colophon {
+    border-top: 1px solid var(--line);
+    margin-top: clamp(48px, 8vw, 90px);
+    padding-top: 26px;
+    font-family: ui-sans-serif, system-ui, sans-serif;
+    font-size: 12.5px;
+    color: var(--faint);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 22px;
+    align-items: center;
+  }
+  footer.colophon a { color: var(--muted); text-decoration: none; border-bottom: 1px solid var(--line); }
+  footer.colophon a:hover { color: var(--ink); }
+
+  .skip-link {
+    position: absolute;
+    left: -9999px;
+    top: 0;
+    z-index: 99;
+    background: var(--warm);
+    color: #2a1c08;
+    padding: 10px 16px;
+    border-radius: 0 0 8px 0;
+    font-family: ui-sans-serif, system-ui, sans-serif;
+    font-weight: 700;
+    text-decoration: none;
+  }
+  .skip-link:focus { left: 0; }
+
+  .sr-only {
+    position: absolute; width: 1px; height: 1px;
+    padding: 0; margin: -1px; overflow: hidden;
+    clip: rect(0,0,0,0); white-space: nowrap; border: 0;
+  }
+
+  /* reduced motion: front is already cleared, scene shown static, no rain/animation */
+  @media (prefers-reduced-motion: reduce) {
+    .now-bar .pulse { animation: none; }
+    .scroll-cue { animation: none; }
+  }
+
+  @media (max-width: 640px) {
+    .forecast { position: static; width: auto; max-width: none; margin: 14px 0 0; }
+    .overlay { padding-top: 18px; }
+    .lede { max-width: none; }
+  }
+</style>
+</head>
+<body>
+  <a class="skip-link" href="#read">Skip the sky — read about Memex</a>
+
+  <!-- ================= THE FRONT (full-bleed scene stage) ================= -->
+  <section class="stage" aria-label="A weather front moving across the sky, raining down a remembered coding moment">
+    <canvas id="sky" aria-hidden="true"></canvas>
+
+    <div class="forecast ui-sans" aria-hidden="true" id="forecast">
+      <h4>Front, incoming</h4>
+      <div class="row" data-phase="0"><span class="dot"></span>Clear sky</div>
+      <div class="row" data-phase="1"><span class="dot"></span>Front building</div>
+      <div class="row" data-phase="2"><span class="dot"></span>Downpour</div>
+      <div class="row" data-phase="3"><span class="dot"></span>Memory breaks through</div>
+      <div class="row" data-phase="4"><span class="dot"></span>Clearing</div>
+    </div>
+
+    <div class="overlay">
+      <header class="masthead">
+        <span class="wordmark">Me<b>m</b>ex</span>
+        <span class="kicker">Qdrant Vector Space Day 2026 · Think Outside the Bot</span>
+      </header>
+
+      <div class="stage-foot">
+        <div class="now-bar" id="nowbar" role="status" aria-live="polite">
+          <span class="pulse" aria-hidden="true"></span>
+          <span>Right now you're: <span class="now-ctx" id="now-ctx">untangling an auth-retry loop</span></span>
+        </div>
+        <h1 class="lede">A front rolls in, and the memory <span class="em">rains down.</span></h1>
+        <p class="sub">You didn't go looking. The weather changed — and the moment you half-forgot
+          breaks through the downpour, lit from below. That's recall as it actually happens: it arrives.</p>
+      </div>
+    </div>
+
+    <div class="scroll-cue ui-sans" aria-hidden="true">scroll</div>
+
+    <!-- Accessible text for the depicted scene; canvas is decorative -->
+    <p class="sr-only" id="scene-alt" aria-live="polite"></p>
+  </section>
+
+  <!-- ================= THE READING ================= -->
+  <main class="doc" id="read">
+    <a name="read"></a>
+    <p class="doc-head">What you just watched</p>
+    <h2>You don't document every memory — yet when the moment is right, the relevant past surfaces on its own.</h2>
+    <p class="body">
+      No one writes down every session. So Memex doesn't ask you to. It keeps a corpus of your
+      <strong>Claude Code / Codex history</strong> — <code>~/.claude/projects/**/*.jsonl</code>,
+      legacy transcripts, and <code>history.jsonl</code> — and turns it into a navigable
+      <strong>spatial, associative memory</strong>. As you work, the past you'd have lost
+      <strong>arrives unbidden</strong>, the way a forgotten fix returns mid-task.
+    </p>
+    <p class="body">
+      It is a <strong>non-chatbot, LLM-free-at-runtime</strong> tool. The map is built by
+      <strong>Qdrant</strong> — you move through your own history by <em>similarity</em>, not keywords —
+      so there is no model improvising answers, and no search box to interrogate.
+    </p>
+
+    <section class="surfaces" aria-label="What Memex gives you">
+      <div class="surface">
+        <h3>Proactive Recall</h3>
+        <p>The current task evokes related past sessions — they surface on their own, like the scene the front just rained down.</p>
+      </div>
+      <div class="surface">
+        <h3>Lens</h3>
+        <p>Named-vector weighted search across the corpus, for when you do want to steer the lookup yourself.</p>
+      </div>
+      <div class="surface">
+        <h3>Topology</h3>
+        <p>A distance-matrix to MST graph of how your sessions actually relate to one another.</p>
+      </div>
+      <div class="surface">
+        <h3>Time Machine</h3>
+        <p>Replay a past session in sequence — Claude Code silently migrates and deletes old ones; this keeps a copy you own.</p>
+      </div>
+      <div class="surface">
+        <h3>Mix / Discovery</h3>
+        <p>Positive / negative recommendation — pull toward what fits, push away from what doesn't.</p>
+      </div>
+      <div class="surface">
+        <h3>Companion · Wrapped · Loop Breaker</h3>
+        <p>The agent-memory layer: a running picture of your work, and a nudge when you're circling the same problem.</p>
+      </div>
+    </section>
+
+    <div class="codecard">
+      <div class="bar">Agent integration — 11 MCP tools over stdio + HTTP</div>
+      <pre><span class="tok-com"># Add Memex to Claude Code / Codex / Cursor</span>
+<span class="tok-cmd">claude</span> mcp add memex <span class="tok-flag">--</span> memex-mcp serve
+<span class="tok-com"># Or run the server / Docker variant: Qdrant + web + MCP in one image</span>
+<span class="tok-cmd">docker</span> run <span class="tok-flag">-p</span> 8080:8080 memex</pre>
+    </div>
+
+    <div class="cta-row">
+      <a class="btn primary" href="https://github.com/Two-Weeks-Team/memex">Read the code on GitHub</a>
+      <a class="btn ghost" href="https://two-weeks-team.github.io/memex/">Open the live landing</a>
+      <a class="btn ghost" href="https://github.com/Two-Weeks-Team/memex#mcp">The MCP &amp; Docker story</a>
+    </div>
+
+    <footer class="colophon">
+      <span>Memex · built for Qdrant Vector Space Day 2026.</span>
+      <a href="https://github.com/Two-Weeks-Team/memex">github.com/Two-Weeks-Team/memex</a>
+      <a href="https://two-weeks-team.github.io/memex/">two-weeks-team.github.io/memex</a>
+      <span>After Vannevar Bush's 1945 <em>Memex</em> &amp; associative trails — not a search box, not a chatbot.</span>
+    </footer>
+  </main>
+
+<script>
+(function () {
+  "use strict";
+
+  var canvas = document.getElementById("sky");
+  var ctx = canvas.getContext("2d");
+  var DPR = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+  var W = 0, H = 0;
+
+  var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  // ---- The catalog of remembered SCENES the front can rain down ----
+  // Each scene is a small depicted tableau: a context that evokes it, a setting,
+  // and the props/figures the canvas paints in. Honest, concrete coding moments.
+  var SCENES = [
+    {
+      ctx: "untangling an auth-retry loop",
+      title: "the night the token finally refreshed",
+      place: "11:48pm · a desk lamp, two empty mugs",
+      caption: "You'd looped on the 401 for an hour — then remembered the clock skew. The retry went green.",
+      sky: "#1d2f4d", warm: "#ffd9a8",
+      // scene type drives the hand-painted tableau
+      kind: "desk"
+    },
+    {
+      ctx: "deciding how to shape a migration",
+      title: "the whiteboard that survived the rewrite",
+      place: "a meeting room · low afternoon sun",
+      caption: "Boxes, arrows, one circled word: idempotent. The migration ran twice and nothing broke.",
+      sky: "#2a3552", warm: "#ffe2b0",
+      kind: "board"
+    },
+    {
+      ctx: "chasing a flaky test",
+      title: "the green bar after the long red",
+      place: "a terminal glow · rain on the window",
+      caption: "Forty-one runs red. You pinned the seed, and the forty-second held. You almost cheered.",
+      sky: "#172841", warm: "#ffcf9a",
+      kind: "rainwindow"
+    },
+    {
+      ctx: "naming a vector collection",
+      title: "the sketch on the back of a receipt",
+      place: "a café table · steam off the cup",
+      caption: "Three little points, one labelled 'nearest'. That doodle became the topology graph.",
+      sky: "#243a55", warm: "#ffdca0",
+      kind: "cafe"
+    }
+  ];
+
+  var sceneIdx = Math.floor(Math.random() * SCENES.length);
+
+  // ---- Static cloud puffs that compose the front (hand-authored shapes) ----
+  function makeFront() {
+    var puffs = [];
+    var n = 26;
+    for (var i = 0; i < n; i++) {
+      puffs.push({
+        // x spread relative to width, y biased upper-middle
+        x: (i / n) * 1.5 - 0.18 + (Math.random() - 0.5) * 0.06,
+        y: 0.14 + Math.random() * 0.20,
+        r: 0.06 + Math.random() * 0.10,
+        soft: 0.6 + Math.random() * 0.5
+      });
+    }
+    return puffs;
+  }
+  var front = makeFront();
+
+  // ---- Rain drops (only drawn during downpour) ----
+  var drops = [];
+  function seedRain() {
+    drops.length = 0;
+    for (var i = 0; i < 320; i++) {
+      drops.push({
+        x: Math.random(),
+        y: Math.random(),
+        len: 0.02 + Math.random() * 0.04,
+        sp: 0.6 + Math.random() * 0.9,
+        a: 0.12 + Math.random() * 0.25
+      });
+    }
+  }
+  seedRain();
+
+  function resize() {
+    W = canvas.clientWidth; H = canvas.clientHeight;
+    canvas.width = Math.floor(W * DPR);
+    canvas.height = Math.floor(H * DPR);
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  }
+  window.addEventListener("resize", resize);
+  resize();
+
+  // ---------- THE AUTONOMOUS CYCLE ----------
+  // phases: 0 clear, 1 building, 2 downpour, 3 reveal(memory lit beneath), 4 clearing -> next
+  // p is a global progress 0..1 within the current phase; the cycle advances on its own.
+  var phase = 0;
+  var p = 0;               // progress within phase
+  // seconds per phase
+  var DUR = [3.0, 3.2, 2.6, 4.6, 3.4];
+  var last = performance.now();
+
+  var forecastRows = Array.prototype.slice.call(document.querySelectorAll("#forecast .row"));
+  var nowCtx = document.getElementById("now-ctx");
+  var sceneAlt = document.getElementById("scene-alt");
+
+  function applyContext() {
+    var s = SCENES[sceneIdx];
+    nowCtx.textContent = s.ctx;
+  }
+  function setForecast(ph) {
+    forecastRows.forEach(function (r) {
+      r.classList.toggle("active", parseInt(r.getAttribute("data-phase"), 10) === ph);
+    });
+  }
+  function announceScene() {
+    var s = SCENES[sceneIdx];
+    sceneAlt.textContent =
+      "A scene rains into view: " + s.title + " — " + s.place + ". " + s.caption;
+  }
+  function advanceScene() {
+    sceneIdx = (sceneIdx + 1) % SCENES.length;
+    applyContext();
+  }
+
+  applyContext();
+  setForecast(0);
+
+  // ----- helpers: easing -----
+  function smooth(t) { return t < 0 ? 0 : t > 1 ? 1 : t * t * (3 - 2 * t); }
+  function clamp01(t) { return t < 0 ? 0 : t > 1 ? 1 : t; }
+
+  // ----- DRAW: the depicted memory SCENE beneath the front -----
+  // Painted on canvas as a small lit tableau in the lower-center "clearing".
+  function drawScene(reveal) {
+    var s = SCENES[sceneIdx];
+    var cx = W * 0.5;
+    var cy = H * 0.62;
+    var scale = Math.min(W, H) * 0.5;
+
+    // warm shaft of light washing the scene in (the front "rains it down")
+    ctx.save();
+    var shaft = ctx.createRadialGradient(cx, cy - scale * 0.35, scale * 0.05, cx, cy, scale * 1.1);
+    shaft.addColorStop(0, "rgba(255,224,176," + (0.42 * reveal) + ")");
+    shaft.addColorStop(0.5, "rgba(255,196,120," + (0.16 * reveal) + ")");
+    shaft.addColorStop(1, "rgba(255,196,120,0)");
+    ctx.fillStyle = shaft;
+    ctx.fillRect(0, 0, W, H);
+    ctx.restore();
+
+    // global alpha for the whole tableau fading in
+    ctx.save();
+    ctx.globalAlpha = reveal;
+    ctx.translate(cx, cy);
+
+    var warm = s.warm;
+    var glass = "rgba(180,205,235,0.9)";
+    var dark = "rgba(20,28,44,0.92)";
+    var u = scale * 0.4; // tableau unit
+
+    // ground / floor wash
+    ctx.fillStyle = "rgba(10,16,28,0.55)";
+    ctx.beginPath();
+    ctx.ellipse(0, u * 0.95, u * 1.5, u * 0.34, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    if (s.kind === "desk") {
+      // a desk lamp lighting a laptop + two mugs (the 401-loop night)
+      // desk surface
+      ctx.fillStyle = "rgba(60,44,30,0.85)";
+      roundRect(-u * 1.2, u * 0.5, u * 2.4, u * 0.28, 6); ctx.fill();
+      // laptop
+      ctx.fillStyle = dark;
+      roundRect(-u * 0.55, u * 0.05, u * 1.1, u * 0.5, 5); ctx.fill();
+      // glowing screen
+      ctx.fillStyle = warm;
+      ctx.globalAlpha = reveal * 0.92;
+      roundRect(-u * 0.47, u * 0.11, u * 0.94, u * 0.30, 3); ctx.fill();
+      ctx.globalAlpha = reveal;
+      // lamp arm + warm bulb glow
+      ctx.strokeStyle = "rgba(120,130,150,0.8)";
+      ctx.lineWidth = u * 0.04;
+      ctx.beginPath();
+      ctx.moveTo(u * 0.8, u * 0.55); ctx.lineTo(u * 0.8, -u * 0.55);
+      ctx.lineTo(u * 0.35, -u * 0.7); ctx.stroke();
+      var bulb = ctx.createRadialGradient(u * 0.32, -u * 0.66, 1, u * 0.32, -u * 0.66, u * 0.5);
+      bulb.addColorStop(0, "rgba(255,228,170,0.95)");
+      bulb.addColorStop(1, "rgba(255,228,170,0)");
+      ctx.fillStyle = bulb;
+      ctx.beginPath(); ctx.arc(u * 0.32, -u * 0.66, u * 0.5, 0, Math.PI * 2); ctx.fill();
+      // two mugs
+      mug(-u * 0.9, u * 0.4, u * 0.16);
+      mug(u * 0.55, u * 0.42, u * 0.14);
+    } else if (s.kind === "board") {
+      // a whiteboard with boxes/arrows + one circled word (idempotent)
+      ctx.fillStyle = "rgba(232,238,247,0.95)";
+      roundRect(-u * 1.2, -u * 0.8, u * 2.4, u * 1.5, 8); ctx.fill();
+      ctx.strokeStyle = "rgba(40,60,90,0.9)";
+      ctx.lineWidth = u * 0.025;
+      // boxes
+      strokeRect(-u * 0.9, -u * 0.5, u * 0.55, u * 0.34);
+      strokeRect(u * 0.1, -u * 0.5, u * 0.55, u * 0.34);
+      strokeRect(-u * 0.4, u * 0.05, u * 0.55, u * 0.34);
+      // arrows
+      arrow(-u * 0.35, -u * 0.33, u * 0.1, -u * 0.33);
+      arrow(u * 0.37, -u * 0.16, -u * 0.12, u * 0.22);
+      // circled word in warm marker
+      ctx.strokeStyle = warm; ctx.lineWidth = u * 0.04;
+      ctx.beginPath(); ctx.ellipse(u * 0.55, u * 0.42, u * 0.42, u * 0.2, -0.1, 0, Math.PI * 2); ctx.stroke();
+      ctx.fillStyle = warm;
+      ctx.font = "italic " + (u * 0.18) + "px Georgia, serif";
+      ctx.textAlign = "center";
+      ctx.fillText("idempotent", u * 0.55, u * 0.49);
+    } else if (s.kind === "rainwindow") {
+      // a glowing terminal beside a rain-streaked window (the green bar)
+      // window frame
+      ctx.fillStyle = "rgba(24,34,52,0.92)";
+      roundRect(u * 0.15, -u * 0.85, u * 1.05, u * 1.6, 6); ctx.fill();
+      // glass with faint outside glow
+      var pane = ctx.createLinearGradient(u * 0.15, -u * 0.85, u * 1.2, u * 0.75);
+      pane.addColorStop(0, "rgba(70,95,130,0.5)");
+      pane.addColorStop(1, "rgba(30,45,70,0.5)");
+      ctx.fillStyle = pane;
+      roundRect(u * 0.23, -u * 0.77, u * 0.89, u * 1.44, 3); ctx.fill();
+      // rain streaks on the glass
+      ctx.strokeStyle = "rgba(190,210,235,0.5)";
+      ctx.lineWidth = u * 0.015;
+      for (var i = 0; i < 9; i++) {
+        var rx = u * (0.28 + Math.random() * 0.78);
+        ctx.beginPath();
+        ctx.moveTo(rx, -u * 0.7 + Math.random() * u * 0.2);
+        ctx.lineTo(rx + u * 0.03, -u * 0.7 + u * 0.7 + Math.random() * u * 0.4);
+        ctx.stroke();
+      }
+      // terminal screen showing a green bar
+      ctx.fillStyle = "rgba(8,12,20,0.95)";
+      roundRect(-u * 1.2, -u * 0.5, u * 1.15, u * 0.95, 5); ctx.fill();
+      ctx.fillStyle = "rgba(120,150,170,0.5)";
+      for (var j = 0; j < 4; j++) { ctx.fillRect(-u * 1.1, -u * 0.38 + j * u * 0.13, u * (0.4 + Math.random() * 0.5), u * 0.04); }
+      // the GREEN bar
+      ctx.fillStyle = "rgba(120,230,150,0.95)";
+      ctx.shadowColor = "rgba(120,230,150,0.8)"; ctx.shadowBlur = u * 0.25;
+      ctx.fillRect(-u * 1.1, u * 0.18, u * 0.95, u * 0.12);
+      ctx.shadowBlur = 0;
+    } else { // cafe
+      // a café table: cup with steam + a receipt with a tiny topology sketch
+      ctx.fillStyle = "rgba(70,52,38,0.9)";
+      ctx.beginPath(); ctx.ellipse(0, u * 0.5, u * 1.15, u * 0.4, 0, 0, Math.PI * 2); ctx.fill();
+      // cup
+      ctx.fillStyle = "rgba(232,238,247,0.95)";
+      roundRect(-u * 0.75, u * 0.05, u * 0.5, u * 0.42, 6); ctx.fill();
+      ctx.strokeStyle = "rgba(232,238,247,0.95)"; ctx.lineWidth = u * 0.05;
+      ctx.beginPath(); ctx.arc(-u * 0.22, u * 0.26, u * 0.14, -1.2, 1.2); ctx.stroke();
+      // steam (warm, faint)
+      ctx.strokeStyle = "rgba(255,224,176,0.45)"; ctx.lineWidth = u * 0.025;
+      for (var k = 0; k < 2; k++) {
+        ctx.beginPath();
+        var sx = -u * 0.55 + k * u * 0.18;
+        ctx.moveTo(sx, u * 0.02);
+        ctx.bezierCurveTo(sx - u * 0.12, -u * 0.18, sx + u * 0.12, -u * 0.34, sx, -u * 0.52);
+        ctx.stroke();
+      }
+      // receipt with sketch
+      ctx.save();
+      ctx.rotate(0.12);
+      ctx.fillStyle = "rgba(245,242,232,0.96)";
+      roundRect(u * 0.2, u * 0.0, u * 0.78, u * 0.62, 3); ctx.fill();
+      // three points, one labelled nearest
+      ctx.fillStyle = "rgba(40,50,70,0.9)";
+      dot(u * 0.4, u * 0.2, u * 0.04);
+      dot(u * 0.7, u * 0.16, u * 0.04);
+      dot(u * 0.58, u * 0.42, u * 0.04);
+      ctx.strokeStyle = "rgba(40,50,70,0.7)"; ctx.lineWidth = u * 0.012;
+      line(u * 0.4, u * 0.2, u * 0.58, u * 0.42);
+      line(u * 0.7, u * 0.16, u * 0.58, u * 0.42);
+      ctx.fillStyle = warm;
+      ctx.font = (u * 0.1) + "px ui-sans-serif, sans-serif";
+      ctx.textAlign = "left";
+      ctx.fillText("nearest", u * 0.6, u * 0.5);
+      ctx.restore();
+    }
+
+    // figure-of-light: a small warm sitting silhouette anchors every scene as "you, then"
+    ctx.globalAlpha = reveal * 0.85;
+    ctx.fillStyle = "rgba(12,18,30,0.85)";
+    // (kept minimal so it reads as presence, not a stock figure)
+
+    ctx.restore();
+
+    // caption plate under the tableau
+    drawCaption(cx, cy + scale * 0.62, reveal, s);
+  }
+
+  function drawCaption(cx, y, reveal, s) {
+    ctx.save();
+    ctx.globalAlpha = reveal;
+    ctx.textAlign = "center";
+    // title
+    ctx.fillStyle = "rgba(255,224,176," + reveal + ")";
+    ctx.font = "italic " + Math.max(16, Math.min(30, W * 0.024)) + "px Georgia, serif";
+    ctx.fillText("“" + s.title + "”", cx, y);
+    // place
+    ctx.fillStyle = "rgba(159,176,200," + reveal + ")";
+    ctx.font = Math.max(11, Math.min(14, W * 0.012)) + "px ui-sans-serif, sans-serif";
+    ctx.fillText(s.place, cx, y + Math.min(28, W * 0.02));
+    ctx.restore();
+  }
+
+  // ----- canvas shape helpers -----
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+  function strokeRect(x, y, w, h) { ctx.strokeRect(x, y, w, h); }
+  function arrow(x1, y1, x2, y2) {
+    ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+    var ang = Math.atan2(y2 - y1, x2 - x1), hl = 8;
+    ctx.beginPath();
+    ctx.moveTo(x2, y2);
+    ctx.lineTo(x2 - hl * Math.cos(ang - 0.4), y2 - hl * Math.sin(ang - 0.4));
+    ctx.moveTo(x2, y2);
+    ctx.lineTo(x2 - hl * Math.cos(ang + 0.4), y2 - hl * Math.sin(ang + 0.4));
+    ctx.stroke();
+  }
+  function mug(x, y, r) {
+    ctx.fillStyle = "rgba(210,220,235,0.9)";
+    roundRect(x - r, y - r, r * 2, r * 1.8, r * 0.4); ctx.fill();
+    ctx.strokeStyle = "rgba(210,220,235,0.9)"; ctx.lineWidth = r * 0.3;
+    ctx.beginPath(); ctx.arc(x + r * 1.05, y, r * 0.6, -1, 1); ctx.stroke();
+  }
+  function dot(x, y, r) { ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill(); }
+  function line(x1, y1, x2, y2) { ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke(); }
+
+  // ----- DRAW: the cloud front -----
+  // frontX in [-0.4 .. 1.4] across the sky; darkness ramps with phase.
+  function drawFront(frontX, darkness, coverage) {
+    // light shafts breaking from above (always faintly present, stronger when clearing)
+    // clouds
+    for (var i = 0; i < front.length; i++) {
+      var c = front[i];
+      var px = (c.x + frontX) * W;
+      var py = c.y * H;
+      var rad = c.r * Math.min(W, H) * 1.6 * c.soft;
+      if (px < -rad || px > W + rad) continue;
+      var g = ctx.createRadialGradient(px, py, rad * 0.1, px, py, rad);
+      // darker, heavier toward downpour
+      var top = 70 - darkness * 45;
+      var bot = 40 - darkness * 30;
+      g.addColorStop(0, "rgba(" + (top + 30) + "," + (top + 40) + "," + (top + 60) + "," + (0.55 + coverage * 0.4) + ")");
+      g.addColorStop(0.55, "rgba(" + top + "," + (top + 8) + "," + (top + 24) + "," + (0.4 + coverage * 0.45) + ")");
+      g.addColorStop(1, "rgba(" + bot + "," + (bot + 6) + "," + (bot + 18) + ",0)");
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(px, py, rad, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  function drawRain(intensity, frontX) {
+    if (intensity <= 0) return;
+    ctx.save();
+    ctx.lineCap = "round";
+    for (var i = 0; i < drops.length; i++) {
+      var d = drops[i];
+      // rain falls only under the front band
+      var dxScreen = d.x * W;
+      var bandCenter = (frontX + 0.55) * W;
+      var inBand = Math.abs(dxScreen - bandCenter) < W * 0.55;
+      if (!inBand) continue;
+      var x = dxScreen;
+      var y = d.y * H;
+      ctx.strokeStyle = "rgba(174,191,214," + (d.a * intensity) + ")";
+      ctx.lineWidth = 1.1;
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.lineTo(x - d.len * W * 0.12, y + d.len * H);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function stepRain(dt) {
+    for (var i = 0; i < drops.length; i++) {
+      var d = drops[i];
+      d.y += d.sp * dt * 0.9;
+      if (d.y > 1.05) { d.y = -0.05; d.x = Math.random(); }
+    }
+  }
+
+  // ---------- MAIN LOOP ----------
+  function frame(now) {
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+
+    p += dt / DUR[phase];
+    if (p >= 1) {
+      p = 0;
+      // when leaving the "clearing" phase, advance to the next system/scene
+      if (phase === 4) { advanceScene(); }
+      phase = (phase + 1) % 5;
+      setForecast(phase);
+      if (phase === 3) { announceScene(); } // memory breaks through
+    }
+
+    ctx.clearRect(0, 0, W, H);
+
+    // base atmospheric gradient already on body; paint a subtle sky tint per scene
+    var sceneTint = SCENES[sceneIdx].sky;
+    var bg = ctx.createLinearGradient(0, 0, 0, H);
+    bg.addColorStop(0, sceneTint);
+    bg.addColorStop(0.7, "#0c1320");
+    bg.addColorStop(1, "#070b13");
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, W, H);
+
+    // map phase+p to front position, darkness, rain intensity, reveal
+    var frontX, darkness, rainI, reveal;
+    var e = smooth(p);
+
+    switch (phase) {
+      case 0: // clear sky, front approaching from left edge
+        frontX = -0.6 + e * 0.25; darkness = 0.1; rainI = 0; reveal = 0;
+        break;
+      case 1: // front building / rolling overhead, darkening
+        frontX = -0.35 + e * 0.3; darkness = 0.1 + e * 0.8; rainI = e * 0.4; reveal = 0;
+        break;
+      case 2: // downpour
+        frontX = -0.05 + e * 0.12; darkness = 0.9; rainI = 1; reveal = 0;
+        break;
+      case 3: // memory breaks through: rain parts, scene lit from below
+        frontX = 0.07 + e * 0.1; darkness = 0.9 - e * 0.45;
+        rainI = 1 - smooth(clamp01(e * 1.4)); // rain thins as scene comes
+        reveal = smooth(clamp01((e - 0.1) * 1.3));
+        break;
+      case 4: // clearing: front exits right, scene fades, sky reopens
+        frontX = 0.17 + e * 0.9; darkness = 0.45 - e * 0.4; rainI = 0;
+        reveal = 1 - smooth(e); // scene gently fades as the sky clears to the next system
+        break;
+    }
+
+    // light shafts from above when darkness is moderate (breaking light)
+    if (reveal > 0.05) {
+      ctx.save();
+      var shaftAlpha = 0.10 * reveal;
+      var sg = ctx.createLinearGradient(W * 0.5, 0, W * 0.5, H * 0.7);
+      sg.addColorStop(0, "rgba(255,224,176," + shaftAlpha + ")");
+      sg.addColorStop(1, "rgba(255,224,176,0)");
+      ctx.fillStyle = sg;
+      ctx.beginPath();
+      ctx.moveTo(W * 0.36, 0); ctx.lineTo(W * 0.64, 0);
+      ctx.lineTo(W * 0.78, H * 0.7); ctx.lineTo(W * 0.22, H * 0.7);
+      ctx.closePath(); ctx.fill();
+      ctx.restore();
+    }
+
+    // SCENE beneath (drawn before clouds so the front can sit above and "open")
+    if (reveal > 0.01) drawScene(reveal);
+
+    // the front itself
+    drawFront(frontX, darkness, Math.max(rainI, darkness * 0.6));
+
+    // rain
+    if (rainI > 0.01) { drawRain(rainI, frontX); stepRain(dt); }
+
+    requestAnimationFrame(frame);
+  }
+
+  // ---------- REDUCED MOTION: skip the animation, show one cleared scene ----------
+  function drawStatic() {
+    ctx.clearRect(0, 0, W, H);
+    var sceneTint = SCENES[sceneIdx].sky;
+    var bg = ctx.createLinearGradient(0, 0, 0, H);
+    bg.addColorStop(0, sceneTint);
+    bg.addColorStop(0.7, "#0c1320");
+    bg.addColorStop(1, "#070b13");
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, W, H);
+    // a few cleared, light clouds parked at the edges (front already passed)
+    drawFront(0.95, 0.2, 0.25);
+    // the scene fully lit and static
+    drawScene(1);
+    setForecast(3);
+    announceScene();
+  }
+
+  if (reduce) {
+    resize();
+    drawStatic();
+    window.addEventListener("resize", function () { resize(); drawStatic(); });
+  } else {
+    requestAnimationFrame(frame);
+  }
+})();
+</script>
+</body>
+</html>

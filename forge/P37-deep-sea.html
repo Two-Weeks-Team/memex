@@ -1,0 +1,843 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Memex — memories surface from the deep</title>
+<meta name="description" content="Memex turns your Claude Code / Codex session history into a navigable spatial memory. When the moment calls for it, a past coding scene rises on its own — surfaced by similarity, not keywords. LLM-free at runtime, backed by Qdrant." />
+<style>
+  :root {
+    /* Abyssal palette — inky deep-sea dark + living bioluminescent light */
+    --abyss-0: oklch(11% 0.045 240);
+    --abyss-1: oklch(15% 0.06 235);
+    --abyss-2: oklch(19% 0.07 228);
+    --ink: oklch(95% 0.02 220);
+    --ink-soft: oklch(80% 0.035 220);
+    --ink-faint: oklch(62% 0.04 225);
+    /* Living light: cyan-teal bio glow + a deeper aqua + warm plankton accent */
+    --bio: oklch(86% 0.16 195);
+    --bio-deep: oklch(70% 0.15 205);
+    --bio-soft: oklch(78% 0.12 200);
+    --plankton: oklch(88% 0.14 165);
+    --warm: oklch(85% 0.12 90);
+    --line: oklch(55% 0.05 220 / 0.35);
+    --glass: oklch(24% 0.05 225 / 0.5);
+    --glass-edge: oklch(75% 0.09 200 / 0.22);
+    --focus: oklch(90% 0.16 195);
+    --maxw: 1140px;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Fira Code", Menlo, monospace;
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+
+  body {
+    margin: 0;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    color: var(--ink);
+    background:
+      radial-gradient(140% 120% at 50% -10%, oklch(22% 0.07 225) 0%, transparent 45%),
+      radial-gradient(120% 100% at 50% 120%, oklch(8% 0.04 250) 0%, transparent 50%),
+      linear-gradient(180deg, var(--abyss-1) 0%, var(--abyss-0) 55%, oklch(7% 0.035 250) 100%);
+    line-height: 1.62;
+    overflow-x: hidden;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  a { color: var(--bio); text-decoration: none; }
+  a:hover { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
+  :focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; border-radius: 8px; }
+
+  .wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 24px; width: 100%; }
+
+  .skip {
+    position: absolute; left: -999px; top: 0; z-index: 100;
+    background: var(--abyss-2); color: var(--ink); padding: 10px 16px; border-radius: 8px;
+  }
+  .skip:focus { left: 16px; top: 16px; }
+
+  /* ============ THE ABYSS (full-bleed hero stage) ============ */
+  .abyss {
+    position: relative;
+    min-height: 100svh;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    overflow: hidden;
+    isolation: isolate;
+  }
+
+  /* drifting particulate "marine snow" + far light shafts */
+  #deep-canvas {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    z-index: 0; display: block;
+  }
+  /* faint surface light far overhead, leaking down */
+  .light-shafts {
+    position: absolute; inset: 0; z-index: 1; pointer-events: none;
+    background:
+      conic-gradient(from 210deg at 38% -20%, transparent 0deg, oklch(60% 0.1 200 / 0.05) 8deg, transparent 18deg),
+      conic-gradient(from 160deg at 64% -25%, transparent 0deg, oklch(60% 0.1 195 / 0.045) 10deg, transparent 22deg);
+    mix-blend-mode: screen;
+    opacity: 0.9;
+    animation: shaftDrift 26s ease-in-out infinite alternate;
+  }
+  @keyframes shaftDrift { from { transform: translateX(-2%); } to { transform: translateX(2%); } }
+
+  /* ---- The rising SCENE: a remembered coding moment, lit from within ---- */
+  .scene-stage {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+  }
+  .scene {
+    position: relative;
+    width: min(640px, 84vw);
+    transform: translateY(58px) scale(0.94);
+    opacity: 0;
+    filter: blur(14px) brightness(0.7);
+    transition:
+      opacity 1.5s cubic-bezier(.16,.7,.3,1),
+      transform 2.1s cubic-bezier(.16,.7,.3,1),
+      filter 1.7s cubic-bezier(.16,.7,.3,1);
+    will-change: transform, opacity, filter;
+  }
+  .scene.surfaced {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+    filter: blur(0) brightness(1);
+  }
+  .scene.sinking {
+    transform: translateY(-46px) scale(1.04);
+    opacity: 0;
+    filter: blur(16px) brightness(1.3);
+    transition:
+      opacity 1.25s ease-in,
+      transform 1.5s ease-in,
+      filter 1.25s ease-in;
+  }
+
+  /* the scene is a luminous diorama — a moment you SEE, not a chat log */
+  .scene-card {
+    position: relative;
+    border-radius: 20px;
+    padding: 26px 28px 24px;
+    background:
+      radial-gradient(120% 140% at 50% 130%, oklch(40% 0.1 195 / 0.55) 0%, transparent 60%),
+      linear-gradient(165deg, oklch(26% 0.07 215 / 0.82), oklch(17% 0.06 235 / 0.86));
+    border: 1px solid var(--glass-edge);
+    box-shadow:
+      0 0 0 1px oklch(80% 0.1 200 / 0.06),
+      0 30px 90px -20px oklch(6% 0.05 250 / 0.9),
+      0 0 120px -10px oklch(70% 0.16 200 / 0.45);
+    backdrop-filter: blur(3px);
+    overflow: hidden;
+  }
+  /* living light wash that breathes across the surfaced scene */
+  .scene-card::after {
+    content: "";
+    position: absolute; inset: 0;
+    background: radial-gradient(70% 80% at 30% 0%, oklch(85% 0.16 195 / 0.16), transparent 60%);
+    mix-blend-mode: screen;
+    animation: breathe 6s ease-in-out infinite;
+    pointer-events: none;
+  }
+  @keyframes breathe { 0%,100% { opacity: 0.5; } 50% { opacity: 1; } }
+
+  .scene-meta {
+    display: flex; align-items: center; gap: 10px;
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.04em;
+    color: var(--bio-soft);
+    margin-bottom: 16px;
+  }
+  .scene-meta .orb {
+    width: 9px; height: 9px; border-radius: 50%;
+    background: var(--plankton);
+    box-shadow: 0 0 10px 2px var(--plankton);
+    animation: pulse 2.4s ease-in-out infinite;
+  }
+  @keyframes pulse { 0%,100% { opacity: .55; transform: scale(.85); } 50% { opacity: 1; transform: scale(1.1); } }
+  .scene-meta .when { color: var(--ink-faint); margin-left: auto; }
+
+  /* the depicted moment: a glowing fragment of remembered work */
+  .scene-headline {
+    font-size: clamp(1.15rem, 2.6vw, 1.5rem);
+    line-height: 1.28;
+    font-weight: 600;
+    color: var(--ink);
+    margin: 0 0 14px;
+    letter-spacing: -0.01em;
+    text-wrap: balance;
+  }
+  .scene-body {
+    font-family: var(--mono);
+    font-size: 0.86rem;
+    line-height: 1.66;
+    color: var(--ink-soft);
+    margin: 0;
+    white-space: pre-wrap;
+  }
+  .scene-body .lit { color: var(--bio); text-shadow: 0 0 14px oklch(86% 0.16 195 / 0.6); }
+  .scene-body .warm { color: var(--warm); }
+  .scene-foot {
+    margin-top: 18px; padding-top: 14px;
+    border-top: 1px solid oklch(70% 0.06 200 / 0.14);
+    font-size: 0.78rem; color: var(--ink-faint);
+    display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap;
+  }
+  .scene-foot b { color: var(--bio-soft); font-weight: 600; }
+
+  /* trail of light the scene leaves as it rises */
+  .ascend-trail {
+    position: absolute;
+    left: 50%; bottom: -40px; transform: translateX(-50%);
+    width: 2px; height: 220px;
+    background: linear-gradient(to top, oklch(86% 0.16 195 / 0.4), transparent);
+    opacity: 0; z-index: 1;
+    pointer-events: none;
+  }
+  .scene.surfaced ~ .ascend-trail { opacity: 1; transition: opacity 1.2s ease 0.4s; }
+
+  /* ---- current-context cue: what the present moment is "thinking about" ---- */
+  .context-cue {
+    position: absolute;
+    z-index: 3;
+    top: clamp(24px, 8vh, 96px); left: 50%; transform: translateX(-50%);
+    width: min(560px, 86vw);
+    text-align: center;
+    pointer-events: none;
+  }
+  .context-label {
+    font-family: var(--mono);
+    font-size: 0.7rem; letter-spacing: 0.22em; text-transform: uppercase;
+    color: var(--ink-faint); margin-bottom: 8px;
+  }
+  .context-line {
+    font-size: clamp(0.95rem, 2.4vw, 1.2rem);
+    color: var(--ink-soft);
+    font-weight: 500;
+    min-height: 1.6em;
+  }
+  .context-line .cursor {
+    display: inline-block; width: 0.6ch; margin-left: 1px;
+    color: var(--bio);
+    animation: blink 1.05s steps(1) infinite;
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  /* ---- hero copy anchored at the bottom (over the deep) ---- */
+  .abyss-copy {
+    position: relative; z-index: 4;
+    padding: 0 0 clamp(40px, 8vh, 88px);
+  }
+  .eyebrow {
+    display: inline-flex; align-items: center; gap: 9px;
+    font-family: var(--mono);
+    font-size: 0.72rem; letter-spacing: 0.18em; text-transform: uppercase;
+    color: var(--bio-soft);
+    margin: 0 0 18px;
+  }
+  .eyebrow .dot {
+    width: 7px; height: 7px; border-radius: 50%; background: var(--bio);
+    box-shadow: 0 0 12px 2px var(--bio);
+  }
+  h1 {
+    font-size: clamp(2.1rem, 5.6vw, 3.7rem);
+    line-height: 1.08;
+    font-weight: 600;
+    margin: 0 0 1.1rem;
+    letter-spacing: -0.02em;
+    max-width: 17ch;
+    text-wrap: balance;
+  }
+  h1 .glow-word {
+    color: var(--bio);
+    text-shadow: 0 0 30px oklch(86% 0.16 195 / 0.5);
+  }
+  .lede {
+    font-size: clamp(1rem, 2.1vw, 1.18rem);
+    color: var(--ink-soft);
+    max-width: 56ch;
+    margin: 0 0 1.8rem;
+  }
+  .cta-row { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 9px;
+    padding: 13px 22px; border-radius: 12px;
+    font-size: 0.95rem; font-weight: 600;
+    border: 1px solid transparent; cursor: pointer;
+    transition: transform .18s ease, box-shadow .25s ease, background .2s ease;
+  }
+  .btn-primary {
+    color: oklch(15% 0.05 235);
+    background: linear-gradient(135deg, var(--bio), var(--plankton));
+    box-shadow: 0 0 36px -6px oklch(86% 0.16 195 / 0.6);
+  }
+  .btn-primary:hover { transform: translateY(-2px); color: oklch(15% 0.05 235); text-decoration: none; box-shadow: 0 0 52px -4px oklch(86% 0.16 195 / 0.75); }
+  .btn-ghost {
+    color: var(--ink); background: var(--glass);
+    border-color: var(--glass-edge); backdrop-filter: blur(4px);
+  }
+  .btn-ghost:hover { transform: translateY(-2px); border-color: var(--bio-soft); text-decoration: none; color: var(--ink); }
+
+  .scroll-hint {
+    position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%);
+    z-index: 4; font-size: 0.72rem; letter-spacing: 0.16em; text-transform: uppercase;
+    color: var(--ink-faint); font-family: var(--mono);
+    display: flex; flex-direction: column; align-items: center; gap: 6px;
+    animation: bob 2.6s ease-in-out infinite;
+  }
+  @keyframes bob { 0%,100% { transform: translate(-50%, 0); } 50% { transform: translate(-50%, 6px); } }
+  .scroll-hint svg { opacity: 0.7; }
+
+  /* ============ DESCENT (content below the surface) ============ */
+  section.deep-content { position: relative; z-index: 1; padding: clamp(72px, 12vh, 132px) 0; }
+  .sec-head { max-width: 62ch; margin: 0 auto clamp(40px, 7vh, 72px); text-align: center; }
+  .sec-eyebrow {
+    font-family: var(--mono); font-size: 0.72rem; letter-spacing: 0.2em; text-transform: uppercase;
+    color: var(--bio-soft); margin: 0 0 12px;
+  }
+  .sec-head h2 {
+    font-size: clamp(1.7rem, 4vw, 2.6rem); font-weight: 600; line-height: 1.16;
+    margin: 0 0 14px; letter-spacing: -0.015em; text-wrap: balance;
+  }
+  .sec-head p { color: var(--ink-soft); font-size: clamp(1rem, 2vw, 1.12rem); margin: 0; }
+
+  /* how it works — three depths */
+  .depths { display: grid; gap: 20px; grid-template-columns: repeat(3, 1fr); }
+  .depth-card {
+    position: relative; padding: 26px 24px; border-radius: 18px;
+    background: var(--glass); border: 1px solid var(--glass-edge);
+    backdrop-filter: blur(6px); overflow: hidden;
+  }
+  .depth-card::before {
+    content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+    background: linear-gradient(to bottom, var(--bio), transparent);
+  }
+  .depth-num {
+    font-family: var(--mono); font-size: 0.74rem; letter-spacing: 0.1em;
+    color: var(--bio-soft); margin-bottom: 12px;
+  }
+  .depth-card h3 { font-size: 1.12rem; font-weight: 600; margin: 0 0 10px; letter-spacing: -0.01em; }
+  .depth-card p { font-size: 0.94rem; color: var(--ink-soft); margin: 0; }
+
+  /* surfaces grid */
+  .surfaces { display: grid; gap: 16px; grid-template-columns: repeat(3, 1fr); margin-top: 18px; }
+  .surface {
+    padding: 20px; border-radius: 16px;
+    background: oklch(20% 0.05 228 / 0.45); border: 1px solid var(--glass-edge);
+    transition: transform .2s ease, border-color .2s ease;
+  }
+  .surface:hover { transform: translateY(-3px); border-color: var(--bio-soft); }
+  .surface .ico { font-size: 1.3rem; margin-bottom: 10px; }
+  .surface h4 { margin: 0 0 6px; font-size: 1rem; font-weight: 600; }
+  .surface p { margin: 0; font-size: 0.88rem; color: var(--ink-faint); }
+
+  /* facts / honesty strip */
+  .facts {
+    display: grid; gap: 20px; grid-template-columns: 1.1fr 1fr; align-items: start;
+    max-width: 980px; margin: 0 auto;
+  }
+  .facts-list { list-style: none; margin: 0; padding: 0; }
+  .facts-list li {
+    position: relative; padding: 0 0 16px 26px; color: var(--ink-soft); font-size: 0.96rem;
+  }
+  .facts-list li::before {
+    content: ""; position: absolute; left: 2px; top: 9px;
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--bio); box-shadow: 0 0 10px 1px var(--bio);
+  }
+  .facts-list li b { color: var(--ink); font-weight: 600; }
+  .mcp-card {
+    padding: 24px; border-radius: 18px;
+    background: linear-gradient(160deg, oklch(24% 0.06 215 / 0.6), oklch(16% 0.05 235 / 0.7));
+    border: 1px solid var(--glass-edge);
+  }
+  .mcp-card h3 { margin: 0 0 8px; font-size: 1.1rem; font-weight: 600; }
+  .mcp-card p { margin: 0 0 14px; font-size: 0.9rem; color: var(--ink-soft); }
+  .code-chip {
+    font-family: var(--mono); font-size: 0.84rem; color: var(--bio);
+    background: oklch(12% 0.04 245 / 0.8); border: 1px solid var(--line);
+    border-radius: 10px; padding: 12px 14px; overflow-x: auto;
+    display: block; white-space: pre;
+  }
+  .code-chip .muted { color: var(--ink-faint); }
+
+  /* final CTA */
+  .closing { text-align: center; max-width: 60ch; margin: 0 auto; }
+  .closing h2 { font-size: clamp(1.7rem, 4.2vw, 2.7rem); font-weight: 600; margin: 0 0 16px; letter-spacing: -0.015em; line-height: 1.14; }
+  .closing p { color: var(--ink-soft); font-size: 1.08rem; margin: 0 0 28px; }
+
+  footer {
+    border-top: 1px solid var(--line); padding: 36px 0 48px;
+    color: var(--ink-faint); font-size: 0.86rem;
+  }
+  footer .wrap { display: flex; flex-wrap: wrap; gap: 14px 28px; align-items: center; justify-content: space-between; }
+  footer a { color: var(--ink-soft); }
+  footer nav { display: flex; flex-wrap: wrap; gap: 18px; }
+
+  /* ============ responsive ============ */
+  @media (max-width: 860px) {
+    .depths, .surfaces { grid-template-columns: 1fr; }
+    .facts { grid-template-columns: 1fr; }
+    .scene { width: min(560px, 90vw); }
+  }
+  /* On short / narrow viewports the scene + bottom copy can't both center-stack,
+     so anchor the rising scene to the upper third and shrink it for clarity. */
+  @media (max-width: 620px) {
+    .scene-stage { align-items: flex-start; padding-top: clamp(72px, 17vh, 132px); }
+    .scene { width: min(430px, 90vw); }
+    .scene-card { padding: 18px 16px 16px; line-height: 1.4; }
+    .scene-headline { font-size: 1rem; margin-bottom: 10px; }
+    .scene-body { font-size: 0.74rem; line-height: 1.5; }
+    .scene-foot { margin-top: 12px; padding-top: 10px; font-size: 0.72rem; }
+    .scene-card { box-shadow: 0 18px 56px -18px oklch(6% 0.05 250 / 0.9), 0 0 70px -10px oklch(70% 0.16 200 / 0.35); }
+    .context-cue { top: 14px; }
+    /* keep the bottom hero copy readable even if the tall scene lingers behind it */
+    .abyss-copy { background: linear-gradient(to top, var(--abyss-0) 28%, oklch(11% 0.045 240 / 0.86) 62%, transparent 100%); }
+    .abyss-copy .wrap { padding-top: 28px; }
+  }
+
+  /* ============ reduced-motion: surfaced scene shown statically ============ */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+    .scene {
+      transform: none !important; opacity: 1 !important; filter: none !important;
+    }
+    .context-line .cursor { display: none; }
+    .scroll-hint { animation: none; }
+    .light-shafts { animation: none; }
+  }
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<!-- ============ THE ABYSS — full-bleed hero ============ -->
+<header class="abyss" aria-label="Memex — a memory surfacing from the deep">
+  <canvas id="deep-canvas" aria-hidden="true"></canvas>
+  <div class="light-shafts" aria-hidden="true"></div>
+
+  <!-- current context: the present moment that calls a memory up -->
+  <div class="context-cue" aria-hidden="true">
+    <div class="context-label">right now you're working on</div>
+    <div class="context-line" id="context-line"></div>
+  </div>
+
+  <!-- the rising SCENE -->
+  <div class="scene-stage" aria-live="polite">
+    <article class="scene" id="scene" aria-label="A past coding moment surfacing">
+      <div class="scene-card">
+        <div class="scene-meta">
+          <span class="orb" aria-hidden="true"></span>
+          <span id="scene-tag">session</span>
+          <span class="when" id="scene-when">a while ago</span>
+        </div>
+        <h3 class="scene-headline" id="scene-headline"></h3>
+        <pre class="scene-body" id="scene-body"></pre>
+        <div class="scene-foot">
+          <span>surfaced because <b id="scene-why">it resembles what you're doing now</b></span>
+        </div>
+      </div>
+    </article>
+    <div class="ascend-trail" aria-hidden="true"></div>
+  </div>
+
+  <!-- hero copy -->
+  <div class="abyss-copy">
+    <div class="wrap">
+      <p class="eyebrow"><span class="dot" aria-hidden="true"></span>Memex · built for Qdrant Vector Space Day 2026</p>
+      <h1>The memory you forgot you had <span class="glow-word">rises on its own.</span></h1>
+      <p class="lede">
+        You don't document every session. Yet when the moment calls for it, the relevant
+        past surfaces from the depths — a whole coding scene brought back before your eyes,
+        found by <em>similarity</em>, not keywords.
+      </p>
+      <div class="cta-row">
+        <a class="btn btn-primary" href="https://github.com/Two-Weeks-Team/memex">View the repo</a>
+        <a class="btn btn-ghost" href="https://two-weeks-team.github.io/memex/">See it live</a>
+      </div>
+    </div>
+  </div>
+
+  <div class="scroll-hint" aria-hidden="true">
+    <span>descend</span>
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 2v11M3 8l5 5 5-5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+  </div>
+</header>
+
+<main id="main">
+
+  <!-- ============ how it works — three depths ============ -->
+  <section class="deep-content">
+    <div class="wrap">
+      <div class="sec-head">
+        <p class="sec-eyebrow">how recall works</p>
+        <h2>It isn't a search box. The deep does the remembering for you.</h2>
+        <p>Vannevar Bush's 1945 <em>Memex</em> imagined memory you move through by association.
+           Memex reads your own session history and lets the relevant moment rise — unbidden — when the situation evokes it.</p>
+      </div>
+      <div class="depths">
+        <div class="depth-card">
+          <div class="depth-num">— the corpus sinks down —</div>
+          <h3>Your history becomes the deep</h3>
+          <p>Claude Code &amp; Codex transcripts — <code style="font-family:var(--mono);font-size:0.85em">~/.claude/projects/**/*.jsonl</code>,
+             legacy logs and <code style="font-family:var(--mono);font-size:0.85em">history.jsonl</code> — become a corpus you own, embedded into a vector space backed by Qdrant.</p>
+        </div>
+        <div class="depth-card">
+          <div class="depth-num">— a current pulls —</div>
+          <h3>The moment sends a signal</h3>
+          <p>Your present context — what you're debugging, designing, deciding — is matched by
+             similarity against everything below. No query typed; the situation itself is the prompt.</p>
+        </div>
+        <div class="depth-card">
+          <div class="depth-num">— light rises —</div>
+          <h3>The scene surfaces</h3>
+          <p>The closest past moment glows up from the depths and resolves into view — the way a
+             forgotten fact returns mid-task. You're the recipient, not the seeker.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ surfaces ============ -->
+  <section class="deep-content" style="padding-top:0;">
+    <div class="wrap">
+      <div class="sec-head">
+        <p class="sec-eyebrow">what's down there</p>
+        <h2>Many ways the deep gives a memory back</h2>
+        <p>One corpus, several lenses — each surfaces the past by a different kind of nearness.</p>
+      </div>
+      <div class="surfaces">
+        <div class="surface"><div class="ico" aria-hidden="true">⏳</div><h4>Time Machine</h4><p>Replay a past session moment as it unfolded.</p></div>
+        <div class="surface"><div class="ico" aria-hidden="true">🔦</div><h4>Lens</h4><p>Named-vector, weighted search across the corpus.</p></div>
+        <div class="surface"><div class="ico" aria-hidden="true">🕸️</div><h4>Topology</h4><p>Distance-matrix → MST graph of related sessions.</p></div>
+        <div class="surface"><div class="ico" aria-hidden="true">🎚️</div><h4>Mix / Discovery</h4><p>Positive / negative recommendation steering.</p></div>
+        <div class="surface"><div class="ico" aria-hidden="true">🌊</div><h4>Proactive Recall</h4><p>Relevant memories surface on their own cadence.</p></div>
+        <div class="surface"><div class="ico" aria-hidden="true">🧭</div><h4>Companion / Wrapped</h4><p>The agent-memory layer: Loop Breaker &amp; more.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ facts / honesty + MCP ============ -->
+  <section class="deep-content" style="padding-top:0;">
+    <div class="wrap">
+      <div class="facts">
+        <div>
+          <p class="sec-eyebrow">honest about what it is</p>
+          <h2 style="font-size:clamp(1.5rem,3.4vw,2.1rem);font-weight:600;margin:0 0 18px;letter-spacing:-0.015em;">No chatbot. No LLM at runtime.</h2>
+          <ul class="facts-list">
+            <li><b>LLM-free at runtime.</b> Retrieval is vector similarity over Qdrant — not a model generating answers.</li>
+            <li><b>A corpus you own.</b> Claude Code silently migrates and deletes old sessions; Memex preserves yours.</li>
+            <li><b>Spatial, not keyword.</b> You move through memory by similarity, the way Bush's Memex imagined.</li>
+            <li><b>Runs as a server too.</b> A Docker variant bundles Qdrant + web + MCP in one image.</li>
+          </ul>
+        </div>
+        <div class="mcp-card">
+          <h3>Works inside your agent</h3>
+          <p>11 MCP tools over stdio + HTTP — usable from Claude Code, Codex, and Cursor, so a
+             past memory can surface right where you're working.</p>
+          <code class="code-chip"><span class="muted"># add Memex to your agent</span>
+claude mcp add memex \
+  -- <span style="color:var(--bio)">memex serve --stdio</span></code>
+          <p style="margin-top:14px;margin-bottom:0;">
+            <a href="https://github.com/Two-Weeks-Team/memex">Repo &amp; server/Docker variant →</a>
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ closing ============ -->
+  <section class="deep-content" style="padding-top:0;">
+    <div class="wrap">
+      <div class="closing">
+        <h2>The moment you've been here before — let it surface.</h2>
+        <p>Think outside the bot. Give your work a memory it returns to you on its own.</p>
+        <div class="cta-row" style="justify-content:center;">
+          <a class="btn btn-primary" href="https://github.com/Two-Weeks-Team/memex">Open the repo</a>
+          <a class="btn btn-ghost" href="https://two-weeks-team.github.io/memex/">See it live</a>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>Memex · a navigable memory over your Claude Code / Codex history · Qdrant Vector Space Day 2026</span>
+    <nav aria-label="Links">
+      <a href="https://github.com/Two-Weeks-Team/memex">GitHub</a>
+      <a href="https://two-weeks-team.github.io/memex/">Live landing</a>
+      <a href="https://github.com/Two-Weeks-Team/memex#mcp">MCP integration</a>
+    </nav>
+  </div>
+</footer>
+
+<script>
+(function () {
+  "use strict";
+  var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  /* ---------- the remembered SCENES (vivid past coding moments) ---------- */
+  var scenes = [
+    {
+      ctx: "an auth retry that loops on a 401…",
+      tag: "session · oauth-service",
+      when: "6 weeks ago",
+      headline: "The night you finally caught the silent token refresh loop",
+      body: function () {
+        return "you, 1:14am — watching the network tab\n" +
+               "→ refresh fired " + lit("twice") + ", second one with the old token\n" +
+               "→ the fix: " + lit("guard the in-flight refresh") + " with a single\n  promise, return it to every waiter\n" + warm("// it never 401'd again");
+      },
+      why: "you're chasing the same retry shape again"
+    },
+    {
+      ctx: "a migration that won't roll back cleanly…",
+      tag: "session · db-migrations",
+      when: "3 months ago",
+      headline: "The migration you wrote a down() for at the last minute",
+      body: function () {
+        return "the standup where it nearly shipped without one\n" +
+               "→ added " + lit("down()") + " that drops the new index first,\n  then the column — order matters\n" +
+               "→ tested by " + lit("migrate → rollback → migrate") + " locally\n" + warm("// future-you said thanks");
+      },
+      why: "the situation rhymes with this rollback"
+    },
+    {
+      ctx: "a flaky test that only fails in CI…",
+      tag: "session · e2e-suite",
+      when: "5 weeks ago",
+      headline: "The flake that was a timezone, not a race",
+      body: function () {
+        return "two days assuming it was async timing\n" +
+               "→ it was " + lit("Date.now()") + " vs the CI box in UTC\n" +
+               "→ froze the clock, " + lit("pinned TZ in the runner") + "\n" + warm("// green ever since");
+      },
+      why: "this failure looks identical to that one"
+    },
+    {
+      ctx: "deciding how to shape this vector query…",
+      tag: "session · search-relevance",
+      when: "2 months ago",
+      headline: "When you chose named vectors over one giant embedding",
+      body: function () {
+        return "the whiteboard with three arrows and a shrug\n" +
+               "→ split into " + lit("named vectors") + ": title, body, code\n" +
+               "→ weighted them per " + lit("Lens") + " instead of re-indexing\n" + warm("// relevance jumped, no retrain");
+      },
+      why: "you're weighing the same trade-off now"
+    }
+  ];
+
+  function lit(s) { return " L" + s + " "; }
+  function warm(s) { return " W" + s + " "; }
+
+  /* render body string with lit/warm spans, escaping HTML */
+  function renderBody(raw) {
+    var out = "", i = 0;
+    while (i < raw.length) {
+      var ch = raw[i];
+      if (ch === " ") {
+        var kind = raw[i + 1];
+        var end = raw.indexOf(" ", i + 2);
+        var inner = raw.slice(i + 2, end);
+        var cls = kind === "L" ? "lit" : "warm";
+        out += '<span class="' + cls + '">' + esc(inner) + "</span>";
+        i = end + 1;
+      } else {
+        out += esc(ch);
+        i++;
+      }
+    }
+    return out;
+  }
+  function esc(s) {
+    return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+
+  var sceneEl = document.getElementById("scene");
+  var tagEl = document.getElementById("scene-tag");
+  var whenEl = document.getElementById("scene-when");
+  var headEl = document.getElementById("scene-headline");
+  var bodyEl = document.getElementById("scene-body");
+  var whyEl = document.getElementById("scene-why");
+  var ctxLine = document.getElementById("context-line");
+
+  function paint(s) {
+    tagEl.textContent = s.tag;
+    whenEl.textContent = s.when;
+    headEl.textContent = s.headline;
+    bodyEl.innerHTML = renderBody(s.body());
+    whyEl.textContent = s.why;
+  }
+
+  /* ---------- reduced motion: show a surfaced scene, static, no cycling ---------- */
+  if (reduce) {
+    var s0 = scenes[0];
+    paint(s0);
+    ctxLine.textContent = s0.ctx;
+    sceneEl.classList.add("surfaced");
+    return;
+  }
+
+  /* ---------- type the current-context cue ---------- */
+  function typeContext(text, done) {
+    ctxLine.innerHTML = "";
+    var span = document.createElement("span");
+    var cur = document.createElement("span");
+    cur.className = "cursor"; cur.textContent = "▍";
+    ctxLine.appendChild(span); ctxLine.appendChild(cur);
+    var i = 0;
+    (function step() {
+      if (i <= text.length) {
+        span.textContent = text.slice(0, i);
+        i++;
+        setTimeout(step, 34 + Math.random() * 36);
+      } else {
+        setTimeout(function () { if (done) done(); }, 520);
+      }
+    })();
+  }
+
+  /* ---------- the surfacing cycle (autonomous, irregular timing) ---------- */
+  var idx = 0;
+  var running = true;
+
+  function cycle() {
+    if (!running) return;
+    var s = scenes[idx % scenes.length];
+    idx++;
+
+    // 1) the present moment forms
+    paint(s);
+    sceneEl.classList.remove("sinking", "surfaced");
+    typeContext(s.ctx, function () {
+      // 2) the memory rises from the deep, unbidden
+      sceneEl.classList.add("surfaced");
+      // glow ripple in the canvas as it surfaces
+      triggerSurge();
+      // 3) it lingers, then sinks back; the next moment will call another up
+      var linger = 5200 + Math.random() * 2600;
+      setTimeout(function () {
+        if (!running) return;
+        sceneEl.classList.remove("surfaced");
+        sceneEl.classList.add("sinking");
+        setTimeout(function () {
+          var gap = 1400 + Math.random() * 1600;
+          setTimeout(cycle, gap);
+        }, 1500);
+      }, linger);
+    });
+  }
+
+  // pause when tab hidden (kind to battery / honest perf)
+  document.addEventListener("visibilitychange", function () {
+    running = !document.hidden;
+    if (running && idx === 0) startSoon();
+  });
+
+  /* ---------- deep canvas: marine snow + bioluminescent surge ---------- */
+  var cv = document.getElementById("deep-canvas");
+  var ctx2d = cv.getContext("2d");
+  var W = 0, H = 0, dpr = Math.min(window.devicePixelRatio || 1, 2);
+  var motes = [];
+  var orbs = [];   // slow drifting bio orbs
+  var surge = 0;   // 0..1 glow burst when a scene surfaces
+
+  function resize() {
+    W = cv.clientWidth; H = cv.clientHeight;
+    cv.width = Math.floor(W * dpr); cv.height = Math.floor(H * dpr);
+    ctx2d.setTransform(dpr, 0, 0, dpr, 0, 0);
+    seed();
+  }
+  function seed() {
+    motes = [];
+    var n = Math.round((W * H) / 16000);
+    n = Math.max(40, Math.min(150, n));
+    for (var i = 0; i < n; i++) {
+      motes.push({
+        x: Math.random() * W,
+        y: Math.random() * H,
+        r: 0.4 + Math.random() * 1.6,
+        sp: 0.06 + Math.random() * 0.32,   // gentle upward drift
+        dx: (Math.random() - 0.5) * 0.18,
+        a: 0.12 + Math.random() * 0.4
+      });
+    }
+    orbs = [];
+    var m = Math.max(5, Math.min(11, Math.round(W / 160)));
+    for (var j = 0; j < m; j++) {
+      orbs.push({
+        x: Math.random() * W,
+        y: H * (0.45 + Math.random() * 0.6),
+        r: 30 + Math.random() * 90,
+        ph: Math.random() * Math.PI * 2,
+        sp: 0.12 + Math.random() * 0.22,
+        drift: (Math.random() - 0.5) * 0.2,
+        hue: 195 + Math.random() * 18
+      });
+    }
+  }
+
+  function triggerSurge() { surge = 1; }
+
+  var last = performance.now();
+  function frame(now) {
+    var dt = Math.min(48, now - last); last = now;
+    ctx2d.clearRect(0, 0, W, H);
+
+    // soft bio orbs (the deep's living light, breathing & rising)
+    surge += (0 - surge) * 0.018; // decay
+    for (var j = 0; j < orbs.length; j++) {
+      var o = orbs[j];
+      o.ph += o.sp * 0.012 * dt;
+      o.y -= (o.sp * 0.18) * dt * 0.06;
+      o.x += o.drift * dt * 0.02;
+      if (o.y + o.r < -40) { o.y = H + o.r + Math.random() * 80; o.x = Math.random() * W; }
+      if (o.x < -o.r) o.x = W + o.r; if (o.x > W + o.r) o.x = -o.r;
+      var pulse = 0.5 + 0.5 * Math.sin(o.ph);
+      var alpha = (0.05 + 0.07 * pulse) + surge * 0.06;
+      var rad = o.r * (1 + surge * 0.25);
+      var g = ctx2d.createRadialGradient(o.x, o.y, 0, o.x, o.y, rad);
+      g.addColorStop(0, "oklch(82% 0.15 " + o.hue + " / " + alpha.toFixed(3) + ")");
+      g.addColorStop(1, "oklch(82% 0.15 " + o.hue + " / 0)");
+      ctx2d.fillStyle = g;
+      ctx2d.beginPath(); ctx2d.arc(o.x, o.y, rad, 0, Math.PI * 2); ctx2d.fill();
+    }
+
+    // marine snow drifting up through the column
+    for (var i = 0; i < motes.length; i++) {
+      var p = motes[i];
+      p.y -= p.sp * dt * 0.06;
+      p.x += p.dx * dt * 0.02;
+      if (p.y < -6) { p.y = H + 6; p.x = Math.random() * W; }
+      if (p.x < -6) p.x = W + 6; if (p.x > W + 6) p.x = -6;
+      var aa = (p.a + surge * 0.25);
+      ctx2d.beginPath();
+      ctx2d.fillStyle = "oklch(92% 0.06 200 / " + aa.toFixed(3) + ")";
+      ctx2d.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+      ctx2d.fill();
+    }
+
+    requestAnimationFrame(frame);
+  }
+
+  window.addEventListener("resize", resize, { passive: true });
+  resize();
+  requestAnimationFrame(frame);
+
+  /* ---------- kick off ---------- */
+  function startSoon() { setTimeout(cycle, 700); }
+  startSoon();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Memex — a memory that comes back to you</title>
+<style>
+  :root {
+    --bg: oklch(17% 0.03 265);
+    --bg-2: oklch(22% 0.04 270);
+    --ink: oklch(94% 0.02 265);
+    --ink-dim: oklch(72% 0.03 265);
+    --ink-faint: oklch(55% 0.025 265);
+    --accent: oklch(78% 0.16 200);
+    --accent-2: oklch(74% 0.17 320);
+    --trail: oklch(80% 0.13 200 / 0.55);
+    --card-dormant: oklch(28% 0.03 265 / 0.55);
+    --card-surface: oklch(34% 0.05 270);
+    --line: oklch(40% 0.03 265 / 0.5);
+    --maxw: 1080px;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+  }
+  body {
+    margin: 0;
+    background:
+      radial-gradient(1200px 700px at 70% -10%, var(--bg-2), transparent 60%),
+      var(--bg);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--accent); }
+  .wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 22px; }
+
+  /* ---- skip + header ---- */
+  .skip {
+    position: absolute; left: -999px; top: 0;
+    background: var(--accent); color: oklch(15% 0.03 265);
+    padding: 10px 14px; border-radius: 8px; z-index: 50; font-weight: 600;
+  }
+  .skip:focus { left: 12px; top: 12px; }
+  header.top {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 16px; padding: 18px 0; flex-wrap: wrap;
+  }
+  .brand { display: flex; align-items: center; gap: 11px; font-weight: 700; letter-spacing: .2px; }
+  .brand svg { display: block; }
+  .nav { display: flex; gap: 8px; flex-wrap: wrap; }
+  .nav a {
+    text-decoration: none; color: var(--ink-dim); font-size: 14px;
+    padding: 7px 12px; border-radius: 999px; border: 1px solid transparent;
+  }
+  .nav a:hover, .nav a:focus-visible {
+    color: var(--ink); border-color: var(--line); outline: none;
+  }
+
+  /* ---- HUD ribbon (game designer lens, but honest) ---- */
+  .hud {
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+    margin: 6px 0 26px; padding: 11px 14px;
+    border: 1px solid var(--line); border-radius: 14px;
+    background: oklch(24% 0.03 265 / 0.5);
+    font-size: 13px; color: var(--ink-dim);
+  }
+  .hud .tag {
+    font-weight: 700; color: var(--ink); font-size: 12px; letter-spacing: .5px;
+    text-transform: uppercase;
+  }
+  .xpbar {
+    flex: 1 1 180px; min-width: 140px; height: 9px; border-radius: 999px;
+    background: oklch(30% 0.02 265); overflow: hidden; position: relative;
+  }
+  .xpfill {
+    height: 100%; width: 6%; border-radius: 999px;
+    background: linear-gradient(90deg, var(--accent), var(--accent-2));
+    transition: width .35s ease;
+  }
+  @media (prefers-reduced-motion: reduce) { .xpfill { transition: none; } }
+  .xpcount { font-variant-numeric: tabular-nums; min-width: 92px; text-align: right; }
+
+  /* ---- hero ---- */
+  .hero { padding: 8px 0 14px; }
+  .hero h1 {
+    font-size: clamp(30px, 5vw, 52px); line-height: 1.08; margin: 0 0 14px;
+    letter-spacing: -0.5px; max-width: 17ch;
+  }
+  .hero .lede {
+    font-size: clamp(16px, 2.1vw, 20px); color: var(--ink-dim);
+    max-width: 56ch; margin: 0 0 8px;
+  }
+  .hint {
+    font-size: 13.5px; color: var(--ink-faint); margin: 14px 0 0;
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  }
+  .kbd {
+    font: 600 12px/1 system-ui, sans-serif; color: var(--ink);
+    border: 1px solid var(--line); border-bottom-width: 2px;
+    padding: 4px 7px; border-radius: 6px; background: oklch(26% 0.02 265);
+  }
+
+  /* ---- the TOY: memory field ---- */
+  .field-section { margin: 22px 0 12px; }
+  .field {
+    position: relative; width: 100%;
+    aspect-ratio: 16 / 9; min-height: 320px;
+    border: 1px solid var(--line); border-radius: 18px; overflow: hidden;
+    background:
+      radial-gradient(700px 360px at var(--mx, 50%) var(--my, 45%), oklch(30% 0.05 270 / 0.65), transparent 55%),
+      linear-gradient(180deg, oklch(20% 0.03 265), oklch(16% 0.03 265));
+    touch-action: none;
+  }
+  .field canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .card {
+    position: absolute; transform: translate(-50%, -50%) scale(0.82);
+    width: 156px; max-width: 42vw;
+    padding: 10px 12px; border-radius: 12px;
+    border: 1px solid var(--line);
+    background: var(--card-dormant);
+    color: var(--ink-faint);
+    font-size: 12.5px; line-height: 1.35;
+    opacity: 0.42; filter: saturate(0.5);
+    transition: opacity .28s ease, transform .28s ease, filter .28s ease,
+                background-color .28s ease, color .28s ease, box-shadow .28s ease, border-color .28s ease;
+    cursor: default; will-change: transform, opacity;
+  }
+  .card .k { display: block; font-weight: 700; color: var(--ink-dim); font-size: 11px;
+             letter-spacing: .4px; text-transform: uppercase; margin-bottom: 3px; }
+  .card.surfaced {
+    opacity: 1; filter: saturate(1);
+    background: var(--card-surface); color: var(--ink);
+    transform: translate(-50%, -50%) scale(1);
+    box-shadow: 0 8px 30px oklch(10% 0.05 265 / 0.55);
+    border-color: var(--accent);
+  }
+  .card.surfaced .k { color: var(--accent); }
+  .card:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; opacity: 1; }
+  @media (prefers-reduced-motion: reduce) {
+    .card { transition: none; }
+  }
+  .field-cap {
+    font-size: 13px; color: var(--ink-faint); margin: 12px 2px 0;
+    display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+  }
+
+  /* ---- achievement popup ---- */
+  .toast {
+    position: fixed; right: 16px; bottom: 16px; z-index: 40;
+    display: flex; align-items: center; gap: 11px;
+    padding: 12px 14px; max-width: 320px;
+    border: 1px solid var(--accent); border-radius: 13px;
+    background: oklch(24% 0.04 200 / 0.96);
+    box-shadow: 0 10px 34px oklch(8% 0.05 265 / 0.6);
+    transform: translateY(140%); opacity: 0;
+    transition: transform .4s cubic-bezier(.2,.9,.3,1.2), opacity .4s ease;
+  }
+  .toast.show { transform: translateY(0); opacity: 1; }
+  @media (prefers-reduced-motion: reduce) {
+    .toast { transition: opacity .2s ease; transform: none; }
+  }
+  .toast .ico {
+    flex: 0 0 auto; width: 34px; height: 34px; border-radius: 9px;
+    display: grid; place-items: center; background: oklch(34% 0.08 200);
+  }
+  .toast .t-title { font-weight: 700; font-size: 13px; }
+  .toast .t-sub { font-size: 12px; color: var(--ink-dim); }
+
+  /* ---- content sections ---- */
+  section.block { padding: 40px 0; border-top: 1px solid var(--line); }
+  section.block h2 { font-size: clamp(22px, 3vw, 30px); margin: 0 0 8px; letter-spacing: -.3px; }
+  section.block .sub { color: var(--ink-dim); max-width: 60ch; margin: 0 0 22px; }
+
+  .grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+  .tile {
+    border: 1px solid var(--line); border-radius: 14px; padding: 16px 16px 18px;
+    background: oklch(23% 0.03 265 / 0.55);
+  }
+  .tile h3 { margin: 4px 0 6px; font-size: 16px; }
+  .tile p { margin: 0; font-size: 14px; color: var(--ink-dim); }
+  .tile .pill {
+    font-size: 11px; letter-spacing: .4px; text-transform: uppercase;
+    color: var(--accent-2); font-weight: 700;
+  }
+
+  pre.code {
+    margin: 0; padding: 14px 16px; overflow-x: auto;
+    border: 1px solid var(--line); border-radius: 12px;
+    background: oklch(14% 0.02 265); color: var(--ink);
+    font: 13px/1.7 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  pre.code .c { color: var(--ink-faint); }
+  pre.code .a { color: var(--accent); }
+
+  .cta-row { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 8px; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 8px;
+    text-decoration: none; font-weight: 600; font-size: 14px;
+    padding: 11px 16px; border-radius: 11px; border: 1px solid var(--line);
+    color: var(--ink); background: oklch(26% 0.03 265 / 0.6);
+  }
+  .btn.primary { background: linear-gradient(90deg, var(--accent), var(--accent-2));
+                 color: oklch(15% 0.03 265); border-color: transparent; }
+  .btn:hover, .btn:focus-visible { outline: none; border-color: var(--accent); }
+
+  footer {
+    padding: 34px 0 48px; border-top: 1px solid var(--line);
+    color: var(--ink-faint); font-size: 13px;
+  }
+  footer a { color: var(--ink-dim); }
+  .foot-links { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 10px; }
+
+  /* static fallback: show field as a legible grid when JS is off / reduced motion */
+  .nojs .field { aspect-ratio: auto; min-height: 0; padding: 16px;
+    display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(180px,1fr)); }
+  .nojs .field canvas { display: none; }
+  .nojs .card { position: static; transform: none; opacity: 1; filter: none;
+    width: auto; max-width: none; background: var(--card-surface); color: var(--ink); }
+  .nojs .card .k { color: var(--accent); }
+  .nojs .hud, .nojs .hint { display: none; }
+</style>
+</head>
+<body class="nojs">
+<a class="skip" href="#main">Skip to content</a>
+
+<div class="wrap">
+  <header class="top">
+    <div class="brand">
+      <svg width="26" height="26" viewBox="0 0 32 32" aria-hidden="true">
+        <circle cx="16" cy="16" r="14" fill="none" stroke="oklch(78% 0.16 200)" stroke-width="1.4"/>
+        <circle cx="9" cy="12" r="2.4" fill="oklch(78% 0.16 200)"/>
+        <circle cx="22" cy="10" r="2" fill="oklch(74% 0.17 320)"/>
+        <circle cx="18" cy="22" r="2.2" fill="oklch(78% 0.16 200)"/>
+        <path d="M9 12 L22 10 M22 10 L18 22 M18 22 L9 12" stroke="oklch(80% 0.13 200 / 0.6)" stroke-width="1.1" fill="none"/>
+      </svg>
+      <span>Memex</span>
+    </div>
+    <nav class="nav" aria-label="Primary">
+      <a href="#play">The toy</a>
+      <a href="#what">What it is</a>
+      <a href="#agents">For agents</a>
+      <a href="https://two-weeks-team.github.io/memex/">Live</a>
+      <a href="https://github.com/Two-Weeks-Team/memex">Repo</a>
+    </nav>
+  </header>
+</div>
+
+<main id="main" class="wrap">
+
+  <!-- playful HUD: a progress meter that fills as you surface memories -->
+  <div class="hud" aria-hidden="true">
+    <span class="tag">Recall meter</span>
+    <div class="xpbar"><div class="xpfill" id="xpfill"></div></div>
+    <span class="xpcount"><span id="xpnum">0</span> / 9 surfaced</span>
+  </div>
+
+  <section class="hero">
+    <h1>You didn't file it away. It just comes back when it's needed.</h1>
+    <p class="lede">
+      Memex turns your Claude Code &amp; Codex session history into a space you can move
+      through by <em>similarity</em>, not keywords. The page below behaves the same way:
+      nothing is searched — thoughts stay latent until your attention gets close, then they
+      surface and link.
+    </p>
+    <p class="hint">
+      <span>Move your cursor across the field</span>
+      <span aria-hidden="true">·</span>
+      <span>or <span class="kbd">Tab</span> through the cards</span>
+      <span aria-hidden="true">·</span>
+      <span>watch the trails form.</span>
+    </p>
+  </section>
+
+  <!-- ============ THE TOY ============ -->
+  <section id="play" class="field-section" aria-labelledby="play-h">
+    <h2 id="play-h" style="position:absolute;left:-9999px;">Interactive memory field</h2>
+    <div class="field" id="field" role="group"
+         aria-label="A field of dormant memory cards. Move the pointer near a card, or press Tab to focus one, to surface it and reveal its associative trails to nearby memories.">
+      <canvas id="trails" aria-hidden="true"></canvas>
+      <!-- cards injected by JS at random positions; here as static fallback content -->
+      <div class="card" tabindex="0" data-x="18" data-y="26"><span class="k">Session · Apr</span>that Qdrant payload-index bug you fixed at 2am</div>
+      <div class="card" tabindex="0" data-x="40" data-y="18"><span class="k">Topology</span>three refactors that all touched the same module</div>
+      <div class="card" tabindex="0" data-x="66" data-y="22"><span class="k">Lens</span>"how did I prompt that working retry loop?"</div>
+      <div class="card" tabindex="0" data-x="82" data-y="38"><span class="k">Recall</span>a half-finished idea from a deleted session</div>
+      <div class="card" tabindex="0" data-x="28" data-y="52"><span class="k">Mix</span>more like this thread, less like that one</div>
+      <div class="card" tabindex="0" data-x="54" data-y="46"><span class="k">Time machine</span>replay the moment the design changed</div>
+      <div class="card" tabindex="0" data-x="74" data-y="64"><span class="k">Companion</span>"we already decided this — here's where"</div>
+      <div class="card" tabindex="0" data-x="36" data-y="74"><span class="k">Wrapped</span>what you actually worked on this month</div>
+      <div class="card" tabindex="0" data-x="60" data-y="78"><span class="k">Trail</span>follow one thought to its neighbors</div>
+    </div>
+    <p class="field-cap">
+      <span>Each card is a memory from your own history. Proximity, not a query, brings it up.</span>
+      <span>No JS / reduced motion? Every card is shown, already legible.</span>
+    </p>
+  </section>
+
+  <!-- ============ WHAT IT IS ============ -->
+  <section id="what" class="block" aria-labelledby="what-h">
+    <h2 id="what-h">What Memex actually is</h2>
+    <p class="sub">
+      A non-chatbot tool, with no LLM call at runtime, that reads your Claude Code / Codex
+      session history (<code>~/.claude/projects/**/*.jsonl</code> plus legacy transcripts and
+      <code>history.jsonl</code>) and turns it into a navigable spatial memory backed by Qdrant.
+      It exists because Claude Code silently migrates and deletes old sessions — this keeps a
+      corpus you own.
+    </p>
+    <div class="grid">
+      <div class="tile"><span class="pill">Replay</span><h3>Time Machine</h3><p>Step back through a session as it actually unfolded.</p></div>
+      <div class="tile"><span class="pill">Search by meaning</span><h3>Lens</h3><p>Named-vector weighted search — find by similarity, not exact words.</p></div>
+      <div class="tile"><span class="pill">Map</span><h3>Topology</h3><p>Distance matrix reduced to a minimum-spanning-tree graph of your work.</p></div>
+      <div class="tile"><span class="pill">Discover</span><h3>Mix / Discovery</h3><p>Positive / negative recommendations: more like this, less like that.</p></div>
+      <div class="tile"><span class="pill">Proactive</span><h3>Recall</h3><p>Relevant past context surfaces on its own as you work.</p></div>
+      <div class="tile"><span class="pill">Agent memory</span><h3>Companion · Wrapped · Loop Breaker</h3><p>A memory layer for agents — summarize, reflect, stop repeating yourself.</p></div>
+    </div>
+  </section>
+
+  <!-- ============ FOR AGENTS ============ -->
+  <section id="agents" class="block" aria-labelledby="agents-h">
+    <h2 id="agents-h">Wire it into your agent</h2>
+    <p class="sub">
+      Memex exposes 11 MCP tools over stdio and HTTP, so it works inside Claude Code, Codex,
+      and Cursor. A server / Docker variant bundles Qdrant + web UI + MCP into one image.
+    </p>
+    <pre class="code"><span class="c"># add the Memex MCP server to Claude Code</span>
+claude mcp add memex <span class="a">--</span> path/to/memex-mcp
+<span class="c"># 11 tools become available: lens search, topology, recall, mix, time-machine…</span></pre>
+    <div class="cta-row" style="margin-top:18px;">
+      <a class="btn primary" href="https://github.com/Two-Weeks-Team/memex">View the repo</a>
+      <a class="btn" href="https://two-weeks-team.github.io/memex/">Open the live landing</a>
+      <a class="btn" href="https://github.com/Two-Weeks-Team/memex#server--docker">Server / Docker variant</a>
+    </div>
+  </section>
+</main>
+
+<footer class="wrap">
+  <div class="foot-links">
+    <a href="https://github.com/Two-Weeks-Team/memex">github.com/Two-Weeks-Team/memex</a>
+    <a href="https://two-weeks-team.github.io/memex/">two-weeks-team.github.io/memex</a>
+  </div>
+  <div>Built for Qdrant Vector Space Day 2026 — “Think Outside the Bot.” Inspired by Vannevar Bush's 1945 Memex and its associative trails.</div>
+</footer>
+
+<!-- achievement toast -->
+<div class="toast" id="toast" role="status" aria-live="polite">
+  <div class="ico" aria-hidden="true">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+      <path d="M5 13l4 4L19 7" stroke="oklch(94% 0.02 265)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+  </div>
+  <div>
+    <div class="t-title" id="toast-title">Trail complete</div>
+    <div class="t-sub" id="toast-sub">You surfaced every memory in the field.</div>
+  </div>
+</div>
+
+<script>
+(function () {
+  // JS is on → drop the static-fallback styling, enable the toy
+  document.body.classList.remove('nojs');
+
+  var reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var field = document.getElementById('field');
+  var cards = Array.prototype.slice.call(field.querySelectorAll('.card'));
+  var canvas = document.getElementById('trails');
+  var ctx = canvas.getContext('2d');
+  var xpfill = document.getElementById('xpfill');
+  var xpnum = document.getElementById('xpnum');
+  var toast = document.getElementById('toast');
+
+  // place cards from their data-x/data-y (percent) so layout matches the static positions
+  cards.forEach(function (c) {
+    c.style.left = c.getAttribute('data-x') + '%';
+    c.style.top = c.getAttribute('data-y') + '%';
+  });
+
+  var surfacedEver = Object.create(null);
+  var total = cards.length;
+  var allDone = false;
+
+  function cardCenter(c) {
+    var r = c.getBoundingClientRect();
+    var f = field.getBoundingClientRect();
+    return { x: r.left - f.left + r.width / 2, y: r.top - f.top + r.height / 2, el: c };
+  }
+
+  function resize() {
+    var dpr = Math.min(window.devicePixelRatio || 1, 2);
+    var f = field.getBoundingClientRect();
+    canvas.width = Math.max(1, Math.round(f.width * dpr));
+    canvas.height = Math.max(1, Math.round(f.height * dpr));
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  function markSurfaced(el) {
+    var id = el.getAttribute('data-x') + ',' + el.getAttribute('data-y');
+    if (!surfacedEver[id]) {
+      surfacedEver[id] = true;
+      var n = Object.keys(surfacedEver).length;
+      xpnum.textContent = n;
+      xpfill.style.width = Math.round((n / total) * 100) + '%';
+      if (n >= total && !allDone) {
+        allDone = true;
+        showToast();
+      }
+    }
+  }
+
+  var toastTimer = null;
+  function showToast() {
+    toast.classList.add('show');
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { toast.classList.remove('show'); }, 4200);
+  }
+
+  // distance from a point to each card; surface the nearby ones + draw trails to neighbors
+  function activateAt(px, py, radius) {
+    var pts = cards.map(cardCenter);
+    var active = [];
+    pts.forEach(function (p) {
+      var d = Math.hypot(p.x - px, p.y - py);
+      if (d < radius) {
+        p.el.classList.add('surfaced');
+        markSurfaced(p.el);
+        active.push(p);
+      } else {
+        p.el.classList.remove('surfaced');
+      }
+    });
+    drawTrails(active, pts);
+  }
+
+  // draw associative trails: connect each active card to its 2 nearest neighbors
+  function drawTrails(active, allPts) {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (!active.length) return;
+    ctx.lineWidth = 1.2;
+    ctx.strokeStyle = 'oklch(80% 0.13 200 / 0.5)';
+    active.forEach(function (a) {
+      var others = allPts
+        .filter(function (p) { return p.el !== a.el; })
+        .map(function (p) { return { p: p, d: Math.hypot(p.x - a.x, p.y - a.y) }; })
+        .sort(function (m, n) { return m.d - n.d; })
+        .slice(0, 2);
+      others.forEach(function (o) {
+        ctx.beginPath();
+        ctx.moveTo(a.x, a.y);
+        ctx.lineTo(o.p.x, o.p.y);
+        ctx.stroke();
+      });
+    });
+  }
+
+  // ---- pointer (mouse / touch) drives proximity recall ----
+  if (!reduceMotion) {
+    var targetX = -9999, targetY = -9999, curX = -9999, curY = -9999;
+    var raf = null;
+
+    function onMove(clientX, clientY) {
+      var f = field.getBoundingClientRect();
+      targetX = clientX - f.left;
+      targetY = clientY - f.top;
+      field.style.setProperty('--mx', (targetX / f.width * 100) + '%');
+      field.style.setProperty('--my', (targetY / f.height * 100) + '%');
+      if (!raf) raf = requestAnimationFrame(tick);
+    }
+    function tick() {
+      raf = null;
+      // ease the "attention point" toward the pointer for an organic feel
+      curX += (targetX - curX) * 0.22;
+      curY += (targetY - curY) * 0.22;
+      activateAt(curX, curY, 150);
+      if (Math.hypot(targetX - curX, targetY - curY) > 0.6) {
+        raf = requestAnimationFrame(tick);
+      }
+    }
+
+    field.addEventListener('mousemove', function (e) { onMove(e.clientX, e.clientY); });
+    field.addEventListener('mouseleave', function () {
+      cards.forEach(function (c) { c.classList.remove('surfaced'); });
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+    });
+    field.addEventListener('touchmove', function (e) {
+      if (e.touches[0]) { onMove(e.touches[0].clientX, e.touches[0].clientY); e.preventDefault(); }
+    }, { passive: false });
+    field.addEventListener('touchstart', function (e) {
+      if (e.touches[0]) onMove(e.touches[0].clientX, e.touches[0].clientY);
+    });
+  } else {
+    // reduced motion: surface everything once, no animation, draw a static trail set
+    cards.forEach(function (c) { c.classList.add('surfaced'); markSurfaced(c); });
+    var pts = cards.map(cardCenter);
+    drawTrails(pts, pts);
+  }
+
+  // ---- keyboard play path: focusing a card surfaces it + its neighbors ----
+  cards.forEach(function (c) {
+    c.addEventListener('focus', function () {
+      var p = cardCenter(c);
+      activateAt(p.x, p.y, 1); // radius tiny → only this card by distance…
+      c.classList.add('surfaced');
+      markSurfaced(c);
+      // …then connect it to neighbors so a trail is always visible on focus
+      var pts = cards.map(cardCenter);
+      var self = pts.filter(function (q) { return q.el === c; })[0];
+      drawTrails([self], pts);
+    });
+    c.addEventListener('blur', function () {
+      // keep visited cards lit; just clear the transient trail
+      if (!reduceMotion) ctx.clearRect(0, 0, canvas.width, canvas.height);
+    });
+  });
+})();
+</script>
+</body>
+</html>

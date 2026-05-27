@@ -1,0 +1,646 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Memex — one beam splits, and a remembered moment lives inside one color</title>
+<meta name="description" content="Memex turns your Claude Code & Codex session history into a navigable associative memory backed by Qdrant. A single white beam strikes a prism, fans into a spectrum on its own, and one wavelength widens into a vivid scene of a coding moment you'd forgotten — recall as dispersion, not search." />
+<style>
+  :root{
+    --ink:#f1f3ff;
+    --dim:#a4abca;
+    --faint:#646b8c;
+    --bg0:#040509;
+    --bg1:#080a13;
+    --hair:rgba(170,185,255,.14);
+    --panel:rgba(10,13,26,.6);
+
+    /* spectral palette — the visible band, ROYGBIV */
+    --red:#ff5a5a;
+    --orange:#ff9d3d;
+    --yellow:#ffe14d;
+    --green:#54e08a;
+    --cyan:#46d6e0;
+    --blue:#5a7bff;
+    --violet:#b56bff;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    background:
+      radial-gradient(1200px 760px at 12% 14%, #0c0f1e 0%, transparent 60%),
+      radial-gradient(1300px 900px at 88% 96%, #07090f 0%, transparent 55%),
+      linear-gradient(180deg, var(--bg1), var(--bg0) 76%);
+    color:var(--ink);
+    font:16px/1.6 ui-sans-serif,-apple-system,"Segoe UI",Roboto,Inter,system-ui,sans-serif;
+    overflow-x:hidden;
+    -webkit-font-smoothing:antialiased;
+  }
+  a{color:#c4d2ff;text-decoration:none}
+  a:hover{text-decoration:underline}
+  code,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+
+  /* ===================== the optics stage ===================== */
+  .stage{position:relative;width:100%;height:100svh;min-height:680px;overflow:hidden}
+
+  /* faint dark optical-bench grid so the beam reads as "in a lab of light" */
+  .bench{position:absolute;inset:0;
+    background:
+      repeating-linear-gradient(0deg, rgba(150,170,255,.022) 0 1px, transparent 1px 46px),
+      repeating-linear-gradient(90deg, rgba(150,170,255,.018) 0 1px, transparent 1px 46px);
+    mask-image:radial-gradient(120% 100% at 50% 50%, #000 30%, transparent 92%);
+  }
+
+  /* ---- the whole light apparatus is one SVG, full-bleed ---- */
+  .optics{position:absolute;inset:0;width:100%;height:100%;display:block}
+
+  /* ---- the SCENE that resolves out of one band ----
+     A full-bleed picture-plane, clipped into the widened wavelength on the right.
+     Each scene is drawn from layered CSS gradients (a depicted tableau, not text). */
+  .scenewrap{position:absolute;top:0;right:0;height:100%;
+    width:min(58vw, 980px);overflow:hidden;z-index:2;pointer-events:none}
+  /* the wedge: starts as a thin colored sliver, widens to a full picture */
+  .scenewrap::before{ /* the band's color wash that the scene lives inside */
+    content:"";position:absolute;inset:0;z-index:3;mix-blend-mode:overlay;
+    background:linear-gradient(100deg, var(--bandcol, transparent) 0%, transparent 46%);
+    opacity:.5;transition:background .9s ease;
+  }
+  .scene{position:absolute;inset:0;opacity:0;
+    transform:translateX(8%) scaleX(.86);transform-origin:right center;
+    transition:opacity 1s ease, transform 1.15s cubic-bezier(.16,.84,.3,1);
+    /* the left edge of the scene melts back into the spectrum */
+    -webkit-mask-image:linear-gradient(90deg, transparent 0%, #000 26%, #000 100%);
+            mask-image:linear-gradient(90deg, transparent 0%, #000 26%, #000 100%);
+  }
+  .scene.on{opacity:1;transform:translateX(0) scaleX(1)}
+
+  /* faint label that names the resolved memory (a scene caption, not a search hit) */
+  .scenecap{position:absolute;left:30%;bottom:8%;z-index:5;max-width:42%;
+    font-size:13px;letter-spacing:.02em;color:var(--ink);
+    text-shadow:0 1px 16px rgba(0,0,0,.9);opacity:0;transition:opacity .8s ease .3s;
+    pointer-events:none}
+  .scenecap.on{opacity:.92}
+  .scenecap .when{display:block;color:var(--faint);font-size:11.5px;
+    letter-spacing:.12em;text-transform:uppercase;margin-bottom:5px}
+  .scenecap b{font-weight:600}
+
+  /* a soft vignette so overlaid copy on the left stays legible */
+  .stage::after{
+    content:"";position:absolute;inset:0;pointer-events:none;z-index:4;
+    background:
+      linear-gradient(90deg, rgba(4,5,9,.92) 0%, rgba(4,5,9,.55) 30%, transparent 56%),
+      linear-gradient(180deg, rgba(4,5,9,.4) 0%, transparent 26%, transparent 64%, rgba(4,5,9,.85) 100%);
+  }
+
+  /* ===================== overlaid copy (left HUD) ===================== */
+  .hud{position:absolute;inset:0;display:flex;flex-direction:column;z-index:5;pointer-events:none}
+  .hud > *{pointer-events:auto}
+
+  .topbar{display:flex;align-items:center;justify-content:space-between;gap:16px;
+    padding:22px clamp(18px,5vw,56px)}
+  .brand{display:flex;align-items:center;gap:11px;font-weight:700;letter-spacing:.18em;
+    text-transform:uppercase;font-size:13px;color:var(--ink)}
+  /* the brand dot is itself a tiny dispersing spectrum */
+  .brand .dot{width:10px;height:10px;border-radius:50%;
+    background:conic-gradient(from 200deg,var(--red),var(--orange),var(--yellow),var(--green),var(--cyan),var(--blue),var(--violet),var(--red));
+    box-shadow:0 0 12px 2px rgba(120,150,255,.5)}
+  .topbar nav{display:flex;gap:clamp(10px,2.4vw,26px);font-size:13px;color:var(--dim);letter-spacing:.02em}
+  .topbar nav a{color:var(--dim)}
+  .topbar nav a:hover{color:var(--ink)}
+
+  .hero{margin-top:auto;padding:0 clamp(18px,5vw,56px) clamp(26px,6vh,64px);max-width:640px}
+
+  .moment{display:inline-flex;align-items:center;gap:10px;margin-bottom:20px;
+    padding:8px 14px;border:1px solid var(--hair);border-radius:999px;
+    background:var(--panel);backdrop-filter:blur(6px);
+    font-size:12.5px;letter-spacing:.02em;color:var(--dim)}
+  .moment .pulse{width:7px;height:7px;border-radius:50%;background:var(--cyan);
+    box-shadow:0 0 0 0 rgba(70,214,224,.6);animation:pulse 2.6s ease-out infinite}
+  .moment b{color:var(--ink);font-weight:600}
+  @keyframes pulse{
+    0%{box-shadow:0 0 0 0 rgba(70,214,224,.55)}
+    70%{box-shadow:0 0 0 9px rgba(70,214,224,0)}
+    100%{box-shadow:0 0 0 0 rgba(70,214,224,0)}
+  }
+
+  h1{margin:0;font-weight:680;font-size:clamp(32px,5.4vw,58px);line-height:1.05;
+    letter-spacing:-.018em;color:#fff;text-shadow:0 2px 40px rgba(4,5,9,.8)}
+  h1 .spectrum{
+    background:linear-gradient(100deg,var(--red),var(--orange) 18%,var(--yellow) 34%,var(--green) 52%,var(--cyan) 66%,var(--blue) 82%,var(--violet));
+    -webkit-background-clip:text;background-clip:text;color:transparent;
+    text-shadow:none}
+  .lede{margin:18px 0 0;font-size:clamp(15px,2.1vw,18px);color:var(--dim);max-width:560px}
+  .lede b{color:var(--ink);font-weight:600}
+
+  .cta{display:flex;flex-wrap:wrap;gap:13px;margin-top:28px}
+  .btn{display:inline-flex;align-items:center;gap:9px;padding:12px 20px;border-radius:11px;
+    font-size:14.5px;font-weight:600;letter-spacing:.01em;border:1px solid transparent;
+    transition:transform .15s ease, box-shadow .25s ease, background .25s ease}
+  .btn:hover{text-decoration:none;transform:translateY(-1px)}
+  .btn-primary{position:relative;color:#0a0c16;
+    background:linear-gradient(100deg,#ffd36b,#7fe6a6 40%,#73c8ff 72%,#c39bff);
+    box-shadow:0 8px 30px rgba(120,150,255,.3)}
+  .btn-primary:hover{box-shadow:0 12px 38px rgba(120,150,255,.44)}
+  .btn-ghost{border-color:var(--hair);color:var(--ink);background:var(--panel);backdrop-filter:blur(6px)}
+  .btn-ghost:hover{border-color:rgba(170,185,255,.4)}
+
+  .legend{margin-top:22px;font-size:12.5px;color:var(--faint);letter-spacing:.01em;
+    display:flex;align-items:center;gap:9px}
+  .legend .band-label{color:var(--ink);font-weight:600;letter-spacing:.04em}
+
+  .replay{position:absolute;right:clamp(16px,4vw,40px);bottom:clamp(20px,5vh,40px);
+    display:inline-flex;align-items:center;gap:8px;padding:9px 14px;border-radius:999px;
+    border:1px solid var(--hair);background:var(--panel);backdrop-filter:blur(6px);
+    color:var(--dim);font-size:12.5px;cursor:pointer;z-index:6}
+  .replay:hover{color:var(--ink);border-color:rgba(170,185,255,.4)}
+  .replay svg{width:13px;height:13px;fill:currentColor}
+
+  /* ===================== below the fold — ground truth ===================== */
+  .below{position:relative;z-index:2;max-width:1080px;margin:0 auto;
+    padding:clamp(56px,10vh,110px) clamp(18px,5vw,40px) 40px}
+  .kicker{font-size:12px;letter-spacing:.22em;text-transform:uppercase;color:var(--faint);margin:0 0 14px}
+  .below h2{font-size:clamp(24px,4vw,38px);line-height:1.12;margin:0;color:#fff;
+    letter-spacing:-.01em;font-weight:660;max-width:800px}
+  .below p.sub{color:var(--dim);max-width:700px;margin:16px 0 0;font-size:16px}
+
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(238px,1fr));gap:16px;margin-top:42px}
+  .card{position:relative;border:1px solid var(--hair);border-radius:16px;padding:22px 22px 24px;
+    background:linear-gradient(180deg, rgba(14,17,34,.6), rgba(8,10,20,.42));
+    transition:border-color .2s ease, transform .2s ease;overflow:hidden}
+  .card::before{ /* a thin spectral edge that hints the prism motif */
+    content:"";position:absolute;left:0;top:0;bottom:0;width:3px;
+    background:linear-gradient(180deg,var(--red),var(--yellow),var(--green),var(--cyan),var(--violet))}
+  .card:hover{border-color:rgba(170,185,255,.4);transform:translateY(-2px)}
+  .card h3{margin:0 0 8px;font-size:16px;color:#fff;letter-spacing:.01em}
+  .card p{margin:0;font-size:14px;color:var(--dim);line-height:1.55}
+
+  .facts{margin-top:44px;border:1px solid var(--hair);border-radius:16px;overflow:hidden;background:rgba(8,10,20,.5)}
+  .facts .row{display:grid;grid-template-columns:160px 1fr;gap:18px;padding:16px 22px;
+    border-top:1px solid rgba(170,185,255,.08);font-size:14.5px}
+  .facts .row:first-child{border-top:0}
+  .facts .row .lab{color:var(--faint);letter-spacing:.04em;font-size:12.5px;text-transform:uppercase;padding-top:2px}
+  .facts .row .val{color:var(--ink)}
+  .facts .row .val .mono{color:var(--cyan);font-size:13.5px}
+
+  .addline{margin-top:34px;border:1px solid var(--hair);border-radius:14px;background:#06070d;
+    padding:16px 18px;font-size:13.5px;color:var(--dim);overflow-x:auto}
+  .addline .mono{color:var(--ink)}
+  .addline .c{color:var(--green)}
+
+  footer{position:relative;z-index:2;border-top:1px solid var(--hair);margin-top:60px}
+  .foot{max-width:1080px;margin:0 auto;padding:28px clamp(18px,5vw,40px) 60px;
+    display:flex;flex-wrap:wrap;gap:18px;justify-content:space-between;align-items:center;
+    color:var(--faint);font-size:13px}
+  .foot a{color:var(--dim)}
+  .foot .links{display:flex;flex-wrap:wrap;gap:18px}
+
+  /* ===================== spectrum fan-out animation ===================== */
+  /* the seven refracted rays start collapsed onto the incident beam, then fan */
+  .ray{transform-box:fill-box;transform-origin:0% 50%;
+    transition:transform 1.1s cubic-bezier(.16,.84,.3,1), opacity .8s ease;
+    opacity:0}
+  .optics.split .ray{opacity:.9}
+  /* the live band (the one resolving into a scene) brightens; others dim back */
+  .optics.focused .ray{opacity:.34}
+  .optics.focused .ray.active{opacity:1}
+
+  /* incident white beam shimmer */
+  .beam{animation:beamPulse 4s ease-in-out infinite}
+  @keyframes beamPulse{0%,100%{opacity:.85}50%{opacity:1}}
+
+  @media (prefers-reduced-motion: reduce){
+    .moment .pulse{animation:none}
+    .beam{animation:none;opacity:1}
+    .ray{transition:none}
+    .scene{transition:none}
+    .scenecap{transition:none}
+    .scenewrap::before{transition:none}
+  }
+
+  @media (max-width:820px){
+    .scenewrap{width:74vw}
+    .scenecap{left:34%;max-width:54%}
+    .stage::after{background:
+      linear-gradient(90deg, rgba(4,5,9,.94) 0%, rgba(4,5,9,.62) 40%, transparent 66%),
+      linear-gradient(180deg, rgba(4,5,9,.4) 0%, transparent 26%, transparent 60%, rgba(4,5,9,.9) 100%);}
+  }
+  @media (max-width:640px){
+    .topbar nav{display:none}
+    .facts .row{grid-template-columns:1fr;gap:4px}
+    .replay{display:none}
+    .scenewrap{width:90vw}
+  }
+</style>
+</head>
+<body>
+
+<section class="stage" aria-label="A single white beam strikes a prism and fans into a spectrum on its own; one color band widens and resolves into a vivid scene of a remembered coding moment, then collapses and re-splits to the next band.">
+  <div class="bench" aria-hidden="true"></div>
+
+  <!-- ================= THE OPTICS: incident beam → prism → fanned spectrum ================= -->
+  <svg class="optics" id="optics" viewBox="0 0 1440 900" preserveAspectRatio="xMidYMid slice"
+       role="img" aria-hidden="true">
+    <defs>
+      <!-- white-beam gradient: bright core, soft falloff -->
+      <linearGradient id="whiteBeam" x1="0" y1="0" x2="1" y2="0">
+        <stop offset="0%"  stop-color="#ffffff" stop-opacity="0"/>
+        <stop offset="22%" stop-color="#eef3ff" stop-opacity=".9"/>
+        <stop offset="100%" stop-color="#ffffff" stop-opacity="1"/>
+      </linearGradient>
+      <!-- glow for the rays -->
+      <filter id="rayglow" x="-30%" y="-60%" width="160%" height="220%">
+        <feGaussianBlur stdDeviation="5"/>
+      </filter>
+      <!-- the prism's glassy body -->
+      <linearGradient id="glass" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0%"  stop-color="#cdd8ff" stop-opacity=".22"/>
+        <stop offset="50%" stop-color="#ffffff" stop-opacity=".10"/>
+        <stop offset="100%" stop-color="#8ea2ff" stop-opacity=".16"/>
+      </linearGradient>
+      <!-- a faint internal spectral caustic that lives on the prism face -->
+      <linearGradient id="prismEdge" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0%"  stop-color="#ff5a5a"/>
+        <stop offset="30%" stop-color="#ffe14d"/>
+        <stop offset="60%" stop-color="#46d6e0"/>
+        <stop offset="100%" stop-color="#b56bff"/>
+      </linearGradient>
+    </defs>
+
+    <!-- incident white beam, traveling left → into the prism apex (~ x520,y450) -->
+    <rect class="beam" x="-40" y="438" width="560" height="24" rx="12"
+          fill="url(#whiteBeam)" filter="url(#rayglow)"/>
+
+    <!-- ===== the prism (a triangular glass block) ===== -->
+    <g>
+      <polygon points="510,330 510,570 660,450" fill="url(#glass)"
+               stroke="rgba(205,216,255,.5)" stroke-width="1.5"/>
+      <!-- thin spectral caustic glinting on the exit face -->
+      <polygon points="640,440 660,450 640,460" fill="url(#prismEdge)" opacity=".85"/>
+      <!-- apex highlight -->
+      <line x1="510" y1="330" x2="510" y2="570" stroke="rgba(255,255,255,.35)" stroke-width="1.5"/>
+    </g>
+
+    <!-- ===== the seven refracted rays, emanating from the exit point (660,450) =====
+         Each starts collapsed flat on the beam axis (rotate 0), then fans to its angle.
+         Rotation is applied via JS-set CSS custom prop on each ray. Long rectangles. -->
+    <g id="fan" transform="translate(660,450)">
+      <rect class="ray r-red"    x="0" y="-3" width="900" height="6"  rx="3" fill="var(--red)"    filter="url(#rayglow)"/>
+      <rect class="ray r-orange" x="0" y="-3" width="900" height="6"  rx="3" fill="var(--orange)" filter="url(#rayglow)"/>
+      <rect class="ray r-yellow" x="0" y="-3" width="900" height="6"  rx="3" fill="var(--yellow)" filter="url(#rayglow)"/>
+      <rect class="ray r-green"  x="0" y="-3" width="900" height="6"  rx="3" fill="var(--green)"  filter="url(#rayglow)"/>
+      <rect class="ray r-cyan"   x="0" y="-3" width="900" height="6"  rx="3" fill="var(--cyan)"   filter="url(#rayglow)"/>
+      <rect class="ray r-blue"   x="0" y="-3" width="900" height="6"  rx="3" fill="var(--blue)"   filter="url(#rayglow)"/>
+      <rect class="ray r-violet" x="0" y="-3" width="900" height="6"  rx="3" fill="var(--violet)" filter="url(#rayglow)"/>
+    </g>
+  </svg>
+
+  <!-- ================= THE SCENE that lives inside the active band ================= -->
+  <div class="scenewrap" id="scenewrap" aria-hidden="true">
+    <!-- Each .scene is a hand-built tableau from layered gradients (depicting a moment,
+         NOT text, NOT a chatbot). JS cross-fades exactly one at a time. -->
+
+    <!-- SCENE A — late-night debugging: warm desk-lamp glow, dark monitor, a window of city night -->
+    <div class="scene" data-band="orange" data-when="2 months ago · 02:14"
+         data-title="The night the auth-retry finally passed"
+         style="
+        background:
+          radial-gradient(420px 300px at 64% 40%, rgba(255,205,120,.5), transparent 70%),
+          radial-gradient(900px 700px at 92% 30%, rgba(80,40,10,.5), transparent 60%),
+          linear-gradient(160deg, #1a120a 0%, #0d0a08 60%, #060507 100%),
+          /* a glowing monitor rectangle */
+          linear-gradient(0deg, transparent 60%, rgba(120,200,255,.0) 60%);
+      ">
+      <!-- monitor + screen-glow built as nested boxes -->
+      <div style="position:absolute;right:18%;top:34%;width:30%;height:30%;border-radius:6px;
+        background:linear-gradient(180deg,#0a2a3a,#06141d);
+        box-shadow:0 0 60px 14px rgba(70,170,220,.4), inset 0 0 0 2px rgba(150,220,255,.25);"></div>
+      <!-- a green 'passed' check glow on the screen -->
+      <div style="position:absolute;right:28%;top:46%;width:7%;height:7%;border-radius:50%;
+        background:radial-gradient(circle,#7dffae,rgba(125,255,174,0) 70%);"></div>
+      <!-- desk lamp pool -->
+      <div style="position:absolute;right:8%;bottom:10%;width:46%;height:34%;
+        background:radial-gradient(ellipse at 70% 100%, rgba(255,200,110,.45), transparent 65%);"></div>
+      <!-- coffee mug silhouette -->
+      <div style="position:absolute;right:46%;bottom:18%;width:5%;height:9%;border-radius:3px 3px 5px 5px;
+        background:#120d09;box-shadow:0 0 18px 4px rgba(255,180,90,.18);"></div>
+    </div>
+
+    <!-- SCENE B — a green-on-dark architecture sketch coming together: cool teal whiteboard moment -->
+    <div class="scene" data-band="green" data-when="5 weeks ago · 16:40"
+         data-title="When the topology graph first clicked"
+         style="
+        background:
+          radial-gradient(700px 520px at 40% 36%, rgba(60,200,140,.32), transparent 64%),
+          radial-gradient(900px 700px at 88% 84%, rgba(10,40,30,.6), transparent 55%),
+          linear-gradient(150deg, #06140e 0%, #07100c 55%, #050807 100%);
+      ">
+      <!-- nodes + connecting trails of a graph, drawn as glowing dots + lines -->
+      <div style="position:absolute;left:42%;top:30%;width:8px;height:8px;border-radius:50%;background:#8effc4;box-shadow:0 0 16px 5px rgba(110,255,190,.6)"></div>
+      <div style="position:absolute;left:60%;top:48%;width:8px;height:8px;border-radius:50%;background:#8effc4;box-shadow:0 0 16px 5px rgba(110,255,190,.6)"></div>
+      <div style="position:absolute;left:50%;top:64%;width:8px;height:8px;border-radius:50%;background:#8effc4;box-shadow:0 0 16px 5px rgba(110,255,190,.6)"></div>
+      <div style="position:absolute;left:72%;top:34%;width:8px;height:8px;border-radius:50%;background:#8effc4;box-shadow:0 0 16px 5px rgba(110,255,190,.6)"></div>
+      <!-- associative trails between them -->
+      <div style="position:absolute;left:43%;top:31%;width:20%;height:2px;background:linear-gradient(90deg,rgba(110,255,190,.7),rgba(110,255,190,.1));transform:rotate(18deg);transform-origin:left"></div>
+      <div style="position:absolute;left:51%;top:50%;width:14%;height:2px;background:linear-gradient(90deg,rgba(110,255,190,.6),rgba(110,255,190,.1));transform:rotate(-34deg);transform-origin:left"></div>
+      <div style="position:absolute;left:61%;top:50%;width:14%;height:2px;background:linear-gradient(90deg,rgba(110,255,190,.6),rgba(110,255,190,.1));transform:rotate(-22deg);transform-origin:left"></div>
+    </div>
+
+    <!-- SCENE C — a cool blue dawn at the desk: the long session you finally shipped -->
+    <div class="scene" data-band="blue" data-when="3 days ago · 05:52"
+         data-title="The dawn you shipped the Docker image"
+         style="
+        background:
+          radial-gradient(800px 560px at 70% 22%, rgba(120,160,255,.34), transparent 62%),
+          radial-gradient(1000px 800px at 18% 96%, rgba(20,30,70,.7), transparent 55%),
+          linear-gradient(170deg, #0a1024 0%, #0a0e1c 56%, #06080f 100%);
+      ">
+      <!-- horizon line of a dawn window -->
+      <div style="position:absolute;left:0;right:0;top:46%;height:1px;background:linear-gradient(90deg,transparent,rgba(180,200,255,.5),transparent)"></div>
+      <!-- a low warm dawn band at the seam -->
+      <div style="position:absolute;left:0;right:0;top:42%;height:8%;background:linear-gradient(180deg,rgba(255,170,120,.0),rgba(255,150,100,.22),rgba(255,170,120,.0))"></div>
+      <!-- container blocks stacking up = the built image -->
+      <div style="position:absolute;right:24%;bottom:20%;width:9%;height:7%;background:#16224a;box-shadow:0 0 0 1px rgba(150,180,255,.3)"></div>
+      <div style="position:absolute;right:24%;bottom:28%;width:9%;height:7%;background:#1b2a5c;box-shadow:0 0 0 1px rgba(150,180,255,.35)"></div>
+      <div style="position:absolute;right:24%;bottom:36%;width:9%;height:7%;background:#22357a;box-shadow:0 0 20px 4px rgba(120,160,255,.35),0 0 0 1px rgba(150,180,255,.45)"></div>
+    </div>
+
+    <!-- SCENE D — a violet, quiet idea moment: the refactor you sketched at midnight -->
+    <div class="scene" data-band="violet" data-when="last spring · 23:30"
+         data-title="The refactor you sketched and forgot"
+         style="
+        background:
+          radial-gradient(640px 480px at 56% 44%, rgba(180,110,255,.34), transparent 64%),
+          radial-gradient(900px 720px at 12% 14%, rgba(40,20,70,.6), transparent 55%),
+          linear-gradient(160deg, #140c24 0%, #0d0a18 56%, #07060f 100%);
+      ">
+      <!-- a glowing lightbulb-ish spark + radiating idea lines -->
+      <div style="position:absolute;right:30%;top:38%;width:6%;height:6%;border-radius:50%;
+        background:radial-gradient(circle,#e3c4ff,rgba(180,110,255,0) 72%);box-shadow:0 0 50px 14px rgba(180,110,255,.5)"></div>
+      <div style="position:absolute;right:33%;top:30%;width:9%;height:2px;background:linear-gradient(90deg,rgba(220,190,255,.7),transparent);transform:rotate(-40deg);transform-origin:left"></div>
+      <div style="position:absolute;right:30%;top:36%;width:9%;height:2px;background:linear-gradient(90deg,rgba(220,190,255,.7),transparent);transform:rotate(8deg);transform-origin:left"></div>
+      <div style="position:absolute;right:33%;top:46%;width:9%;height:2px;background:linear-gradient(90deg,rgba(220,190,255,.7),transparent);transform:rotate(46deg);transform-origin:left"></div>
+    </div>
+
+    <div class="scenecap" id="scenecap">
+      <span class="when" id="capWhen"></span>
+      <b id="capTitle"></b>
+    </div>
+  </div>
+
+  <div class="hud">
+    <header class="topbar">
+      <div class="brand"><span class="dot" aria-hidden="true"></span> Memex</div>
+      <nav aria-label="Primary">
+        <a href="https://github.com/Two-Weeks-Team/memex">Repo</a>
+        <a href="https://two-weeks-team.github.io/memex/">Live</a>
+        <a href="#how">How it works</a>
+        <a href="#agent">For agents</a>
+      </nav>
+    </header>
+
+    <div class="hero">
+      <span class="moment">
+        <span class="pulse" aria-hidden="true"></span>
+        Right now you're <b>back on a problem you've solved before</b> &mdash; and the light splits&hellip;
+      </span>
+
+      <h1>One beam. A whole<br><span class="spectrum">spectrum of moments.</span></h1>
+
+      <p class="lede">
+        A single white thought hits the glass and <b>fans into its colors on its own</b>.
+        One wavelength widens &mdash; and a coding moment you'd forgotten <b>lives inside
+        that band as a scene</b>, then the light collapses and re-splits to the next.
+        It surfaces because the moment evoked it, not because you searched.
+      </p>
+
+      <div class="cta">
+        <a class="btn btn-primary" href="https://github.com/Two-Weeks-Team/memex">Get Memex on GitHub</a>
+        <a class="btn btn-ghost" href="https://two-weeks-team.github.io/memex/">See it live</a>
+      </div>
+
+      <p class="legend">
+        <span class="band-label" id="bandLabel">refracting&hellip;</span>
+        <span aria-hidden="true">&middot;</span>
+        a memory surfaced by association, not a search
+      </p>
+    </div>
+
+    <button class="replay" id="replay" type="button" aria-label="Split the beam and resolve the scenes again">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5V1L7 6l5 5V7a5 5 0 1 1-5 5H5a7 7 0 1 0 7-7z"/></svg>
+      Refract again
+    </button>
+  </div>
+</section>
+
+<main class="below">
+  <section id="how">
+    <p class="kicker">What just happened</p>
+    <h2>People don't document every memory &mdash; yet when the moment arrives,
+      the relevant thought surfaces on its own.</h2>
+    <p class="sub">
+      Memex is a non-chatbot, LLM-free-at-runtime tool that reads your existing
+      Claude&nbsp;Code and Codex session history and turns it into a navigable
+      associative memory backed by <b style="color:var(--ink)">Qdrant</b>. You move through your
+      own past by <i>similarity</i>, not keywords &mdash; and the relevant moment can rise to you
+      proactively, the way a single beam resolves into the one color you needed.
+    </p>
+
+    <div class="grid">
+      <article class="card">
+        <h3>Time Machine</h3>
+        <p>Replay any past session as it happened &mdash; the whole scene, not a snippet.</p>
+      </article>
+      <article class="card">
+        <h3>Lens</h3>
+        <p>Named-vector weighted search to look through your history from one angle at a time.</p>
+      </article>
+      <article class="card">
+        <h3>Topology</h3>
+        <p>A distance-matrix &rarr; MST graph: how your sessions actually connect to one another.</p>
+      </article>
+      <article class="card">
+        <h3>Mix &amp; Discovery</h3>
+        <p>Positive / negative recommendation to pull related work toward you and push noise away.</p>
+      </article>
+      <article class="card">
+        <h3>Proactive Recall</h3>
+        <p>The piece that split the beam above: a relevant past moment surfaces because the current one evoked it.</p>
+      </article>
+      <article class="card">
+        <h3>Companion · Wrapped · Loop&nbsp;Breaker</h3>
+        <p>An agent-memory layer over your corpus &mdash; recap what you've done, and catch yourself circling.</p>
+      </article>
+    </div>
+
+    <div class="facts" aria-label="What Memex is">
+      <div class="row"><div class="lab">Reads</div>
+        <div class="val"><span class="mono">~/.claude/projects/**/*.jsonl</span>, legacy transcripts, and <span class="mono">history.jsonl</span></div></div>
+      <div class="row"><div class="lab">Backed by</div>
+        <div class="val">Qdrant &mdash; navigate by vector similarity, no runtime LLM</div></div>
+      <div class="row"><div class="lab">Why</div>
+        <div class="val">Claude&nbsp;Code silently migrates and deletes old sessions. Memex keeps a corpus <b style="color:var(--ink)">you own.</b></div></div>
+      <div class="row"><div class="lab">Built for</div>
+        <div class="val">Qdrant Vector Space Day 2026 &mdash; <i>"Think Outside the Bot."</i></div></div>
+    </div>
+  </section>
+
+  <section id="agent">
+    <p class="kicker" style="margin-top:56px">For your agent</p>
+    <h2 style="font-size:clamp(20px,3vw,28px)">11 MCP tools over stdio + HTTP &mdash;
+      works in Claude&nbsp;Code, Codex, and Cursor.</h2>
+    <p class="sub">A server / Docker variant runs Qdrant, the web UI, and the MCP server in one image.
+      The tools let an agent recall, replay, and connect across your own history.</p>
+    <div class="addline mono">
+      <span class="c">$</span> claude mcp add memex -- memex-mcp
+    </div>
+    <p style="margin-top:18px;font-size:14px">
+      <a href="https://github.com/Two-Weeks-Team/memex#server--docker">Server / Docker variant</a>
+      &nbsp;&middot;&nbsp;
+      <a href="https://github.com/Two-Weeks-Team/memex">MCP integration &amp; the 11 tools</a>
+    </p>
+  </section>
+</main>
+
+<footer>
+  <div class="foot">
+    <div>Memex &mdash; a memory you own, surfaced by association.</div>
+    <div class="links">
+      <a href="https://github.com/Two-Weeks-Team/memex">GitHub</a>
+      <a href="https://two-weeks-team.github.io/memex/">Live landing</a>
+      <a href="https://github.com/Two-Weeks-Team/memex#server--docker">Docker</a>
+    </div>
+  </div>
+</footer>
+
+<script>
+(function(){
+  "use strict";
+
+  var optics    = document.getElementById('optics');
+  var scenewrap = document.getElementById('scenewrap');
+  var scenecap  = document.getElementById('scenecap');
+  var capWhen   = document.getElementById('capWhen');
+  var capTitle  = document.getElementById('capTitle');
+  var bandLabel = document.getElementById('bandLabel');
+  var replayBtn = document.getElementById('replay');
+
+  var scenes = Array.prototype.slice.call(scenewrap.querySelectorAll('.scene'));
+
+  // ray elements, top→bottom = red→violet, with the fan angle (deg) each settles to.
+  // angles spread the spectrum across the exit face; negative = up, positive = down.
+  var rays = [
+    {el: optics.querySelector('.r-red'),    band:'red',    ang:-21},
+    {el: optics.querySelector('.r-orange'), band:'orange', ang:-14},
+    {el: optics.querySelector('.r-yellow'), band:'yellow', ang:-7},
+    {el: optics.querySelector('.r-green'),  band:'green',  ang:0},
+    {el: optics.querySelector('.r-cyan'),   band:'cyan',   ang:7},
+    {el: optics.querySelector('.r-blue'),   band:'blue',   ang:14},
+    {el: optics.querySelector('.r-violet'), band:'violet', ang:21}
+  ];
+
+  var bandColor = {
+    red:'var(--red)', orange:'var(--orange)', yellow:'var(--yellow)',
+    green:'var(--green)', cyan:'var(--cyan)', blue:'var(--blue)', violet:'var(--violet)'
+  };
+
+  function prefersReduced(){
+    return window.matchMedia &&
+           window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  }
+
+  var timers = [];
+  function clearTimers(){ timers.forEach(clearTimeout); timers.length = 0; }
+  function later(fn, ms){ timers.push(setTimeout(fn, ms)); }
+
+  // collapse all rays back onto the incident axis
+  function collapseRays(){
+    rays.forEach(function(r){ r.el.style.transform = 'rotate(0deg)'; });
+    optics.classList.remove('split','focused');
+  }
+  // fan the rays out to their spectral angles
+  function fanRays(){
+    optics.classList.add('split');
+    rays.forEach(function(r){ r.el.style.transform = 'rotate(' + r.ang + 'deg)'; });
+  }
+
+  function showScene(idx){
+    var s = scenes[idx];
+    var band = s.getAttribute('data-band');
+
+    // mark the matching ray active, dim the rest
+    optics.classList.add('focused');
+    rays.forEach(function(r){
+      r.el.classList.toggle('active', r.band === band);
+    });
+
+    // tint the scene wedge with the band's color, reveal exactly this scene
+    scenewrap.style.setProperty('--bandcol', bandColor[band] || 'transparent');
+    scenes.forEach(function(o){ o.classList.toggle('on', o === s); });
+
+    // caption (the resolved memory, named like a recalled scene)
+    capWhen.textContent  = s.getAttribute('data-when');
+    capTitle.textContent = s.getAttribute('data-title');
+    scenecap.classList.add('on');
+
+    bandLabel.textContent = band.charAt(0).toUpperCase() + band.slice(1) +
+                            ' band · ' + s.getAttribute('data-title');
+  }
+
+  // a steady, no-motion fallback: show one band's scene resolved, fully static
+  function setStatic(){
+    collapseRays();
+    optics.classList.add('split');           // show the fanned spectrum (no transition)
+    rays.forEach(function(r){ r.el.style.transform = 'rotate(' + r.ang + 'deg)'; });
+    showScene(0);                            // one band's scene, shown static
+    bandLabel.textContent = 'one band resolved · ' + scenes[0].getAttribute('data-title');
+  }
+
+  // ---- the autonomous cycle: split → resolve a band into a scene → collapse → re-split ----
+  var current = 0;
+  function cycle(){
+    clearTimers();
+
+    // 1) collapse to a single white beam, hide scenes
+    collapseRays();
+    scenes.forEach(function(o){ o.classList.remove('on'); });
+    scenecap.classList.remove('on');
+    bandLabel.textContent = 'refracting…';
+
+    // 2) the beam splits on its own (a beat after collapse)
+    later(fanRays, 220);
+
+    // 3) one band widens into its scene
+    later(function(){ showScene(current); }, 1100);
+
+    // 4) hold the scene, then advance to the next band and re-split
+    later(function(){
+      current = (current + 1) % scenes.length;
+      cycle();
+    }, 1100 + 3200);
+  }
+
+  replayBtn.addEventListener('click', function(){
+    current = 0;
+    if (prefersReduced()){ setStatic(); } else { cycle(); }
+  });
+
+  if (window.matchMedia){
+    try{
+      window.matchMedia('(prefers-reduced-motion: reduce)')
+        .addEventListener('change', function(){
+          clearTimers();
+          if (prefersReduced()){ setStatic(); } else { current = 0; cycle(); }
+        });
+    }catch(_){}
+  }
+
+  // kick off autonomously — the situation calls the spectrum up; the visitor does nothing.
+  if (prefersReduced()){
+    setStatic();
+  } else {
+    later(cycle, 500);
+  }
+})();
+</script>
+</body>
+</html>

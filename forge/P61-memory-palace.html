@@ -1,0 +1,623 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Memex — the memory was already in the room</title>
+<style>
+  :root{
+    --bg:#07080d;
+    --ink:#e9ecf6;
+    --dim:#9aa1b8;
+    --line:rgba(150,160,200,.16);
+    --warm:#ffcaa0;        /* the lit-room glow */
+    --warm-2:#ff9d5c;
+    --cool:#6fb7ff;        /* the corridor cold light */
+    --accent:#b69dff;
+    --pane:#0c0e16;
+    --maxw:1180px;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:var(--bg);
+    color:var(--ink);
+    font-family:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;
+    -webkit-font-smoothing:antialiased;
+    overflow-x:hidden;
+  }
+  .ui{font-family:ui-sans-serif,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  a{color:inherit}
+  ::selection{background:var(--warm-2);color:#1a0f06}
+
+  /* ---------- skip link ---------- */
+  .skip{position:absolute;left:-9999px;top:8px;z-index:200;background:var(--warm);color:#1a0f06;
+        padding:10px 16px;border-radius:8px;font-family:ui-sans-serif,system-ui;font-weight:700}
+  .skip:focus{left:12px}
+
+  /* ============================================================
+     STAGE — the CSS-3D memory-palace corridor
+     ============================================================ */
+  .stage{
+    position:relative;
+    height:100svh;
+    min-height:600px;
+    overflow:hidden;
+    background:
+      radial-gradient(120% 80% at 50% 18%, #11131d 0%, #08090f 55%, #05060a 100%);
+    perspective:1100px;
+    perspective-origin:50% 44%;
+  }
+
+  /* the world we fly through; JS translates this on Z to create drift */
+  .world{
+    position:absolute; inset:0;
+    transform-style:preserve-3d;
+    will-change:transform;
+    transform:translateZ(0px);
+  }
+
+  /* a single corridor segment = 4 walls of a box, repeated down -Z */
+  .seg{position:absolute; left:50%; top:50%; transform-style:preserve-3d;}
+  .panel{
+    position:absolute; left:50%; top:50%;
+    transform-style:preserve-3d;
+    background:linear-gradient(180deg,#0e1019,#0a0c14);
+    border:1px solid var(--line);
+    box-shadow:inset 0 0 80px rgba(0,0,0,.6);
+  }
+  /* corridor cross-section: 560 wide x 460 tall, segments 360 deep */
+  .floor,.ceil{width:560px;height:360px;margin-left:-280px;margin-top:-180px;}
+  .left,.right{width:360px;height:460px;margin-left:-180px;margin-top:-230px;}
+
+  .floor{transform:rotateX(90deg) translateZ(230px);
+    background:
+      repeating-linear-gradient(90deg,#0b0d15 0 92px, #0e1019 92px 100px),
+      linear-gradient(180deg,#0c0e17,#090b12);}
+  .ceil{transform:rotateX(90deg) translateZ(-230px);
+    background:linear-gradient(180deg,#0a0c13,#070810);}
+  .left{transform:rotateY(90deg) translateZ(-280px);}
+  .right{transform:rotateY(-90deg) translateZ(-280px);}
+
+  /* subtle wall sconce lighting */
+  .sconce{position:absolute;top:50%;width:60px;height:60px;margin-top:-30px;border-radius:50%;
+    background:radial-gradient(circle,rgba(111,183,255,.32),transparent 70%);transform:translateZ(1px);}
+  .left .sconce{right:40px}
+  .right .sconce{left:40px}
+
+  /* depth haze so far segments fade to black */
+  .haze{position:absolute;inset:0;z-index:5;pointer-events:none;
+    background:radial-gradient(60% 50% at 50% 44%, transparent 0%, transparent 30%, rgba(5,6,10,.55) 72%, rgba(5,6,10,.95) 100%);}
+  /* the cold corridor vignette warms toward the open door */
+  .glow{position:absolute;inset:0;z-index:4;pointer-events:none;opacity:0;transition:opacity 1.4s ease;
+    background:radial-gradient(46% 40% at 50% 43%, rgba(255,160,90,.30), transparent 60%);}
+  .stage.lit .glow{opacity:1}
+
+  /* ===========================================================
+     THE DOOR at the end of the corridor (far -Z)
+     swings open ON ITS OWN onto the lit room
+     =========================================================== */
+  .doorway{
+    position:absolute;left:50%;top:50%;
+    transform-style:preserve-3d;
+    transform:translateZ(-1980px); /* far end; JS-driven world brings it near */
+    margin-left:-150px;margin-top:-205px;
+  }
+  .door-frame{
+    position:absolute;width:300px;height:410px;
+    border:6px solid #14161f;
+    background:#05060a;
+    box-shadow:0 0 0 2px rgba(255,180,120,.10), inset 0 0 60px rgba(0,0,0,.9);
+  }
+  .door{
+    position:absolute;left:0;top:0;width:300px;height:410px;
+    transform-style:preserve-3d;
+    transform-origin:left center;
+    transform:rotateY(0deg);
+    transition:transform 2.6s cubic-bezier(.22,.61,.18,1);
+    background:
+      linear-gradient(105deg,#1b1d28 0%,#11131c 48%,#0b0d15 100%);
+    border:2px solid #2a2d3a;
+    box-shadow:inset -8px 0 30px rgba(0,0,0,.7), inset 8px 0 14px rgba(255,200,150,.06);
+  }
+  .door::after{ /* door handle */
+    content:"";position:absolute;right:18px;top:50%;width:9px;height:34px;margin-top:-17px;
+    border-radius:6px;background:linear-gradient(180deg,#e9c89a,#9c7a4e);box-shadow:0 0 8px rgba(255,200,140,.4);}
+  .stage.lit .door{transform:rotateY(-104deg)}
+
+  /* the lit ROOM behind the door — recessed, full depth */
+  .room{
+    position:absolute;left:0;top:0;width:300px;height:410px;
+    transform-style:preserve-3d;
+    transform:translateZ(-2px);
+    overflow:hidden;
+    background:radial-gradient(120% 90% at 50% 60%, #3a2a1c 0%, #211810 55%, #120c08 100%);
+    box-shadow:inset 0 0 70px rgba(0,0,0,.85);
+  }
+  /* warm light spill from the open room */
+  .room::before{
+    content:"";position:absolute;inset:-2px;
+    background:radial-gradient(80% 70% at 50% 64%, rgba(255,196,130,.36), transparent 70%);
+    mix-blend-mode:screen;
+  }
+
+  /* ===========================================================
+     THE SCENE inside the room — a DEPICTED MOMENT, built in 3D.
+     A late-night desk: monitor showing a settled git graph,
+     a desk lamp, a coffee mug, a window with city night.
+     Layered on translateZ so you literally see INTO the room.
+     =========================================================== */
+  .scene{position:absolute;left:50%;top:50%;transform-style:preserve-3d;transform:translate(-150px,-205px)}
+  .obj{position:absolute;transform-style:preserve-3d}
+
+  /* back wall window — night city */
+  .window{left:30px;top:34px;width:120px;height:120px;transform:translateZ(-40px);
+    background:linear-gradient(180deg,#1a2740 0%,#0e1730 70%,#0a0f22 100%);
+    border:6px solid #0c0e15;box-shadow:0 0 24px rgba(120,170,255,.18) inset, 0 0 18px rgba(120,170,255,.10);}
+  .window::before{content:"";position:absolute;inset:0;
+    background:
+      radial-gradient(2px 2px at 22% 30%, #ffe9b0 60%, transparent),
+      radial-gradient(1.5px 1.5px at 60% 22%, #fff 60%, transparent),
+      radial-gradient(2px 2px at 78% 48%, #ffd27a 60%, transparent),
+      radial-gradient(1.5px 1.5px at 40% 64%, #cfe4ff 60%, transparent),
+      linear-gradient(0deg, rgba(40,30,18,.6), transparent 30%);
+    opacity:.9}
+  .window::after{content:"";position:absolute;left:50%;top:0;width:2px;height:100%;background:#0c0e15;transform:translateX(-1px);}
+
+  /* desk surface */
+  .desk{left:18px;top:248px;width:264px;height:120px;transform:rotateX(64deg) translateZ(0);
+    background:linear-gradient(180deg,#3a2a1a,#241910);border-top:2px solid #5a4226;
+    box-shadow:0 -18px 40px rgba(255,170,90,.10);}
+
+  /* monitor — the recalled MOMENT lives on this screen */
+  .monitor{left:96px;top:150px;width:150px;height:104px;transform:translateZ(8px);
+    background:#05070c;border:5px solid #14171f;border-radius:5px;
+    box-shadow:0 14px 30px rgba(0,0,0,.6), 0 0 22px rgba(120,180,255,.16);}
+  .screen{position:absolute;inset:4px;border-radius:2px;overflow:hidden;
+    background:linear-gradient(180deg,#0a1422,#070b14);}
+  /* a settled commit graph — the moment "it finally went green" */
+  .glab{position:absolute;left:7px;font:9px/1.1 ui-monospace,SFMono-Regular,Menlo,monospace;color:#8fb6ff;letter-spacing:.2px}
+  .gnode{position:absolute;width:7px;height:7px;border-radius:50%;}
+  .gline{position:absolute;width:2px;background:#2f6f4f;left:9px;}
+  .pass{position:absolute;right:6px;bottom:6px;font:bold 8px ui-sans-serif,system-ui;color:#7CFFB0;
+    border:1px solid rgba(124,255,176,.5);border-radius:4px;padding:2px 5px;background:rgba(20,60,40,.5)}
+  .scr-flicker{position:absolute;inset:0;background:linear-gradient(180deg,transparent,rgba(120,180,255,.06));animation:scan 3.4s linear infinite}
+  @keyframes scan{0%{transform:translateY(-100%)}100%{transform:translateY(100%)}}
+
+  /* desk lamp — the warm source */
+  .lamp-arm{left:48px;top:150px;width:6px;height:96px;transform:translateZ(6px) rotate(14deg);
+    background:linear-gradient(180deg,#8a6a3e,#4a371f);transform-origin:bottom}
+  .lamp-head{left:30px;top:140px;width:46px;height:20px;border-radius:24px 24px 6px 6px;transform:translateZ(7px) rotate(38deg);
+    background:linear-gradient(180deg,#f0c884,#9c7544);box-shadow:0 16px 36px rgba(255,180,90,.5)}
+  .lamp-pool{left:8px;top:236px;width:150px;height:70px;border-radius:50%;transform:rotateX(64deg) translateZ(2px);
+    background:radial-gradient(circle,rgba(255,196,120,.55),transparent 70%);filter:blur(2px)}
+
+  /* coffee mug */
+  .mug{left:212px;top:226px;width:30px;height:34px;border-radius:5px 5px 8px 8px;transform:translateZ(8px);
+    background:linear-gradient(180deg,#c75b3a,#8c3a23);box-shadow:0 8px 16px rgba(0,0,0,.5)}
+  .mug::after{content:"";position:absolute;right:-9px;top:7px;width:12px;height:16px;border:3px solid #8c3a23;border-left:none;border-radius:0 8px 8px 0}
+  .steam{left:222px;top:204px;width:3px;height:20px;border-radius:3px;transform:translateZ(8px);
+    background:linear-gradient(180deg,transparent,rgba(255,220,180,.5),transparent);animation:steam 3s ease-in-out infinite}
+  @keyframes steam{0%,100%{opacity:.2;transform:translateZ(8px) translateY(0)}50%{opacity:.7;transform:translateZ(8px) translateY(-6px)}}
+
+  /* a sticky note on the wall — handwritten, part of the moment, not UI */
+  .sticky{left:182px;top:60px;width:58px;height:54px;transform:translateZ(-30px) rotate(-5deg);
+    background:#e9d27a;box-shadow:0 6px 14px rgba(0,0,0,.5);
+    font:11px/1.25 "Bradley Hand","Segoe Script","Comic Sans MS",cursive;color:#4a3a12;padding:6px 7px}
+
+  /* dust motes drifting in the light shaft */
+  .mote{position:absolute;width:3px;height:3px;border-radius:50%;background:rgba(255,220,170,.8);
+    box-shadow:0 0 6px rgba(255,210,150,.7);transform:translateZ(20px)}
+
+  /* ===========================================================
+     CONTEXT card — the SITUATION that calls the memory up.
+     Sits in the foreground; it is the "you're mid-task" trigger.
+     =========================================================== */
+  .context{
+    position:absolute;left:0;right:0;bottom:0;z-index:8;
+    padding:18px clamp(16px,4vw,40px) 26px;
+    background:linear-gradient(0deg, rgba(5,6,10,.92) 18%, rgba(5,6,10,.55) 70%, transparent);
+    display:flex;flex-direction:column;gap:6px;
+  }
+  .context .now{display:flex;align-items:center;gap:10px;color:var(--cool);
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;letter-spacing:.04em}
+  .pulse{width:9px;height:9px;border-radius:50%;background:var(--cool);box-shadow:0 0 0 0 rgba(111,183,255,.6);
+    animation:pulse 2s infinite}
+  @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(111,183,255,.55)}70%{box-shadow:0 0 0 12px rgba(111,183,255,0)}100%{box-shadow:0 0 0 0 rgba(111,183,255,0)}}
+  .context .nowtxt{color:var(--dim)}
+  .context .nowtxt b{color:var(--ink);font-weight:600}
+  .recall{font-size:clamp(20px,3.4vw,34px);line-height:1.22;max-width:760px;margin:2px 0 0;
+    opacity:0;transform:translateY(14px);transition:opacity 1s ease .2s, transform 1s ease .2s}
+  .stage.lit .recall{opacity:1;transform:none}
+  .recall .em{color:var(--warm)}
+  .recall .meta{display:block;margin-top:8px;font-family:ui-monospace,Menlo,monospace;font-size:12px;color:var(--dim);letter-spacing:.02em}
+
+  /* the quiet "click of recognition" label that rises with the door */
+  .arises{position:absolute;left:50%;top:14%;transform:translateX(-50%);z-index:8;text-align:center;
+    opacity:0;transition:opacity 1.1s ease .4s}
+  .stage.lit .arises{opacity:1}
+  .arises .k{font-family:ui-monospace,Menlo,monospace;font-size:11px;letter-spacing:.34em;text-transform:uppercase;color:var(--warm-2)}
+  .arises .h{margin-top:6px;font-size:clamp(15px,2vw,19px);color:var(--ink);text-shadow:0 2px 18px rgba(0,0,0,.8)}
+
+  /* top brand bar */
+  .top{position:absolute;top:0;left:0;right:0;z-index:9;display:flex;justify-content:space-between;align-items:center;
+    padding:16px clamp(16px,4vw,40px);font-family:ui-sans-serif,system-ui}
+  .brand{display:flex;align-items:center;gap:10px;font-weight:700;letter-spacing:.02em}
+  .brand .dot{width:11px;height:11px;border-radius:3px;background:linear-gradient(135deg,var(--warm),var(--accent));box-shadow:0 0 14px rgba(255,180,120,.6)}
+  .top nav{display:flex;gap:18px;font-size:13.5px}
+  .top nav a{color:var(--dim);text-decoration:none}
+  .top nav a:hover,.top nav a:focus-visible{color:var(--ink)}
+
+  /* replay control (honest: lets keyboard/AT users re-trigger the arising) */
+  .replay{position:absolute;right:clamp(16px,4vw,40px);bottom:120px;z-index:9;
+    font-family:ui-sans-serif,system-ui;font-size:12.5px;color:var(--dim);
+    background:rgba(20,22,32,.7);border:1px solid var(--line);border-radius:999px;
+    padding:8px 14px;cursor:pointer;backdrop-filter:blur(6px)}
+  .replay:hover,.replay:focus-visible{color:var(--ink);border-color:rgba(255,180,120,.4)}
+
+  .scrollcue{position:absolute;left:50%;bottom:18px;transform:translateX(-50%);z-index:9;color:var(--dim);
+    font-family:ui-sans-serif,system-ui;font-size:11px;letter-spacing:.18em;text-transform:uppercase;opacity:.7}
+
+  /* ============================================================
+     PAGE BELOW — honest explanation, facts, links
+     ============================================================ */
+  .page{max-width:var(--maxw);margin:0 auto;padding:0 clamp(18px,4vw,40px)}
+  section{padding:72px 0;border-top:1px solid var(--line)}
+  .eyebrow{font-family:ui-monospace,Menlo,monospace;font-size:12px;letter-spacing:.26em;text-transform:uppercase;color:var(--warm-2)}
+  h2{font-size:clamp(24px,3.4vw,38px);line-height:1.15;margin:.5rem 0 0;font-weight:600}
+  .lede{color:var(--dim);font-size:17px;line-height:1.7;max-width:64ch;margin-top:16px}
+  .lede b{color:var(--ink);font-weight:600}
+
+  /* corridor-of-rooms: each surface = a "door" you've already walked through */
+  .rooms{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin-top:30px}
+  .rcard{position:relative;background:var(--pane);border:1px solid var(--line);border-radius:12px;padding:20px 18px;
+    overflow:hidden}
+  .rcard::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;
+    background:linear-gradient(180deg,var(--warm),var(--accent));opacity:.7}
+  .rcard h3{margin:0 0 6px;font-size:17px;font-family:ui-sans-serif,system-ui;font-weight:650}
+  .rcard p{margin:0;color:var(--dim);font-size:14px;line-height:1.6;font-family:ui-sans-serif,system-ui}
+  .rcard .tag{display:inline-block;margin-bottom:10px;font-family:ui-monospace,Menlo,monospace;font-size:10.5px;
+    letter-spacing:.16em;text-transform:uppercase;color:var(--warm-2)}
+
+  .facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:18px;margin-top:28px;
+    font-family:ui-sans-serif,system-ui}
+  .fact{padding:18px 20px;border:1px solid var(--line);border-radius:12px;background:var(--pane)}
+  .fact h4{margin:0 0 8px;font-size:14px;letter-spacing:.02em}
+  .fact p{margin:0;color:var(--dim);font-size:13.5px;line-height:1.6}
+  .fact code{font-family:ui-monospace,Menlo,monospace;font-size:12px;color:var(--warm);background:rgba(255,180,120,.08);
+    padding:1px 5px;border-radius:4px;word-break:break-all}
+
+  pre{background:#0a0c13;border:1px solid var(--line);border-radius:12px;padding:18px 20px;overflow:auto;margin-top:22px;
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;line-height:1.7;position:relative}
+  pre .c{color:#6b7488}
+  pre .p{color:var(--warm)}
+  .copy{position:absolute;top:10px;right:10px;font-family:ui-sans-serif,system-ui;font-size:11px;color:var(--dim);
+    background:rgba(30,32,44,.8);border:1px solid var(--line);border-radius:7px;padding:5px 10px;cursor:pointer}
+  .copy:hover,.copy:focus-visible{color:var(--ink)}
+
+  .cta{display:flex;flex-wrap:wrap;gap:14px;margin-top:30px;font-family:ui-sans-serif,system-ui}
+  .btn{display:inline-flex;align-items:center;gap:8px;text-decoration:none;font-weight:650;font-size:14.5px;
+    padding:13px 22px;border-radius:11px;border:1px solid var(--line)}
+  .btn.primary{background:linear-gradient(135deg,var(--warm),var(--warm-2));color:#1a0f06;border-color:transparent}
+  .btn.ghost{color:var(--ink);background:rgba(255,255,255,.02)}
+  .btn:hover{transform:translateY(-1px)}
+  .btn:focus-visible,a:focus-visible,button:focus-visible{outline:2px solid var(--warm);outline-offset:3px}
+
+  footer{padding:40px 0 70px;color:var(--dim);font-family:ui-sans-serif,system-ui;font-size:13px;line-height:1.7}
+  footer a{color:var(--warm)}
+  .footrow{display:flex;flex-wrap:wrap;gap:10px 22px;margin-top:10px}
+  .badge{display:inline-block;font-family:ui-monospace,Menlo,monospace;font-size:11px;letter-spacing:.12em;
+    border:1px solid var(--line);border-radius:999px;padding:5px 12px;color:var(--dim);margin-top:14px;margin-right:8px}
+
+  /* ============================================================
+     REDUCED MOTION — static framed view INTO the already-lit
+     room. Door pre-opened, no travel, no flicker/steam/motes.
+     ============================================================ */
+  @media (prefers-reduced-motion: reduce){
+    .stage{perspective:1400px}
+    .world{transform:translateZ(1700px) !important}     /* park us at the doorway */
+    .door{transition:none;transform:rotateY(-104deg)}    /* already open */
+    .glow{transition:none;opacity:1}
+    .recall{transition:none;opacity:1;transform:none}
+    .arises{transition:none;opacity:1}
+    .scr-flicker,.steam{animation:none}
+    .mote{display:none}
+    .pulse{animation:none}
+    .replay{display:none}
+  }
+</style>
+</head>
+<body>
+<a class="skip" href="#story">Skip the corridor — read what Memex is</a>
+
+<!-- ===================== THE 3D CORRIDOR STAGE ===================== -->
+<div class="stage" id="stage" aria-label="A memory-palace corridor. As it drifts forward, a door at the end opens on its own onto a lit scene: a late-night desk where a build finally passed.">
+  <div class="top ui">
+    <div class="brand"><span class="dot"></span> Memex</div>
+    <nav aria-label="Primary">
+      <a href="#story">What it is</a>
+      <a href="#surfaces">Surfaces</a>
+      <a href="#agent">For agents</a>
+      <a href="https://github.com/Two-Weeks-Team/memex">Repo</a>
+    </nav>
+  </div>
+
+  <div class="world" id="world" aria-hidden="true">
+    <!-- corridor segments generated by JS; doorway + room are static markup -->
+    <div class="doorway" id="doorway">
+      <div class="door-frame"></div>
+      <div class="room">
+        <div class="scene">
+          <!-- back-wall window: city at night -->
+          <div class="obj window"></div>
+          <!-- sticky note (handwritten, part of the moment) -->
+          <div class="obj sticky">retry → backoff. don't reset the token!</div>
+          <!-- desk lamp -->
+          <div class="obj lamp-arm"></div>
+          <div class="obj lamp-head"></div>
+          <div class="obj lamp-pool"></div>
+          <!-- monitor with the settled commit graph: it finally went green -->
+          <div class="obj monitor">
+            <div class="screen">
+              <div class="gline" style="top:14px;height:60px"></div>
+              <span class="gnode" style="left:6px;top:12px;background:#5fae7a;box-shadow:0 0 8px #5fae7a"></span>
+              <span class="glab" style="left:20px;top:9px">fix: auth retry uses backoff</span>
+              <span class="gnode" style="left:6px;top:34px;background:#5fae7a;box-shadow:0 0 6px #5fae7a"></span>
+              <span class="glab" style="left:20px;top:31px">test: 401 path reconnects</span>
+              <span class="gnode" style="left:6px;top:56px;background:#7CFFB0;box-shadow:0 0 12px #7CFFB0"></span>
+              <span class="glab" style="left:20px;top:53px;color:#bdf3d2">build ✓ all green</span>
+              <span class="pass">PASS</span>
+              <div class="scr-flicker"></div>
+            </div>
+          </div>
+          <!-- coffee mug + steam -->
+          <div class="obj mug"></div>
+          <div class="obj steam"></div>
+          <!-- desk surface in front -->
+          <div class="obj desk"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="glow"></div>
+  <div class="haze"></div>
+
+  <div class="arises ui" aria-hidden="true">
+    <div class="k">— oh, right —</div>
+    <div class="h">You solved this exact retry loop at 1&nbsp;a.m. three weeks ago.</div>
+  </div>
+
+  <!-- the SITUATION that calls the memory up (foreground, not a search box) -->
+  <div class="context ui" id="context">
+    <div class="now">
+      <span class="pulse"></span>
+      <span class="nowtxt">right now, in this session — <b>your auth request keeps 401-ing on retry</b></span>
+    </div>
+    <p class="recall" id="recall">
+      …and the room down the hall was <span class="em">already that night</span> — the one where the build finally went green.
+      <span class="meta">surfaced from session · 2026-05-06 · 01:14 · project/auth-gateway · by similarity, not by you asking</span>
+    </p>
+  </div>
+
+  <button class="replay ui" id="replay" type="button">↺ let it arise again</button>
+  <div class="scrollcue ui" aria-hidden="true">scroll ↓</div>
+</div>
+
+<!-- ===================== HONEST STORY ===================== -->
+<main class="page">
+  <section id="story">
+    <div class="eyebrow">The feeling</div>
+    <h2>You didn't go looking. The room was already lit.</h2>
+    <p class="lede">
+      You don't journal every debugging session — yet the moment a familiar problem returns,
+      the night you solved it last time comes back <b>on its own</b>. Memex is built around that
+      reflex. It watches the <b>session you already own</b> and, when the current context lines up
+      with something from your past, the relevant moment <b>surfaces unbidden</b> — the way a forgotten
+      fact returns mid-task. No prompt. No query box. You're the recipient, not the seeker.
+    </p>
+    <p class="lede">
+      Concretely: Memex turns your Claude Code / Codex history into a navigable, spatial memory.
+      Each past session is a room you can walk back into — and sometimes a door opens before you reach for it.
+    </p>
+  </section>
+
+  <section id="surfaces">
+    <div class="eyebrow">Doors down the hall</div>
+    <h2>Six ways to move through what you've already done</h2>
+    <p class="lede">Each is a real surface in the app — different routes through the same Qdrant-backed corpus.</p>
+    <div class="rooms">
+      <div class="rcard"><span class="tag ui">replay</span><h3>Time Machine</h3><p>Step back into a session and watch it unfold, message by message, the way it actually happened.</p></div>
+      <div class="rcard"><span class="tag ui">weighted search</span><h3>Lens</h3><p>Named-vector weighted retrieval — tilt toward intent, code, or outcome and re-rank the same corpus.</p></div>
+      <div class="rcard"><span class="tag ui">graph</span><h3>Topology</h3><p>A distance matrix becomes a minimum-spanning-tree map of how your sessions relate.</p></div>
+      <div class="rcard"><span class="tag ui">discovery</span><h3>Mix</h3><p>Positive / negative recommendation — “more like this room, less like that one.”</p></div>
+      <div class="rcard"><span class="tag ui">proactive</span><h3>Recall</h3><p>The autonomous part: relevant past moments rise into the current context without being asked.</p></div>
+      <div class="rcard"><span class="tag ui">agent memory</span><h3>Companion · Wrapped · Loop&nbsp;Breaker</h3><p>A memory layer for your agent — recurring patterns, a session retrospective, and a nudge when you’re circling.</p></div>
+    </div>
+  </section>
+
+  <section id="agent">
+    <div class="eyebrow">For your agent</div>
+    <h2>Hand the corridor to Claude Code, Codex, or Cursor</h2>
+    <p class="lede">
+      Memex exposes <b>11 MCP tools</b> over stdio + HTTP — each a typed handle on a Qdrant primitive
+      the desktop app already uses. Wire it once and your agent can walk these rooms on its own.
+    </p>
+    <pre><button class="copy" type="button" data-copy="claude mcp add memex /path/to/memex/src-tauri/target/release/memex mcp">copy</button><span class="c"># one-time wiring — point Claude Code at the memex binary you already run</span>
+<span class="p">claude</span> mcp add memex /path/to/memex/src-tauri/target/release/memex mcp
+<span class="c"># or let memex print the line for you</span>
+<span class="p">memex</span> install-mcp</pre>
+
+    <div class="facts">
+      <div class="fact"><h4>What it reads</h4><p>Your local session history — <code>~/.claude/projects/**/*.jsonl</code>, legacy transcripts, and <code>history.jsonl</code>.</p></div>
+      <div class="fact"><h4>No LLM at runtime</h4><p>Not a chatbot. Retrieval runs on vectors in <b>Qdrant</b> on <code>localhost:6334</code>; the corpus stays on your machine.</p></div>
+      <div class="fact"><h4>Headless option</h4><p>The <a href="https://github.com/Two-Weeks-Team/memex/blob/main/deploy/web/README.md">server / Docker variant</a> runs Qdrant + web UI/API + MCP in one image.</p></div>
+      <div class="fact"><h4>Why it exists</h4><p>Claude Code silently migrates and deletes old sessions. Memex keeps a corpus <b>you own</b> and lets you move through it by similarity.</p></div>
+    </div>
+
+    <div class="cta">
+      <a class="btn primary" href="https://github.com/Two-Weeks-Team/memex">Open the repo</a>
+      <a class="btn ghost" href="https://two-weeks-team.github.io/memex/">See the live landing</a>
+      <a class="btn ghost" href="https://github.com/Two-Weeks-Team/memex/blob/main/deploy/web/README.md">Server / Docker variant</a>
+    </div>
+  </section>
+
+  <footer>
+    <div>
+      <span class="badge ui">v0.1.0 · macOS Apple Silicon</span>
+      <span class="badge ui">unsigned MVP</span>
+      <span class="badge ui">needs local Qdrant @ :6334</span>
+      <span class="badge ui">Qdrant VSD 2026</span>
+    </div>
+    <p style="margin-top:18px">
+      Memex — a navigable memory over the coding history you already own, backed by Qdrant.
+      Built for <b>Qdrant Vector Space Day 2026 — “Think Outside the Bot.”</b>
+    </p>
+    <div class="footrow">
+      <a href="https://github.com/Two-Weeks-Team/memex">github.com/Two-Weeks-Team/memex</a>
+      <a href="https://two-weeks-team.github.io/memex/">two-weeks-team.github.io/memex</a>
+      <a href="https://github.com/Two-Weeks-Team/memex/blob/main/deploy/web/README.md">server / Docker</a>
+    </div>
+    <p style="margin-top:14px;opacity:.7">
+      Vannevar Bush imagined the Memex in 1945 — a desk you walk back through by association.
+      This is one room of it.
+    </p>
+  </footer>
+</main>
+
+<script>
+(function(){
+  "use strict";
+  var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  var world   = document.getElementById("world");
+  var doorway = document.getElementById("doorway");
+  var stage   = document.getElementById("stage");
+  var replay  = document.getElementById("replay");
+
+  /* ---- build the corridor: segments receding down -Z toward the door ---- */
+  var SEG_DEPTH = 360;
+  var SEG_COUNT = 6;          // enough to fill to the doorway at ~ -2000px
+  var frag = document.createDocumentFragment();
+  for (var i = 0; i < SEG_COUNT; i++){
+    var z = -(i * SEG_DEPTH);
+    var seg = document.createElement("div");
+    seg.className = "seg";
+    seg.style.transform = "translateZ(" + z + "px)";
+    // four panels per segment; sconces alternate to imply walked-past lights
+    var floor = mk("panel floor");
+    var ceil  = mk("panel ceil");
+    var left  = mk("panel left");
+    var right = mk("panel right");
+    if (i % 2 === 0){ left.appendChild(mk("sconce")); }
+    else            { right.appendChild(mk("sconce")); }
+    seg.appendChild(floor); seg.appendChild(ceil); seg.appendChild(left); seg.appendChild(right);
+    frag.appendChild(seg);
+  }
+  // insert segments before the doorway so the door sits at the far end
+  world.insertBefore(frag, doorway);
+
+  function mk(cls){ var d=document.createElement("div"); d.className=cls; return d; }
+
+  if (reduce){ return; } // static framed view handled entirely by CSS
+
+  /* ---- dust motes inside the lit room (depth detail) ---- */
+  var scene = doorway.querySelector(".scene");
+  for (var m=0; m<10; m++){
+    var mote = document.createElement("div");
+    mote.className = "mote";
+    var mx = 30 + Math.random()*240, my = 60 + Math.random()*240;
+    mote.style.left = mx + "px"; mote.style.top = my + "px";
+    mote.style.opacity = (0.25 + Math.random()*0.5).toFixed(2);
+    scene.appendChild(mote);
+    floatMote(mote, mx, my);
+  }
+  function floatMote(el, bx, by){
+    var t = Math.random()*1000;
+    (function loop(){
+      t += 0.012;
+      el.style.transform = "translateZ(" + (10 + Math.sin(t*1.3)*16) + "px) translate(" +
+                           (Math.sin(t)*6) + "px," + (Math.cos(t*0.8)*8) + "px)";
+      requestAnimationFrame(loop);
+    })();
+  }
+
+  /* ---- AUTONOMOUS DRIFT: the corridor pulls you toward the door ---- */
+  // travel from z=0 up to ~1760px, easing to a near-stop just shy of the doorway,
+  // then the door opens on its own. No user input drives this.
+  var DRIFT_TARGET = 1760;
+  var startTime = null, DURATION = 5200;
+  var traveling = false;
+
+  function easeOutCubic(p){ return 1 - Math.pow(1 - p, 3); }
+
+  function travel(ts){
+    if (startTime === null) startTime = ts;
+    var p = Math.min((ts - startTime) / DURATION, 1);
+    var z = DRIFT_TARGET * easeOutCubic(p);
+    world.style.transform = "translateZ(" + z + "px)";
+    if (p < 1){ requestAnimationFrame(travel); }
+    else { traveling = false; openDoor(); }
+  }
+
+  var doorTimer = null;
+  function openDoor(){
+    // the situation has been "recognized" — the door swings open by itself
+    stage.classList.add("lit");
+  }
+
+  function beginArising(){
+    // reset, then drift forward on its own after a beat of stillness
+    stage.classList.remove("lit");
+    if (doorTimer) clearTimeout(doorTimer);
+    world.style.transition = "none";
+    world.style.transform = "translateZ(0px)";
+    startTime = null; traveling = true;
+    // small pause so the corridor reads as "still" before it pulls you in
+    doorTimer = setTimeout(function(){
+      world.style.transition = "";
+      requestAnimationFrame(travel);
+    }, 900);
+  }
+
+  // kick off once the stage is on screen (still autonomous, just polite about offscreen)
+  var kicked = false;
+  function maybeKick(){
+    if (kicked) return;
+    var r = stage.getBoundingClientRect();
+    if (r.top < window.innerHeight && r.bottom > 0){
+      kicked = true; beginArising();
+    }
+  }
+  if ("IntersectionObserver" in window){
+    var io = new IntersectionObserver(function(entries){
+      entries.forEach(function(e){ if (e.isIntersecting){ kicked = true; beginArising(); io.disconnect(); } });
+    }, {threshold:.4});
+    io.observe(stage);
+  } else {
+    maybeKick();
+  }
+
+  // replay is an accessibility affordance to re-trigger the *autonomous* sequence
+  if (replay){
+    replay.addEventListener("click", function(){ beginArising(); });
+  }
+
+  /* ---- copy buttons ---- */
+  document.querySelectorAll(".copy").forEach(function(btn){
+    btn.addEventListener("click", function(){
+      var txt = btn.getAttribute("data-copy") || "";
+      var done = function(){ var old=btn.textContent; btn.textContent="copied"; setTimeout(function(){btn.textContent=old;},1400); };
+      if (navigator.clipboard && navigator.clipboard.writeText){
+        navigator.clipboard.writeText(txt).then(done, fallback);
+      } else { fallback(); }
+      function fallback(){
+        var ta=document.createElement("textarea"); ta.value=txt; document.body.appendChild(ta);
+        ta.select(); try{document.execCommand("copy");}catch(e){} document.body.removeChild(ta); done();
+      }
+    });
+  });
+})();
+</script>
+</body>
+</html>

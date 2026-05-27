@@ -1,0 +1,708 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Memex — Ferrofluid Relief</title>
+<style>
+  :root {
+    --ink: #04050a;
+    --bg-0: #030407;
+    --bg-1: #080a12;
+    --fluid-hi: #6d78ff;     /* cool magnetic rim-light on the black fluid */
+    --fluid-mid: #1a1d33;
+    --fluid-lo: #000000;
+    --warm: #ffcf8a;         /* the remembered lamp inside the relief */
+    --green: #7df0a4;        /* the moment it went green */
+    --steel: #c5cbe0;
+    --steel-deep: #767e9c;
+    --hairline: rgba(150,160,210,0.10);
+    --accent: #9aa6ff;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+
+  body {
+    background:
+      radial-gradient(130% 100% at 50% -10%, #0c0f1c 0%, var(--bg-1) 40%, var(--bg-0) 100%);
+    color: var(--steel);
+    font-family: "Helvetica Neue", Helvetica, Arial, "Segoe UI", system-ui, sans-serif;
+    min-height: 100vh;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+  }
+  a { color: inherit; }
+
+  .skip {
+    position: absolute; left: -9999px; top: 0;
+    background: #fff; color: #000; padding: 10px 16px; z-index: 999;
+    border-radius: 0 0 8px 0; font-weight: 700; text-decoration: none;
+  }
+  .skip:focus { left: 0; }
+
+  /* ============ STAGE ============ */
+  .stage {
+    position: relative;
+    width: 100%;
+    height: 100svh;
+    min-height: 640px;
+    overflow: hidden;
+    isolation: isolate;
+  }
+
+  /* the magnetic-field bloom behind the fluid — an unseen pole pulling it up */
+  .field {
+    position: absolute; inset: 0;
+    background:
+      radial-gradient(60% 46% at 50% 64%, rgba(109,120,255,0.16), rgba(0,0,0,0) 62%),
+      radial-gradient(120% 70% at 50% 110%, rgba(60,68,140,0.22), rgba(0,0,0,0) 70%);
+    pointer-events: none;
+    will-change: opacity, transform;
+  }
+
+  /* the ferrofluid canvas — full-bleed; this is the centerpiece */
+  #fluid {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+  }
+
+  .vignette {
+    position: absolute; inset: 0;
+    background:
+      radial-gradient(120% 95% at 50% 42%, rgba(0,0,0,0) 46%, rgba(0,0,0,0.6) 100%),
+      linear-gradient(180deg, rgba(0,0,0,0.32) 0%, rgba(0,0,0,0) 24%, rgba(0,0,0,0) 66%, rgba(0,0,0,0.5) 100%);
+    pointer-events: none;
+  }
+
+  /* ============ CURRENT CONTEXT — what calls the memory up ============ */
+  .context {
+    position: absolute;
+    top: clamp(22px, 5vh, 52px);
+    left: 50%;
+    transform: translateX(-50%);
+    text-align: center;
+    width: min(720px, 90vw);
+    z-index: 5;
+  }
+  .context .eyebrow {
+    font-size: 11px; letter-spacing: 0.34em; text-transform: uppercase;
+    color: var(--steel-deep);
+  }
+  .context .now {
+    margin-top: 8px;
+    font-size: clamp(16px, 2.4vw, 22px);
+    color: #eaecff;
+    line-height: 1.4;
+    text-shadow: 0 1px 18px rgba(0,0,0,0.8);
+  }
+  .context .now .cursor {
+    display: inline-block; width: 2px; height: 1em;
+    background: var(--accent); margin-left: 2px; transform: translateY(2px);
+    animation: blink 1.1s steps(2) infinite;
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  /* the recognition line + provenance that arrive once the relief holds */
+  .recall {
+    position: absolute;
+    left: 50%;
+    top: clamp(150px, 23vh, 230px);
+    transform: translateX(-50%);
+    width: min(640px, 88vw);
+    text-align: center;
+    z-index: 5;
+    opacity: 0;
+    transition: opacity 1.1s ease;
+    pointer-events: none;
+  }
+  .recall.show { opacity: 1; }
+  .recall .moment {
+    font-size: 12px; letter-spacing: 0.16em; text-transform: uppercase;
+    color: var(--accent);
+  }
+  .recall .moment .glow { color: var(--green); text-shadow: 0 0 14px rgba(125,240,164,0.55); }
+  .recall .lede {
+    margin: 12px auto 0;
+    font-size: clamp(15px, 2vw, 19px);
+    color: #dde1f4;
+    line-height: 1.5;
+    text-shadow: 0 1px 14px rgba(0,0,0,0.75);
+  }
+  .recall .lede b { color: #fff; font-weight: 700; }
+  .recall .src {
+    margin-top: 10px;
+    font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase;
+    color: var(--steel-deep);
+  }
+
+  /* a small honest status of what the fluid is doing right now */
+  .settle {
+    position: absolute;
+    top: clamp(16px, 4vh, 32px); right: clamp(16px, 4vw, 32px);
+    font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase;
+    color: var(--steel-deep);
+    z-index: 6;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .settle .dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: radial-gradient(circle at 30% 30%, #cfd4ff, var(--accent) 60%, #2a2f55);
+    box-shadow: 0 0 10px rgba(150,166,255,0.6);
+    animation: pulse 2.4s ease-in-out infinite;
+  }
+  @keyframes pulse { 0%,100% { opacity: 0.4; } 50% { opacity: 1; } }
+
+  /* ============ MASTHEAD over the fluid ============ */
+  .mast {
+    position: absolute;
+    bottom: clamp(22px, 5vh, 46px);
+    left: 50%; transform: translateX(-50%);
+    width: min(880px, 92vw);
+    text-align: center;
+    z-index: 6;
+  }
+  .wordmark {
+    font-size: clamp(13px, 1.6vw, 15px);
+    letter-spacing: 0.42em; text-transform: uppercase;
+    color: #fff;
+    text-shadow: 0 0 1px rgba(255,255,255,0.8), 0 2px 14px rgba(0,0,0,0.8);
+  }
+  .mast h1 {
+    margin: 12px 0 0;
+    font-size: clamp(26px, 5vw, 50px);
+    line-height: 1.05;
+    font-weight: 800;
+    letter-spacing: -0.01em;
+    background: linear-gradient(180deg, #ffffff 0%, #c7cdf0 42%, #6d78ff 78%, #c7cdf0 100%);
+    -webkit-background-clip: text; background-clip: text;
+    color: transparent;
+    filter: drop-shadow(0 2px 24px rgba(0,0,0,0.6));
+  }
+  .mast p {
+    margin: 14px auto 0;
+    max-width: 560px;
+    color: #c2c8e2;
+    font-size: clamp(14px, 1.7vw, 17px);
+    line-height: 1.55;
+    text-shadow: 0 1px 12px rgba(0,0,0,0.8);
+  }
+  .cta { margin-top: 22px; display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+  .btn {
+    display: inline-block;
+    padding: 12px 22px;
+    border-radius: 999px;
+    font-size: 14px; font-weight: 700; letter-spacing: 0.02em;
+    text-decoration: none;
+    border: 1px solid rgba(150,160,255,0.28);
+    color: #05060c;
+    background: linear-gradient(180deg, #d7dbff 0%, #aab2ff 48%, #818bf0 100%);
+    box-shadow: 0 1px 0 rgba(255,255,255,0.5) inset, 0 10px 24px rgba(0,0,0,0.5);
+    transition: transform 0.18s ease, box-shadow 0.18s ease;
+  }
+  .btn:hover { transform: translateY(-1px); box-shadow: 0 1px 0 rgba(255,255,255,0.5) inset, 0 14px 30px rgba(0,0,0,0.6); }
+  .btn.ghost {
+    color: #e7eafc;
+    background: rgba(150,160,255,0.07);
+    backdrop-filter: blur(4px);
+    box-shadow: 0 0 0 1px rgba(150,160,255,0.16) inset;
+  }
+  .btn:focus-visible, a:focus-visible { outline: 2px solid #9fd1ff; outline-offset: 3px; }
+
+  /* ============ BELOW THE FOLD — honest facts ============ */
+  .below {
+    position: relative;
+    max-width: 1040px;
+    margin: 0 auto;
+    padding: 88px 24px 40px;
+  }
+  .below h2 { font-size: clamp(22px, 3vw, 30px); margin: 0 0 8px; color: #eef1ff; letter-spacing: -0.01em; }
+  .below .sub { color: var(--steel-deep); margin: 0 0 40px; max-width: 620px; line-height: 1.6; }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 18px;
+  }
+  .card {
+    padding: 22px 20px;
+    border-radius: 14px;
+    background: linear-gradient(180deg, rgba(150,160,255,0.05), rgba(150,160,255,0.015));
+    border: 1px solid var(--hairline);
+    box-shadow: 0 1px 0 rgba(150,160,255,0.08) inset;
+  }
+  .card h3 { margin: 0 0 8px; font-size: 16px; color: #e7eafc; letter-spacing: 0.01em; }
+  .card p { margin: 0; font-size: 14px; line-height: 1.6; color: #aab2cf; }
+  .card code { color: #cfd4ff; font-size: 12.5px; }
+
+  .mcp {
+    margin-top: 44px;
+    padding: 24px 22px;
+    border-radius: 16px;
+    background:
+      radial-gradient(80% 120% at 100% 0%, rgba(109,120,255,0.12), rgba(0,0,0,0) 60%),
+      linear-gradient(180deg, rgba(150,160,255,0.05), rgba(150,160,255,0.015));
+    border: 1px solid var(--hairline);
+  }
+  .mcp h3 { margin: 0 0 10px; color: #eef1ff; font-size: 17px; }
+  .mcp p { color: #aab2cf; line-height: 1.6; font-size: 14px; margin: 0 0 14px; }
+  .codeline {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 13.5px;
+    background: #04050a;
+    border: 1px solid var(--hairline);
+    border-radius: 10px;
+    padding: 12px 14px;
+    color: #cfd4ff;
+    overflow-x: auto;
+  }
+  .codeline .k { color: #9aa6ff; }
+  .codeline .c { color: var(--steel-deep); }
+
+  footer {
+    max-width: 1040px;
+    margin: 0 auto;
+    padding: 30px 24px 60px;
+    border-top: 1px solid var(--hairline);
+    display: flex; flex-wrap: wrap; gap: 18px 26px; align-items: center;
+  }
+  footer a {
+    color: #c2c8e2; text-decoration: none; font-size: 14px;
+    border-bottom: 1px solid transparent; padding-bottom: 1px;
+  }
+  footer a:hover { border-bottom-color: #c2c8e2; }
+  footer .tag { color: var(--steel-deep); font-size: 12.5px; margin-left: auto; }
+
+  /* ============ REDUCED MOTION — a single settled relief scene, static ============ */
+  @media (prefers-reduced-motion: reduce) {
+    .field, .settle .dot, .context .now .cursor { animation: none !important; }
+    .recall { opacity: 1 !important; transition: none !important; }
+    .settle { display: none; }
+  }
+
+  @media (max-width: 560px) {
+    .context .now { font-size: 16px; }
+    .mast h1 { font-size: 28px; }
+    .recall { top: clamp(130px, 22vh, 200px); }
+  }
+</style>
+</head>
+<body>
+<a class="skip" href="#facts">Skip to product details</a>
+
+<main>
+  <section class="stage" aria-label="A remembered coding moment rising out of a pool of black magnetic fluid">
+    <div class="field" id="field" aria-hidden="true"></div>
+
+    <!-- the ferrofluid is drawn here; it rises into the bas-relief of a scene -->
+    <canvas id="fluid"
+            role="img"
+            aria-label="A pool of glossy black magnetic fluid spikes upward and rises into the bas-relief silhouette of a remembered late-night coding scene: a lamp-lit desk, a monitor, and the moment a failing test finally went green."></canvas>
+
+    <!-- the current situation that calls the memory up (a stated context, not a prompt box) -->
+    <div class="context">
+      <div class="eyebrow">Right now, in your editor</div>
+      <div class="now" id="nowLine">You're staring at an auth-retry that keeps 401-ing<span class="cursor" aria-hidden="true"></span></div>
+    </div>
+
+    <div class="settle" aria-hidden="true"><span class="dot"></span><span id="settleLabel">rising</span></div>
+
+    <!-- the recognition line, arriving once the relief holds -->
+    <div class="recall" id="recall" aria-hidden="false">
+      <div class="moment" id="momentLine">02:14 · last March · token refresh, attempt 7 <span class="glow">— it went green</span></div>
+      <p class="lede" id="ledeLine">Oh&mdash;<b>right</b>. You solved this exact 401 once before. The retry was firing <b>before</b> the refreshed token had landed. You didn't go looking for that night; it rose on its own.</p>
+      <p class="src">Recalled from your own Claude Code session history</p>
+    </div>
+
+    <!-- masthead over the fluid -->
+    <div class="mast">
+      <div class="wordmark">Memex</div>
+      <h1>The thought you needed,<br/>before you went looking.</h1>
+      <p>A still pool of your past sessions &mdash; until a moment in your editor pulls at it,
+        and it rises, on its own, into the scene you'd forgotten you lived.</p>
+      <div class="cta">
+        <a class="btn" href="https://github.com/Two-Weeks-Team/memex">View the repository</a>
+        <a class="btn ghost" href="https://two-weeks-team.github.io/memex/">Open the live landing</a>
+      </div>
+    </div>
+
+    <div class="vignette" aria-hidden="true"></div>
+  </section>
+
+  <!-- ============ honest facts below the fold ============ -->
+  <section class="below" id="facts">
+    <h2>What's actually happening</h2>
+    <p class="sub">Memex is a non-chatbot tool that runs over your Claude Code and Codex session
+      history. No LLM at runtime &mdash; it turns the transcripts you already own into a navigable,
+      associative memory you can move through by similarity, not keywords.</p>
+
+    <div class="grid">
+      <div class="card">
+        <h3>Your corpus, preserved</h3>
+        <p>Reads <code>~/.claude/projects/**/*.jsonl</code>, legacy transcripts, and
+          <code>history.jsonl</code> &mdash; a corpus you keep, even when old sessions get
+          silently migrated or removed.</p>
+      </div>
+      <div class="card">
+        <h3>Backed by Qdrant</h3>
+        <p>Embeddings live in a Qdrant vector space, so recall is by closeness of meaning.
+          A server / Docker variant runs Qdrant, the web UI, and MCP together in one image.</p>
+      </div>
+      <div class="card">
+        <h3>Surfaces, not searches</h3>
+        <p>Time Machine replay, Lens weighted vectors, Topology graphs, Mix/Discovery, and a
+          proactive Recall that brings a past moment forward when the current one rhymes with it.</p>
+      </div>
+      <div class="card">
+        <h3>Agent-memory layer</h3>
+        <p>A Companion / Wrapped / Loop-Breaker layer reflects on patterns across your sessions
+          &mdash; what you keep circling back to, and where you've been before.</p>
+      </div>
+    </div>
+
+    <div class="mcp">
+      <h3>Plug it into your agent</h3>
+      <p>11 MCP tools over stdio + HTTP &mdash; works in Claude Code, Codex, and Cursor. Your
+        agent can recall, replay, and connect across your own history.</p>
+      <div class="codeline"><span class="k">claude mcp add</span> memex -- memex-mcp <span class="c"># 11 tools, runs locally over your sessions</span></div>
+    </div>
+  </section>
+
+  <footer>
+    <a href="https://github.com/Two-Weeks-Team/memex">Repository</a>
+    <a href="https://two-weeks-team.github.io/memex/">Live landing</a>
+    <a href="https://github.com/Two-Weeks-Team/memex">Server / Docker variant</a>
+    <a href="https://github.com/Two-Weeks-Team/memex">MCP integration · 11 tools</a>
+    <span class="tag">Built for Qdrant Vector Space Day 2026 — "Think Outside the Bot."</span>
+  </footer>
+</main>
+
+<script>
+(function () {
+  "use strict";
+
+  var reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  var canvas = document.getElementById("fluid");
+  var ctx = canvas.getContext("2d");
+  var settleLabel = document.getElementById("settleLabel");
+  var nowLine = document.getElementById("nowLine");
+  var recall = document.getElementById("recall");
+  var momentLine = document.getElementById("momentLine");
+  var ledeLine = document.getElementById("ledeLine");
+  var field = document.getElementById("field");
+
+  var W = 0, H = 0, DPR = 1;
+
+  function resize() {
+    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    W = canvas.clientWidth;
+    H = canvas.clientHeight;
+    canvas.width = Math.floor(W * DPR);
+    canvas.height = Math.floor(H * DPR);
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  }
+  resize();
+  window.addEventListener("resize", resize, { passive: true });
+
+  // ---------------------------------------------------------------------------
+  // The remembered SCENES. Each is a bas-relief silhouette the fluid rises into:
+  // a height-profile across x (0..1) describing the skyline of a coding tableau
+  // (desk slab, monitor block, lamp swell), plus its own recognition copy and
+  // an optional warm "lamp" and green "it passed" glint placed in relief.
+  // ---------------------------------------------------------------------------
+  var scenes = [
+    {
+      now: "You're staring at an auth-retry that keeps 401-ing",
+      aria: "Black magnetic fluid rising into a bas-relief: 02:14 last March, a lamp-lit desk, a monitor, and the line where the token refresh finally went green.",
+      moment: '02:14 · last March · token refresh, attempt 7 <span class="glow">— it went green</span>',
+      lede: "Oh&mdash;<b>right</b>. You solved this exact 401 once before. The retry was firing <b>before</b> the refreshed token had landed. You didn't go looking for that night; it rose on its own.",
+      lampX: 0.74, greenX: 0.46
+    },
+    {
+      now: "You're untangling why the migration drops a foreign key",
+      aria: "Black magnetic fluid rising into a bas-relief: a winter afternoon, two windows side by side, the schema diff that revealed a rename masquerading as a drop.",
+      moment: '16:40 · February · schema diff, the rename <span class="glow">— not a drop</span>',
+      lede: "Wait&mdash;you've <b>been here</b>. It wasn't a dropped key; it was a column rename the diff read as drop-then-add. That afternoon rises before you finish re-reading the migration.",
+      lampX: 0.28, greenX: 0.62
+    },
+    {
+      now: "You're chasing a race in the websocket reconnect",
+      aria: "Black magnetic fluid rising into a bas-relief: late, the editor's glow, the reconnect backoff you had already tuned once before.",
+      moment: '23:51 · April · reconnect backoff <span class="glow">— stop the thundering herd</span>',
+      lede: "There it is. You'd <b>already</b> tamed this reconnect storm with jittered backoff. The fix rises before you finish re-reading the stack trace.",
+      lampX: 0.66, greenX: 0.40
+    }
+  ];
+
+  // Build a normalized height-profile (0..1) for the bas-relief silhouette of a
+  // desk scene, sampled at N control points across the width. This is the SHAPE
+  // the fluid morphs toward — a depicted moment, not a chart or UI.
+  var N = 96;
+  function buildSilhouette(scene) {
+    var h = new Float32Array(N);
+    for (var i = 0; i < N; i++) {
+      var x = i / (N - 1);
+      var y = 0.18; // a low desk slab as the base of the relief
+      // monitor block (a broad raised rectangle, the screen of the memory)
+      if (x > 0.30 && x < 0.70) y = Math.max(y, 0.62);
+      // monitor bezel shoulders
+      if (x > 0.27 && x < 0.30) y = Math.max(y, 0.40);
+      if (x > 0.70 && x < 0.73) y = Math.max(y, 0.40);
+      // the lamp swell — a soft rounded rise (warm light source in the scene)
+      var lampD = Math.abs(x - scene.lampX);
+      if (lampD < 0.12) y = Math.max(y, 0.80 * Math.cos((lampD / 0.12) * Math.PI / 2));
+      // a coffee-cup nub on the far side of the lamp
+      var cupX = scene.lampX > 0.5 ? scene.lampX - 0.30 : scene.lampX + 0.30;
+      var cupD = Math.abs(x - cupX);
+      if (cupD < 0.045) y = Math.max(y, 0.34);
+      // keyboard ridge in front (low, wide)
+      if (x > 0.34 && x < 0.66) y = Math.max(y, 0.24);
+      h[i] = y;
+    }
+    // smooth the profile so it reads as flowing fluid, not stairsteps
+    var s = new Float32Array(N);
+    for (var k = 0; k < N; k++) {
+      var a = h[Math.max(0, k - 1)], b = h[k], c = h[Math.min(N - 1, k + 1)];
+      s[k] = (a + 2 * b + c) / 4;
+    }
+    return s;
+  }
+
+  // Reduced motion: paint ONE settled relief scene, static, and stop.
+  if (reduce) {
+    var sc = scenes[0];
+    applyCopy(sc);
+    recall.classList.add("show");
+    paintStatic(buildSilhouette(sc), sc);
+    return;
+  }
+
+  function applyCopy(scene) {
+    nowLine.firstChild.nodeValue = scene.now + " ";
+    canvas.setAttribute("aria-label", scene.aria);
+    momentLine.innerHTML = scene.moment;
+    ledeLine.innerHTML = scene.lede;
+  }
+
+  // ---------------------------------------------------------------------------
+  // RENDERING. The fluid is drawn as a filled body whose top edge is a chain of
+  // overlapping "spike" lobes. Spikes are the Rosensweig instability: regular
+  // peaks that erupt under a magnetic field. We interpolate the top edge between
+  // a flat-pool state (small jittery spikes) and the scene silhouette (the relief).
+  // A cool rim-light + warm lamp + green glint give it gloss and depth.
+  // ---------------------------------------------------------------------------
+
+  // per-column spike phase so the surface shimmers like a live magnetic surface
+  var phase = new Float32Array(N);
+  for (var p = 0; p < N; p++) phase[p] = Math.random() * Math.PI * 2;
+
+  // morph: 0 = flat spiking pool, 1 = fully risen relief of the scene
+  var morph = 0;
+  var current = buildSilhouette(scenes[0]);
+  var sceneIdx = 0;
+
+  function poolHeight(i, t) {
+    // base pool with traveling small Rosensweig spikes
+    var base = 0.10;
+    var spike = 0.05 * (0.5 + 0.5 * Math.sin(i * 0.9 + t * 2.2 + phase[i]));
+    var spike2 = 0.03 * (0.5 + 0.5 * Math.sin(i * 1.7 - t * 1.6 + phase[i] * 1.3));
+    return base + spike + spike2;
+  }
+
+  function drawFrame(t) {
+    ctx.clearRect(0, 0, W, H);
+
+    var baseY = H * 0.92;       // the pool sits low; relief rises upward from here
+    var amp = H * 0.62;         // max relief height in px
+
+    // assemble the top-edge points
+    var pts = [];
+    for (var i = 0; i < N; i++) {
+      var x = (i / (N - 1)) * W;
+      var pool = poolHeight(i, t);
+      var relief = current[i];
+      // when risen, add fine spiky chatter on top of the relief so it stays "ferro"
+      var chatter = (0.018 + 0.012 * morph) * Math.sin(i * 2.3 + t * 3.1 + phase[i]);
+      var hgt = pool * (1 - morph) + (relief + chatter) * morph;
+      var y = baseY - hgt * amp;
+      pts.push({ x: x, y: y });
+    }
+
+    // ---- the fluid body fill ----
+    ctx.beginPath();
+    ctx.moveTo(0, H);
+    ctx.lineTo(pts[0].x, pts[0].y);
+    // smooth the silhouette with quadratic midpoints (rounded, liquid lobes)
+    for (var j = 1; j < pts.length; j++) {
+      var mx = (pts[j - 1].x + pts[j].x) / 2;
+      var my = (pts[j - 1].y + pts[j].y) / 2;
+      ctx.quadraticCurveTo(pts[j - 1].x, pts[j - 1].y, mx, my);
+    }
+    ctx.lineTo(W, pts[pts.length - 1].y);
+    ctx.lineTo(W, H);
+    ctx.closePath();
+
+    // glossy black body: deep black core, cool sheen down the slopes
+    var body = ctx.createLinearGradient(0, baseY - amp, 0, baseY);
+    body.addColorStop(0, "#11132a");
+    body.addColorStop(0.18, "#0a0b1c");
+    body.addColorStop(0.6, "#04040c");
+    body.addColorStop(1, "#000000");
+    ctx.fillStyle = body;
+    ctx.fill();
+
+    // ---- cool magnetic rim-light along the crests (gloss) ----
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, pts[0].y);
+    for (var r = 1; r < pts.length; r++) {
+      var rmx = (pts[r - 1].x + pts[r].x) / 2;
+      var rmy = (pts[r - 1].y + pts[r].y) / 2;
+      ctx.quadraticCurveTo(pts[r - 1].x, pts[r - 1].y, rmx, rmy);
+    }
+    ctx.lineWidth = 2.2;
+    ctx.strokeStyle = "rgba(120,132,255," + (0.30 + 0.45 * morph).toFixed(3) + ")";
+    ctx.shadowColor = "rgba(120,132,255,0.55)";
+    ctx.shadowBlur = 14;
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+
+    // a faint specular highlight band on the upper-left slopes
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, pts[0].y);
+    for (var s2 = 1; s2 < pts.length; s2++) {
+      var smx = (pts[s2 - 1].x + pts[s2].x) / 2;
+      var smy = (pts[s2 - 1].y + pts[s2].y) / 2;
+      ctx.quadraticCurveTo(pts[s2 - 1].x, pts[s2 - 1].y, smx, smy);
+    }
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = "rgba(210,216,255,0.12)";
+    ctx.stroke();
+
+    // ---- the warm lamp + green glint, embedded IN the relief (the scene's lights) ----
+    if (morph > 0.25) {
+      var sc = scenes[sceneIdx];
+      var lampPx = sc.lampX * W;
+      var li = Math.round(sc.lampX * (N - 1));
+      var lampY = pts[li].y;
+      var lampGlow = ctx.createRadialGradient(lampPx, lampY, 0, lampPx, lampY, H * 0.16);
+      var la = (morph - 0.25) / 0.75;
+      lampGlow.addColorStop(0, "rgba(255,207,138," + (0.5 * la).toFixed(3) + ")");
+      lampGlow.addColorStop(1, "rgba(255,207,138,0)");
+      ctx.fillStyle = lampGlow;
+      ctx.fillRect(0, 0, W, H);
+
+      var grPx = sc.greenX * W;
+      var gi = Math.round(sc.greenX * (N - 1));
+      var grY = pts[gi].y + 6;
+      var grGlow = ctx.createRadialGradient(grPx, grY, 0, grPx, grY, H * 0.05);
+      grGlow.addColorStop(0, "rgba(125,240,164," + (0.75 * la).toFixed(3) + ")");
+      grGlow.addColorStop(1, "rgba(125,240,164,0)");
+      ctx.fillStyle = grGlow;
+      ctx.fillRect(0, 0, W, H);
+      // the bright green dot — the moment the test passed
+      ctx.beginPath();
+      ctx.arc(grPx, grY, 3.2, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(170,255,200," + la.toFixed(3) + ")";
+      ctx.fill();
+    }
+  }
+
+  // static painter for reduced-motion: one risen relief, no animation
+  function paintStatic(silhouette, scene) {
+    current = silhouette;
+    morph = 1;
+    sceneIdx = 0;
+    drawFrame(0);
+  }
+
+  // ------------------------------- LIFECYCLE --------------------------------
+  // Each cycle: a context is stated -> the fluid rises unbidden into that scene's
+  // relief -> it holds -> it collapses back to a spiking pool -> irregular pause.
+  var state = "idle";
+  var stateStart = 0;
+  var holdMs = 6000;
+  var riseMs = 2200;
+  var fallMs = 1600;
+  var nextGap = 0;
+
+  function startCycle() {
+    var sc = scenes[sceneIdx % scenes.length];
+    current = buildSilhouette(sc);
+    applyCopy(sc);
+    recall.classList.remove("show");
+    settleLabel.textContent = "rising";
+    state = "rise";
+    stateStart = performance.now();
+  }
+
+  function loop(t) {
+    var tt = t / 1000;
+
+    if (state === "rise") {
+      var pr = Math.min(1, (t - stateStart) / riseMs);
+      // ease-out so spikes leap up fast then settle into the relief
+      morph = 1 - Math.pow(1 - pr, 3);
+      if (pr >= 1) {
+        morph = 1;
+        state = "hold";
+        stateStart = t;
+        settleLabel.textContent = "held";
+        recall.classList.add("show");
+      }
+    } else if (state === "hold") {
+      morph = 1;
+      if (t - stateStart >= holdMs) {
+        state = "fall";
+        stateStart = t;
+        settleLabel.textContent = "collapsing";
+        recall.classList.remove("show");
+      }
+    } else if (state === "fall") {
+      var pf = Math.min(1, (t - stateStart) / fallMs);
+      var ef = pf * pf; // ease-in: the relief slumps then drops back to pool
+      morph = 1 - ef;
+      if (pf >= 1) {
+        morph = 0;
+        state = "wait";
+        stateStart = t;
+        settleLabel.textContent = "still";
+        // lifelike, irregular pause before the next memory arises unbidden
+        nextGap = 2400 + Math.random() * 2400;
+        sceneIdx++;
+      }
+    } else if (state === "wait") {
+      morph = 0;
+      if (t - stateStart >= nextGap) startCycle();
+    }
+
+    // breathe the field bloom subtly with the morph (the unseen magnet)
+    field.style.opacity = (0.55 + 0.45 * morph).toFixed(3);
+    field.style.transform = "translateY(" + (6 * (1 - morph)).toFixed(1) + "px)";
+
+    drawFrame(tt);
+    raf = requestAnimationFrame(loop);
+  }
+
+  // begin still, then let the first memory rise on its own (no user action)
+  var raf;
+  state = "wait";
+  stateStart = performance.now();
+  nextGap = 900;
+  raf = requestAnimationFrame(loop);
+
+  // pause work when the tab is hidden
+  document.addEventListener("visibilitychange", function () {
+    if (document.hidden) {
+      cancelAnimationFrame(raf);
+    } else {
+      stateStart = performance.now() - 0;
+      raf = requestAnimationFrame(loop);
+    }
+  });
+})();
+</script>
+</body>
+</html>

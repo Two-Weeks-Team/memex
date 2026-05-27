@@ -1,0 +1,629 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Memex — the moment projects a memory before you</title>
+<style>
+  :root{
+    --holo-cyan:#5ff0ff;
+    --holo-mag:#ff5fd6;
+    --holo-amber:#ffd66b;
+    --holo-violet:#9a7bff;
+    --ink:#dff6ff;
+    --ink-dim:#7fa6b8;
+    --void:#03060c;
+    --void2:#070d1a;
+    --panel:rgba(8,16,30,.62);
+    --hairline:rgba(95,240,255,.18);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:
+      radial-gradient(1200px 800px at 50% -10%, #0a1426 0%, var(--void2) 45%, var(--void) 100%);
+    color:var(--ink);
+    font:400 16px/1.6 ui-sans-serif,-apple-system,"Segoe UI",Roboto,Inter,system-ui,sans-serif;
+    -webkit-font-smoothing:antialiased;
+    overflow-x:hidden;
+  }
+  a{color:var(--holo-cyan);text-underline-offset:3px}
+  .wrap{max-width:1080px;margin:0 auto;padding:0 22px}
+  .skip{position:absolute;left:-999px;top:0;background:#021;color:#fff;padding:10px 14px;z-index:50;border-radius:8px}
+  .skip:focus{left:12px;top:12px}
+
+  /* ---------- top line ---------- */
+  header.top{
+    position:relative;z-index:6;display:flex;align-items:center;justify-content:space-between;
+    padding:22px 0 8px;
+  }
+  .brand{display:flex;align-items:center;gap:11px;font-weight:700;letter-spacing:.06em}
+  .brand .glyph{
+    width:26px;height:26px;border-radius:6px;position:relative;
+    background:linear-gradient(135deg,var(--holo-cyan),var(--holo-violet) 55%,var(--holo-mag));
+    box-shadow:0 0 22px rgba(95,240,255,.55);
+  }
+  .brand .glyph::after{content:"";position:absolute;inset:5px;border-radius:3px;background:var(--void);}
+  .brand small{display:block;font-weight:500;letter-spacing:.18em;font-size:10px;color:var(--ink-dim)}
+  .top nav{display:flex;gap:8px;align-items:center}
+  .top nav a{
+    text-decoration:none;color:var(--ink);font-size:13.5px;padding:8px 13px;border-radius:999px;
+    border:1px solid var(--hairline);background:rgba(95,240,255,.04);
+  }
+  .top nav a.primary{
+    background:linear-gradient(120deg,rgba(95,240,255,.22),rgba(154,123,255,.22));
+    border-color:rgba(95,240,255,.5);font-weight:600;
+  }
+  .top nav a:hover{border-color:rgba(95,240,255,.55)}
+
+  /* ---------- stage ---------- */
+  .stage{position:relative;padding:14px 0 40px;min-height:74vh}
+  .lede{position:relative;z-index:6;max-width:560px;padding-top:18px}
+  .kick{
+    display:inline-flex;align-items:center;gap:9px;font-size:12px;letter-spacing:.16em;
+    text-transform:uppercase;color:var(--ink-dim);
+    border:1px solid var(--hairline);border-radius:999px;padding:6px 13px;margin-bottom:18px;
+  }
+  .kick .dot{width:7px;height:7px;border-radius:50%;background:var(--holo-cyan);box-shadow:0 0 12px var(--holo-cyan);
+    animation:blip 2.6s ease-in-out infinite}
+  @keyframes blip{0%,100%{opacity:.35}50%{opacity:1}}
+  h1{
+    font-size:clamp(30px,5.6vw,58px);line-height:1.04;margin:0 0 16px;font-weight:800;letter-spacing:-.015em;
+    color:#eafcff;
+    text-shadow:0 0 40px rgba(95,240,255,.18);
+  }
+  h1 .grad{
+    background:linear-gradient(100deg,var(--holo-cyan),var(--holo-violet) 45%,var(--holo-mag));
+    -webkit-background-clip:text;background-clip:text;color:transparent;
+  }
+  .lede p{color:#bcd8e6;font-size:clamp(15px,1.9vw,18px);max-width:48ch}
+
+  /* current-context strip: the situation that calls the memory up */
+  .ctx{
+    margin:22px 0 0;display:flex;align-items:center;gap:12px;flex-wrap:wrap;
+    font-size:13px;color:var(--ink-dim);
+  }
+  .ctx .now{
+    display:inline-flex;align-items:center;gap:9px;color:#cfeaf4;
+    background:var(--panel);border:1px solid var(--hairline);border-radius:10px;padding:9px 13px;
+    backdrop-filter:blur(6px);
+  }
+  .ctx .now b{color:#eafcff;font-weight:600}
+  .ctx .pulse{width:8px;height:8px;border-radius:50%;background:var(--holo-amber);
+    box-shadow:0 0 12px var(--holo-amber);animation:blip 1.8s ease-in-out infinite}
+
+  /* ---------- the projector ---------- */
+  .projector{
+    position:relative;z-index:4;margin:30px auto 0;width:min(760px,94vw);height:480px;
+    perspective:1300px;
+  }
+  /* emitter base */
+  .emitter{
+    position:absolute;left:50%;bottom:6px;transform:translateX(-50%);
+    width:300px;height:50px;border-radius:50%;
+    background:
+      radial-gradient(closest-side, rgba(95,240,255,.55), rgba(95,240,255,.12) 60%, transparent 72%);
+    box-shadow:0 0 60px 14px rgba(95,240,255,.32);
+  }
+  .emitter::before{
+    content:"";position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+    width:148px;height:22px;border-radius:50%;
+    background:linear-gradient(90deg,var(--holo-mag),var(--holo-cyan),var(--holo-violet));
+    filter:blur(2px);opacity:.9;
+    animation:emitterspin 5.5s linear infinite;
+  }
+  @keyframes emitterspin{0%{filter:blur(2px) hue-rotate(0deg)}100%{filter:blur(2px) hue-rotate(360deg)}}
+  .base-ring{
+    position:absolute;left:50%;bottom:2px;transform:translateX(-50%);
+    width:230px;height:40px;border-radius:50%;
+    border:1px solid rgba(95,240,255,.4);
+    box-shadow:inset 0 0 18px rgba(95,240,255,.25);
+  }
+
+  /* light cone rising from emitter */
+  .cone{
+    position:absolute;left:50%;bottom:34px;transform:translateX(-50%);
+    width:0;height:0;
+    border-left:170px solid transparent;
+    border-right:170px solid transparent;
+    border-bottom:420px solid rgba(95,240,255,.06);
+    filter:blur(2px);
+    mix-blend-mode:screen;
+    animation:coneflux 6s ease-in-out infinite;
+  }
+  @keyframes coneflux{0%,100%{opacity:.5}50%{opacity:.85}}
+  .cone.b{
+    border-bottom-color:rgba(154,123,255,.05);
+    animation-duration:7.4s;animation-delay:.6s;
+    transform:translateX(-50%) scaleX(1.18);
+  }
+
+  /* the volumetric scene that materializes */
+  .scene{
+    position:absolute;left:50%;bottom:46px;transform:translateX(-50%);
+    width:min(560px,86%);height:392px;border-radius:14px;
+    overflow:hidden;
+    transform-style:preserve-3d;
+    animation:projectIn 2.6s cubic-bezier(.2,.8,.2,1) .25s both;
+  }
+  @keyframes projectIn{
+    0%{opacity:0;transform:translateX(-50%) translateY(40px) scaleY(.04) skewX(-8deg);filter:blur(10px)}
+    35%{opacity:.5;transform:translateX(-50%) translateY(8px) scaleY(1.06) skewX(2deg);filter:blur(4px)}
+    60%{opacity:.85;transform:translateX(-50%) translateY(0) scaleY(.98) skewX(-1deg)}
+    100%{opacity:1;transform:translateX(-50%) translateY(0) scaleY(1) skewX(0)}
+  }
+  .scene-inner{
+    position:absolute;inset:0;
+    animation:holoflicker 7s steps(60) infinite, holohover 9s ease-in-out infinite;
+  }
+  /* gentle volumetric flicker + chromatic shimmer */
+  @keyframes holoflicker{
+    0%,100%{opacity:.92}
+    3%{opacity:.7}6%{opacity:.95}
+    41%{opacity:.86}43%{opacity:.99}
+    72%{opacity:.78}74%{opacity:.96}
+  }
+  @keyframes holohover{
+    0%,100%{transform:translateY(0) rotateX(0.5deg)}
+    50%{transform:translateY(-7px) rotateX(-0.5deg)}
+  }
+
+  /* SCENE artwork — a remembered debugging night, hand-built in CSS/SVG */
+  .art{position:absolute;inset:0}
+  .art svg{position:absolute;inset:0;width:100%;height:100%}
+  /* tint the whole scene holographic-cyan, additive */
+  .holo-tint{
+    position:absolute;inset:0;mix-blend-mode:color;
+    background:linear-gradient(180deg,rgba(95,240,255,.5),rgba(154,123,255,.45) 55%,rgba(255,95,214,.4));
+    pointer-events:none;
+  }
+  .holo-glow{
+    position:absolute;inset:0;mix-blend-mode:screen;pointer-events:none;
+    background:radial-gradient(120% 80% at 50% 30%,rgba(95,240,255,.16),transparent 60%);
+  }
+  /* scanlines */
+  .scanlines{
+    position:absolute;inset:0;pointer-events:none;mix-blend-mode:overlay;
+    background:repeating-linear-gradient(0deg,
+      rgba(0,0,0,.0) 0px,rgba(0,0,0,.0) 2px,
+      rgba(0,0,0,.28) 3px,rgba(0,0,0,.0) 4px);
+    opacity:.55;
+    animation:scanroll 6s linear infinite;
+  }
+  @keyframes scanroll{0%{background-position-y:0}100%{background-position-y:120px}}
+  /* a single bright sweep line passing up the projection */
+  .sweep{
+    position:absolute;left:0;right:0;height:60px;pointer-events:none;mix-blend-mode:screen;
+    background:linear-gradient(180deg,transparent,rgba(95,240,255,.5),transparent);
+    animation:sweepup 5.5s ease-in-out infinite;
+  }
+  @keyframes sweepup{0%{top:100%}55%{top:-60px}100%{top:-60px}}
+  /* chromatic aberration ghosts */
+  .chroma{position:absolute;inset:0;pointer-events:none}
+  .chroma.r{mix-blend-mode:screen;transform:translateX(2px);filter:drop-shadow(2px 0 0 rgba(255,60,120,.6))}
+  .chroma.b{mix-blend-mode:screen;transform:translateX(-2px);filter:drop-shadow(-2px 0 0 rgba(60,140,255,.6))}
+
+  /* caption that the projection carries */
+  .holo-caption{
+    position:absolute;left:0;right:0;bottom:0;padding:16px 18px 14px;z-index:5;
+    background:linear-gradient(0deg,rgba(2,8,18,.92),rgba(2,8,18,.0));
+    text-align:left;
+  }
+  .holo-caption .when{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--holo-cyan);
+    text-shadow:0 0 10px rgba(95,240,255,.6)}
+  .holo-caption .quote{font-size:15px;color:#eafcff;margin:5px 0 2px;font-weight:500;
+    text-shadow:0 0 14px rgba(95,240,255,.3)}
+  .holo-caption .src{font-size:12px;color:var(--ink-dim);font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+
+  /* floating data motes around the projection */
+  .mote{position:absolute;border-radius:50%;background:var(--holo-cyan);
+    box-shadow:0 0 8px var(--holo-cyan);opacity:.0;
+    animation:rise 7s ease-in infinite}
+  @keyframes rise{
+    0%{opacity:0;transform:translateY(0) scale(.6)}
+    12%{opacity:.9}
+    100%{opacity:0;transform:translateY(-300px) scale(1.1)}
+  }
+
+  /* the "another moment arrives" cycler label */
+  .cycle-tag{
+    position:absolute;top:4px;right:0;z-index:6;display:flex;align-items:center;gap:8px;
+    font-size:11.5px;color:var(--ink-dim);letter-spacing:.04em;
+    background:var(--panel);border:1px solid var(--hairline);border-radius:999px;padding:6px 12px;
+    backdrop-filter:blur(6px);
+  }
+  .cycle-tag .rot{width:9px;height:9px;border-radius:50%;
+    background:conic-gradient(var(--holo-cyan),var(--holo-mag),var(--holo-violet),var(--holo-cyan));
+    animation:emitterspin 3s linear infinite}
+
+  /* ---------- explainer band ---------- */
+  .band{position:relative;z-index:6;margin-top:8px;border-top:1px solid var(--hairline);padding:46px 0 8px}
+  .band h2{font-size:13px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-dim);margin:0 0 22px}
+  .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
+  .card{
+    background:var(--panel);border:1px solid var(--hairline);border-radius:14px;padding:20px;
+    backdrop-filter:blur(6px);
+  }
+  .card .n{font-family:ui-monospace,Menlo,monospace;font-size:12px;color:var(--holo-cyan);opacity:.8}
+  .card h3{margin:8px 0 7px;font-size:17px;color:#eafcff}
+  .card p{margin:0;font-size:14px;color:#aecddc}
+
+  /* what it is */
+  .truth{margin-top:34px;display:grid;grid-template-columns:1.1fr .9fr;gap:26px;align-items:start}
+  .truth ul{margin:8px 0 0;padding-left:18px;color:#bcd8e6}
+  .truth li{margin:8px 0;font-size:14.5px}
+  .truth li b{color:#eafcff;font-weight:600}
+  .mcp{
+    background:#04101f;border:1px solid var(--hairline);border-radius:14px;padding:18px;
+  }
+  .mcp .lab{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-dim);margin-bottom:10px}
+  .mcp pre{
+    margin:0;font-family:ui-monospace,Menlo,monospace;font-size:13px;line-height:1.7;color:#cfeaf4;
+    white-space:pre-wrap;word-break:break-word;
+  }
+  .mcp pre .c{color:#5ff0ff}
+  .mcp pre .g{color:#7fa6b8}
+  .surfaces{display:flex;flex-wrap:wrap;gap:7px;margin-top:14px}
+  .surfaces span{font-size:11.5px;color:#cfeaf4;border:1px solid var(--hairline);border-radius:999px;
+    padding:5px 11px;background:rgba(95,240,255,.05)}
+
+  /* ---------- CTA ---------- */
+  .cta{position:relative;z-index:6;margin:42px 0 12px;text-align:center;
+    background:linear-gradient(180deg,rgba(95,240,255,.06),transparent);
+    border:1px solid var(--hairline);border-radius:18px;padding:40px 22px}
+  .cta h2{font-size:clamp(22px,3.4vw,32px);margin:0 0 8px;color:#eafcff}
+  .cta p{color:#aecddc;margin:0 auto 22px;max-width:54ch}
+  .btns{display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
+  .btn{
+    text-decoration:none;border-radius:11px;padding:13px 20px;font-weight:600;font-size:15px;
+    border:1px solid var(--hairline);color:#eafcff;background:rgba(95,240,255,.05);
+  }
+  .btn.primary{
+    background:linear-gradient(120deg,var(--holo-cyan),var(--holo-violet));color:#03121a;border:none;
+    box-shadow:0 0 30px rgba(95,240,255,.35);
+  }
+  .btn:hover{border-color:rgba(95,240,255,.6)}
+
+  footer{position:relative;z-index:6;border-top:1px solid var(--hairline);margin-top:36px;
+    padding:24px 0 50px;display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap;
+    color:var(--ink-dim);font-size:13px}
+  footer a{color:#bcd8e6;text-decoration:none;margin-right:16px}
+  footer a:hover{color:#eafcff}
+
+  @media (max-width:780px){
+    .projector{height:430px}
+    .scene{height:340px}
+    .grid3{grid-template-columns:1fr}
+    .truth{grid-template-columns:1fr}
+    .cone{border-bottom-width:360px}
+  }
+
+  /* ---------- reduced motion: a stable, projected scene, no flicker ---------- */
+  @media (prefers-reduced-motion: reduce){
+    *{animation:none !important}
+    .scene{opacity:1;transform:translateX(-50%)}
+    .scene-inner{opacity:1;transform:none}
+    .scanlines{opacity:.32}
+    .sweep{display:none}
+    .emitter::before{filter:blur(2px)}
+    .mote{display:none}
+    .cone{opacity:.55}
+    .brand .glyph,.btn.primary,.emitter{box-shadow:none}
+  }
+</style>
+</head>
+<body>
+<a class="skip" href="#what">Skip to what Memex is</a>
+
+<div class="wrap">
+  <header class="top">
+    <div class="brand">
+      <span class="glyph" aria-hidden="true"></span>
+      <span>MEMEX<small>think outside the bot</small></span>
+    </div>
+    <nav aria-label="Primary">
+      <a href="#what">What it is</a>
+      <a href="https://github.com/Two-Weeks-Team/memex" rel="noopener">Source</a>
+      <a class="primary" href="https://two-weeks-team.github.io/memex/" rel="noopener">Live landing</a>
+    </nav>
+  </header>
+
+  <section class="stage" aria-label="A memory projects itself">
+    <div class="cycle-tag" aria-hidden="true"><span class="rot"></span><span id="cycleLabel">projecting…</span></div>
+
+    <div class="lede">
+      <span class="kick"><span class="dot" aria-hidden="true"></span> involuntary recall</span>
+      <h1>You don't go looking.<br><span class="grad">The moment projects the memory.</span></h1>
+      <p>You're back in a problem you've solved before — and a past session rises on its
+        own, like a hologram igniting from the table. Not searched for. Surfaced <em>to</em> you.</p>
+
+      <div class="ctx" role="note" aria-label="Current situation">
+        <span class="now"><span class="pulse" aria-hidden="true"></span> Right now you're: <b id="ctxNow">debugging an auth-retry loop</b></span>
+        <span>— so this rose up:</span>
+      </div>
+    </div>
+
+    <!-- THE PROJECTOR -->
+    <div class="projector" aria-label="Holographic projection of a remembered coding moment">
+      <div class="cone" aria-hidden="true"></div>
+      <div class="cone b" aria-hidden="true"></div>
+
+      <!-- the materialized SCENE -->
+      <figure class="scene" id="scene">
+        <div class="scene-inner">
+          <div class="art" id="artHost" aria-hidden="true"><!-- SVG scene injected --></div>
+          <div class="holo-tint" aria-hidden="true"></div>
+          <div class="holo-glow" aria-hidden="true"></div>
+          <div class="scanlines" aria-hidden="true"></div>
+          <div class="sweep" aria-hidden="true"></div>
+        </div>
+        <figcaption class="holo-caption">
+          <div class="when" id="capWhen">37 days ago · 02:14</div>
+          <div class="quote" id="capQuote">"Backoff fixed it — the retry was racing the token refresh."</div>
+          <div class="src" id="capSrc">~/.claude/projects/api-gateway · session 8b3f</div>
+        </figcaption>
+      </figure>
+
+      <div class="base-ring" aria-hidden="true"></div>
+      <div class="emitter" aria-hidden="true"></div>
+    </div>
+  </section>
+
+  <!-- HOW the surfacing works -->
+  <section class="band" aria-label="How recall happens">
+    <h2>Why it rises on its own</h2>
+    <div class="grid3">
+      <div class="card">
+        <div class="n">01</div>
+        <h3>The situation, not your search</h3>
+        <p>Memex reads what you're working on now and matches it by <b>similarity</b> against your
+          whole session history — no keyword, no query field.</p>
+      </div>
+      <div class="card">
+        <div class="n">02</div>
+        <h3>A scene, not a snippet</h3>
+        <p>What surfaces is a whole moment you can step back into: the file, the dead end, the
+          line that finally worked — replayable, not just quoted.</p>
+      </div>
+      <div class="card">
+        <div class="n">03</div>
+        <h3>It comes to you</h3>
+        <p>Proactive Recall fires on its own cadence. You're the recipient. The forgotten fix
+          returns the way déjà vu does — unbidden.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- WHAT IT IS (honest facts) -->
+  <section class="band" id="what" aria-label="What Memex is">
+    <h2>What Memex actually is</h2>
+    <div class="truth">
+      <div>
+        <ul>
+          <li>A <b>non-chatbot, LLM-free-at-runtime</b> tool over your Claude Code / Codex
+            session history (<code>~/.claude/projects/**/*.jsonl</code> + legacy transcripts).</li>
+          <li>It turns that history into a <b>navigable spatial / associative memory</b>,
+            backed by <b>Qdrant</b> — you move by <em>similarity</em>, not keywords.</li>
+          <li>Surfaces: Time Machine replay, <b>Lens</b> (named-vector weighted search),
+            <b>Topology</b> (MST graph), <b>Mix / Discovery</b>, proactive <b>Recall</b>,
+            Dashboard, and a Companion / Wrapped / Loop Breaker layer.</li>
+          <li>It exists because Claude Code silently migrates and deletes old sessions —
+            Memex keeps a corpus <b>you own</b>.</li>
+        </ul>
+        <div class="surfaces" aria-label="Surfaces">
+          <span>Time Machine</span><span>Lens</span><span>Topology</span>
+          <span>Mix / Discovery</span><span>Recall</span><span>Dashboard</span><span>Companion</span>
+        </div>
+      </div>
+      <div class="mcp">
+        <div class="lab">Agent integration · 11 MCP tools (stdio + HTTP)</div>
+        <pre><span class="g"># Claude Code / Codex / Cursor</span>
+claude mcp add memex \
+  -- <span class="c">memex-mcp</span> --transport stdio
+
+<span class="g"># or run the server / Docker variant</span>
+<span class="g"># (Qdrant + web + MCP in one image)</span></pre>
+        <p style="margin:14px 0 0;font-size:13px;color:#9fc2d2">
+          Works in Claude Code, Codex and Cursor. A server / Docker variant bundles
+          Qdrant, the web UI and the MCP server together.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- CTA -->
+  <section class="cta" aria-label="Get started">
+    <h2>Let the next moment bring it back.</h2>
+    <p>Open the source, run it over your own sessions, and watch the relevant past
+      project itself the moment you need it.</p>
+    <div class="btns">
+      <a class="btn primary" href="https://github.com/Two-Weeks-Team/memex" rel="noopener">Get the source</a>
+      <a class="btn" href="https://two-weeks-team.github.io/memex/" rel="noopener">See the live landing</a>
+    </div>
+  </section>
+
+  <footer>
+    <div>
+      <a href="https://github.com/Two-Weeks-Team/memex" rel="noopener">Source code</a>
+      <a href="https://two-weeks-team.github.io/memex/" rel="noopener">Live landing</a>
+    </div>
+    <div>Open-source · Built for Qdrant Vector Space Day 2026 — "Think Outside the Bot."</div>
+  </footer>
+</div>
+
+<script>
+(function(){
+  "use strict";
+  var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  // ---- Build the SVG "remembered coding moment" scene. ----
+  // Hand-authored vector tableau: a developer at a desk at night, a screen with a
+  // failing stack trace, a graph of retries — rendered as a wireframe hologram.
+  function sceneSVG(variant){
+    // variant: {sky, screenLines, graph}
+    var lines = variant.code.map(function(c,i){
+      var y = 78 + i*15;
+      var w = c.w;
+      return '<rect x="118" y="'+y+'" width="'+w+'" height="6" rx="3" fill="'+(c.hot?'#ff5fd6':'#5ff0ff')+'" opacity="'+(c.hot?'.95':'.6')+'"/>';
+    }).join('');
+
+    // retry / backoff graph bars rising
+    var bars = '';
+    var bx = [0,1,2,3,4,5];
+    bx.forEach(function(k){
+      var h = variant.bars[k];
+      bars += '<rect x="'+(322+k*22)+'" y="'+(250 - h)+'" width="13" height="'+h+'" rx="2" fill="#5ff0ff" opacity="'+(k===variant.peak?'.95':'.45')+'"/>';
+    });
+
+    return ''
+    + '<svg viewBox="0 0 560 392" preserveAspectRatio="xMidYMid slice" role="img">'
+    +   '<defs>'
+    +     '<linearGradient id="grA" x1="0" y1="0" x2="0" y2="1">'
+    +       '<stop offset="0" stop-color="#0a1c33"/><stop offset="1" stop-color="#04101f"/>'
+    +     '</linearGradient>'
+    +     '<radialGradient id="moon" cx="50%" cy="50%" r="50%">'
+    +       '<stop offset="0" stop-color="#bfeeff" stop-opacity=".9"/>'
+    +       '<stop offset="1" stop-color="#5ff0ff" stop-opacity="0"/>'
+    +     '</radialGradient>'
+    +   '</defs>'
+    +   '<rect width="560" height="392" fill="url(#grA)"/>'
+    // window with night sky behind the desk
+    +   '<rect x="372" y="26" width="150" height="120" rx="6" fill="#06182c" stroke="#5ff0ff" stroke-opacity=".4"/>'
+    +   '<line x1="447" y1="26" x2="447" y2="146" stroke="#5ff0ff" stroke-opacity=".25"/>'
+    +   '<line x1="372" y1="86" x2="522" y2="86" stroke="#5ff0ff" stroke-opacity=".25"/>'
+    +   '<circle cx="498" cy="52" r="22" fill="url(#moon)"/>'
+    +   '<circle cx="498" cy="52" r="10" fill="#dffaff" opacity=".8"/>'
+    +   variant.stars
+    // desk
+    +   '<rect x="60" y="300" width="440" height="10" rx="3" fill="#5ff0ff" opacity=".5"/>'
+    +   '<line x1="96" y1="310" x2="96" y2="372" stroke="#5ff0ff" stroke-opacity=".4" stroke-width="3"/>'
+    +   '<line x1="470" y1="310" x2="470" y2="372" stroke="#5ff0ff" stroke-opacity=".4" stroke-width="3"/>'
+    // monitor with the failing trace
+    +   '<rect x="100" y="58" width="200" height="150" rx="8" fill="#04121f" stroke="#5ff0ff" stroke-opacity=".6"/>'
+    +   '<rect x="100" y="58" width="200" height="18" rx="8" fill="#5ff0ff" opacity=".18"/>'
+    +   lines
+    +   '<line x1="180" y1="208" x2="180" y2="228" stroke="#5ff0ff" stroke-opacity=".6" stroke-width="6"/>'
+    +   '<rect x="150" y="228" width="60" height="6" rx="3" fill="#5ff0ff" opacity=".5"/>'
+    // retry graph panel
+    +   '<rect x="312" y="170" width="160" height="86" rx="6" fill="#04121f" stroke="#5ff0ff" stroke-opacity=".4"/>'
+    +   bars
+    +   '<line x1="320" y1="250" x2="464" y2="250" stroke="#5ff0ff" stroke-opacity=".5"/>'
+    // the developer — seated silhouette, head tilted toward the screen
+    +   '<circle cx="60" cy="232" r="20" fill="none" stroke="#5ff0ff" stroke-width="2.4" stroke-opacity=".85"/>'
+    +   '<path d="M30 300 Q34 256 60 256 Q86 256 90 300 Z" fill="none" stroke="#5ff0ff" stroke-width="2.4" stroke-opacity=".75"/>'
+    +   '<line x1="78" y1="270" x2="104" y2="246" stroke="#5ff0ff" stroke-width="2.4" stroke-opacity=".7"/>'
+    // coffee mug, steam
+    +   '<rect x="250" y="284" width="22" height="16" rx="3" fill="none" stroke="#ffd66b" stroke-opacity=".7"/>'
+    +   '<path d="M256 280 q4 -6 0 -12" stroke="#ffd66b" stroke-opacity=".5" fill="none"/>'
+    +   '<path d="M264 280 q4 -6 0 -12" stroke="#ffd66b" stroke-opacity=".4" fill="none"/>'
+    + '</svg>';
+  }
+
+  function starsFor(seed){
+    var s='', r=seed;
+    function rnd(){ r=(r*9301+49297)%233280; return r/233280; }
+    for(var i=0;i<10;i++){
+      var x=376+rnd()*142, y=30+rnd()*112;
+      s+='<circle cx="'+x.toFixed(0)+'" cy="'+y.toFixed(0)+'" r="'+(rnd()>.7?'1.6':'1')+'" fill="#dffaff" opacity="'+(0.4+rnd()*0.5).toFixed(2)+'"/>';
+    }
+    return s;
+  }
+
+  // A small set of remembered MOMENTS the projector cycles through (unbidden).
+  var MOMENTS = [
+    {
+      ctx:"debugging an auth-retry loop",
+      when:"37 days ago · 02:14",
+      quote:"\"Backoff fixed it — the retry was racing the token refresh.\"",
+      src:"~/.claude/projects/api-gateway · session 8b3f",
+      code:[{w:120},{w:90,hot:true},{w:140},{w:70},{w:100,hot:true},{w:60}],
+      bars:[10,22,16,40,28,52], peak:5, stars:starsFor(7)
+    },
+    {
+      ctx:"untangling a flaky test in CI",
+      when:"9 days ago · 23:48",
+      quote:"\"It was the shared fixture — order-dependent state across the suite.\"",
+      src:"~/.claude/projects/checkout · session 41ce",
+      code:[{w:100},{w:150},{w:80,hot:true},{w:120},{w:60},{w:90,hot:true}],
+      bars:[30,18,44,12,38,22], peak:2, stars:starsFor(19)
+    },
+    {
+      ctx:"tuning a slow Qdrant query",
+      when:"3 months ago · 16:02",
+      quote:"\"Pre-filtering by payload before vector search cut the tail latency.\"",
+      src:"~/.claude/projects/memex-core · session c70a",
+      code:[{w:130},{w:80},{w:110,hot:true},{w:150},{w:70,hot:true},{w:90}],
+      bars:[48,40,30,22,16,9], peak:0, stars:starsFor(33)
+    },
+    {
+      ctx:"wiring an MCP tool over stdio",
+      when:"21 days ago · 11:37",
+      quote:"\"The handshake needed the transport flag — stdio, not HTTP, for the local agent.\"",
+      src:"~/.claude/projects/agent-bridge · session 5d12",
+      code:[{w:110,hot:true},{w:140},{w:90},{w:70},{w:120,hot:true},{w:80}],
+      bars:[14,26,20,36,30,46], peak:5, stars:starsFor(51)
+    }
+  ];
+
+  var host   = document.getElementById('artHost');
+  var capWhen= document.getElementById('capWhen');
+  var capQ   = document.getElementById('capQuote');
+  var capSrc = document.getElementById('capSrc');
+  var ctxNow = document.getElementById('ctxNow');
+  var cycleL = document.getElementById('cycleLabel');
+  var sceneEl= document.getElementById('scene');
+
+  var idx = 0;
+  function render(m){
+    host.innerHTML =
+      '<div class="chroma b">'+ sceneSVG(m) +'</div>' +
+      '<div class="chroma r">'+ sceneSVG(m) +'</div>' +
+      sceneSVG(m);
+    capWhen.textContent = m.when;
+    capQ.textContent    = m.quote;
+    capSrc.textContent  = m.src;
+    ctxNow.textContent  = m.ctx;
+  }
+
+  // initial projection
+  render(MOMENTS[0]);
+
+  if(reduce) {
+    cycleL.textContent = "a remembered moment";
+    return; // stable scene, no cycling, no flicker
+  }
+
+  // Autonomous cadence: the next moment arises on its own — irregular, lifelike timing.
+  function nextDelay(){ return 5200 + Math.random()*3600; } // 5.2s–8.8s
+
+  function cycle(){
+    idx = (idx + 1) % MOMENTS.length;
+    cycleL.textContent = "a memory arrives…";
+    // replay the project-in animation by re-triggering it
+    sceneEl.style.animation = 'none';
+    // force reflow
+    void sceneEl.offsetWidth;
+    render(MOMENTS[idx]);
+    sceneEl.style.animation = '';
+    setTimeout(function(){ cycleL.textContent = "surfaced unbidden"; }, 2600);
+    setTimeout(cycle, nextDelay());
+  }
+  setTimeout(function(){ cycleL.textContent = "surfaced unbidden"; }, 2900);
+  setTimeout(cycle, nextDelay());
+
+  // floating data motes around the cone (decorative)
+  var proj = document.querySelector('.projector');
+  for(var i=0;i<7;i++){
+    var d = document.createElement('span');
+    d.className = 'mote';
+    var sz = 2 + Math.random()*3;
+    d.style.width = d.style.height = sz.toFixed(1)+'px';
+    d.style.left = (30 + Math.random()*40) + '%';
+    d.style.bottom = '60px';
+    d.style.animationDelay = (Math.random()*7).toFixed(2)+'s';
+    d.style.animationDuration = (5.5 + Math.random()*3).toFixed(1)+'s';
+    proj.appendChild(d);
+  }
+})();
+</script>
+</body>
+</html>

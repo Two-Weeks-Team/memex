@@ -1,0 +1,698 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Memex — the memory steps out of the dark</title>
+<meta name="description" content="Memex turns your Claude Code / Codex session history into a navigable spatial memory. When the moment calls, a past coding scene steps out of the shadow on its own — LLM-free at runtime, backed by Qdrant." />
+<style>
+  :root {
+    /* Chiaroscuro stage — near-black void, one warm key light */
+    --void:      oklch(8% 0.012 275);
+    --void-2:    oklch(11% 0.018 278);
+    --ink:       oklch(95% 0.015 90);
+    --ink-soft:  oklch(80% 0.02 90);
+    --ink-faint: oklch(60% 0.02 90);
+    --key:       oklch(86% 0.13 78);   /* warm theatrical key light */
+    --key-deep:  oklch(70% 0.15 60);
+    --rim:       oklch(82% 0.10 250);  /* cool rim / back light */
+    --line:      oklch(40% 0.02 275 / 0.45);
+    --glass:     oklch(20% 0.02 275 / 0.5);
+    --glass-edge:oklch(70% 0.04 90 / 0.16);
+    --focus:     oklch(88% 0.16 80);
+    --maxw: 1080px;
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+
+  body {
+    margin: 0;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    color: var(--ink);
+    background: var(--void);
+    line-height: 1.6;
+    overflow-x: hidden;
+  }
+
+  a { color: var(--key); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  :focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; border-radius: 6px; }
+
+  .wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 24px; }
+
+  /* ====================================================================
+     THE STAGE — a dim theatrical void; a scene steps out of shadow
+     ==================================================================== */
+  .stage {
+    position: relative;
+    min-height: 100svh;
+    display: flex;
+    align-items: center;
+    overflow: hidden;
+    background:
+      /* faint floor wash so the void has a ground */
+      radial-gradient(140% 80% at 50% 118%, var(--void-2) 0%, transparent 60%),
+      var(--void);
+  }
+
+  /* the growing key light — a warm cone that swells on its own */
+  .keylight {
+    position: absolute;
+    left: 50%;
+    top: -12%;
+    width: 150vmax;
+    height: 150vmax;
+    transform: translateX(-50%);
+    pointer-events: none;
+    z-index: 0;
+    background:
+      radial-gradient(closest-side,
+        oklch(86% 0.13 78 / 0.30) 0%,
+        oklch(80% 0.13 70 / 0.14) 28%,
+        oklch(70% 0.12 60 / 0.05) 50%,
+        transparent 72%);
+    opacity: 0;
+    will-change: opacity, transform;
+  }
+
+  /* dust motes drifting in the beam — only visible where the light is */
+  .dust { position: absolute; inset: 0; z-index: 1; pointer-events: none; }
+
+  /* ---- the diorama: a full SCENE that emerges, full-bleed centered ---- */
+  .diorama-shell {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+  }
+  .diorama {
+    position: relative;
+    width: min(78vw, 760px);
+    aspect-ratio: 16 / 10;
+    /* the scene starts in shadow: dark, low, unlit */
+    filter: brightness(0.08) saturate(0.4);
+    opacity: 0;
+    transform: translateY(26px) scale(0.965);
+    will-change: filter, opacity, transform;
+  }
+  /* when lit, the scene STEPS OUT — brightens, lifts, steadies */
+  .diorama.lit {
+    animation: stepOut 7200ms cubic-bezier(.22,.61,.36,1) forwards;
+  }
+  @keyframes stepOut {
+    0%   { filter: brightness(0.08) saturate(0.4); opacity: 0;   transform: translateY(26px) scale(0.965); }
+    22%  { opacity: 1; }
+    46%  { filter: brightness(1) saturate(1.04);   opacity: 1;   transform: translateY(0) scale(1); }
+    78%  { filter: brightness(1) saturate(1.04);   opacity: 1;   transform: translateY(0) scale(1); }
+    100% { filter: brightness(0.08) saturate(0.4); opacity: 0;   transform: translateY(-14px) scale(0.985); }
+  }
+  .diorama svg { display: block; width: 100%; height: 100%; }
+
+  /* the caption that rises with the scene */
+  .scene-label {
+    position: absolute;
+    left: 0; right: 0;
+    bottom: -2.6rem;
+    text-align: center;
+    font-size: 0.92rem;
+    color: var(--ink-soft);
+    letter-spacing: 0.01em;
+    text-shadow: 0 1px 12px var(--void);
+  }
+  .scene-label b { color: var(--key); font-weight: 600; }
+
+  /* copy column sits in the lit foreground */
+  .stage-copy {
+    position: relative;
+    z-index: 3;
+    max-width: 560px;
+    padding: 7rem 0 6rem;
+  }
+  .eyebrow {
+    font-size: 0.78rem;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    margin: 0 0 1.4rem;
+    display: flex; align-items: center; gap: 0.6rem;
+  }
+  .eyebrow .spark {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--key);
+    box-shadow: 0 0 12px 2px oklch(86% 0.13 78 / 0.7);
+    animation: pulse 5.4s ease-in-out infinite;
+  }
+  @keyframes pulse { 0%,100%{opacity:.35;transform:scale(.8);} 50%{opacity:1;transform:scale(1.2);} }
+
+  h1 {
+    font-size: clamp(2.1rem, 5.6vw, 3.7rem);
+    line-height: 1.08;
+    font-weight: 600;
+    margin: 0 0 1.4rem;
+    letter-spacing: -0.015em;
+    text-shadow: 0 2px 30px var(--void);
+  }
+  h1 .accent {
+    background: linear-gradient(98deg, var(--key), var(--key-deep));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .lede {
+    font-size: clamp(1.04rem, 1.8vw, 1.24rem);
+    color: var(--ink-soft);
+    max-width: 46ch;
+    margin: 0 0 2.3rem;
+    text-shadow: 0 1px 20px var(--void);
+  }
+  .actions { display: flex; flex-wrap: wrap; gap: 0.85rem; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 0.5rem;
+    padding: 0.8rem 1.45rem;
+    border-radius: 13px;
+    font-size: 0.95rem; font-weight: 500;
+    border: 1px solid var(--glass-edge);
+    background: var(--glass);
+    backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+    color: var(--ink);
+    transition: transform .25s ease, border-color .25s ease, box-shadow .25s ease;
+  }
+  .btn:hover {
+    text-decoration: none;
+    transform: translateY(-2px);
+    border-color: var(--key);
+    box-shadow: 0 0 26px -6px oklch(86% 0.13 78 / 0.5);
+  }
+  .btn-primary {
+    border-color: oklch(86% 0.13 78 / 0.5);
+    background: linear-gradient(120deg, oklch(40% 0.09 70 / 0.55), oklch(34% 0.07 60 / 0.4));
+  }
+  .stage-foot {
+    margin: 2.6rem 0 0;
+    font-size: 0.85rem;
+    color: var(--ink-faint);
+  }
+
+  /* a heavy vignette frames the void like a proscenium */
+  .stage::after {
+    content: "";
+    position: absolute; inset: 0; z-index: 2;
+    pointer-events: none;
+    background: radial-gradient(120% 100% at 50% 45%, transparent 48%, oklch(6% 0.01 275 / 0.9) 100%);
+  }
+
+  /* ====================================================================
+     PAGE BODY
+     ==================================================================== */
+  section { position: relative; z-index: 2; }
+  .panel { padding: 6rem 0; }
+  .panel h2 {
+    font-size: clamp(1.5rem, 3vw, 2.1rem);
+    font-weight: 600; margin: 0 0 0.8rem; letter-spacing: -0.01em;
+  }
+  .panel .sub { color: var(--ink-soft); max-width: 60ch; margin: 0 0 2.8rem; font-size: 1.05rem; }
+
+  .surfaces { display: grid; grid-template-columns: repeat(auto-fit, minmax(248px, 1fr)); gap: 1.1rem; }
+  .card {
+    padding: 1.6rem 1.5rem; border-radius: 16px;
+    border: 1px solid var(--glass-edge);
+    background: var(--glass);
+    backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+    opacity: 0; transform: translateY(22px);
+    transition: opacity .9s ease, transform .9s ease, border-color .4s ease, box-shadow .4s ease;
+  }
+  .card.surfaced { opacity: 1; transform: translateY(0); }
+  .card:hover { border-color: var(--key); box-shadow: 0 0 30px -10px oklch(86% 0.13 78 / 0.5); }
+  .card h3 { font-size: 1.05rem; margin: 0 0 0.4rem; display: flex; align-items: center; gap: 0.55rem; }
+  .card p { margin: 0; color: var(--ink-soft); font-size: 0.94rem; }
+  .card .ic { width: 22px; height: 22px; flex: none; color: var(--key); }
+
+  .truth { display: grid; gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 16px; overflow: hidden; }
+  .truth-row { display: grid; grid-template-columns: 200px 1fr; gap: 1.4rem; padding: 1.3rem 1.5rem; background: oklch(13% 0.018 275 / 0.8); }
+  .truth-row dt { color: var(--ink); font-weight: 600; font-size: 0.96rem; }
+  .truth-row dd { margin: 0; color: var(--ink-soft); font-size: 0.96rem; }
+  .truth-row code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.86em; color: var(--ink); }
+  @media (max-width: 620px) { .truth-row { grid-template-columns: 1fr; gap: 0.3rem; } }
+
+  .agent-card {
+    border: 1px solid var(--glass-edge); background: var(--glass);
+    backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+    border-radius: 18px; padding: 2.2rem;
+  }
+  pre {
+    margin: 1.2rem 0 0; padding: 1rem 1.2rem;
+    background: oklch(9% 0.012 275); border: 1px solid var(--line); border-radius: 12px;
+    overflow-x: auto; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.88rem; color: var(--ink-soft);
+  }
+  pre .c { color: var(--ink-faint); }
+  pre .k { color: var(--key); }
+
+  footer { position: relative; z-index: 2; border-top: 1px solid var(--line); padding: 3rem 0 4rem; color: var(--ink-faint); font-size: 0.9rem; }
+  .foot-links { display: flex; flex-wrap: wrap; gap: 1.6rem; margin-bottom: 1.4rem; }
+  .foot-note { max-width: 60ch; line-height: 1.7; }
+
+  /* ====================================================================
+     prefers-reduced-motion — the stage is simply LIT. Scene 1, fully out
+     of shadow, static. No sweeps, no cycling, no dust.
+     ==================================================================== */
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    .eyebrow .spark { animation: none; opacity: 0.9; }
+    .keylight { opacity: 1 !important; }
+    .dust { display: none; }
+    .diorama { opacity: 1 !important; transform: none !important; filter: brightness(1) saturate(1.04) !important; animation: none !important; }
+    .card { opacity: 1; transform: none; transition: none; }
+    .btn { transition: none; }
+  }
+</style>
+</head>
+<body>
+
+<!-- =================== THE STAGE =================== -->
+<header class="stage" aria-label="A dark stage where a remembered coding moment steps out of the shadow">
+  <div class="keylight" id="keylight" aria-hidden="true"></div>
+  <canvas class="dust" id="dust" aria-hidden="true"></canvas>
+
+  <!-- the emerging scene (full-bleed tableau, hand-authored SVG) -->
+  <div class="diorama-shell" aria-hidden="true">
+    <figure class="diorama" id="diorama">
+      <!-- SVG scene gets injected/swapped by the sequencer -->
+    </figure>
+  </div>
+
+  <div class="wrap">
+    <div class="stage-copy">
+      <p class="eyebrow"><span class="spark" aria-hidden="true"></span> Memex · associative memory</p>
+      <h1>You never wrote it down.<br /><span class="accent">It steps out of the dark anyway.</span></h1>
+      <p class="lede">
+        Most of what you do with Claude Code and Codex goes unrecorded. Yet when the
+        moment calls for it, the right past scene rises into the light on its own —
+        not because you went searching, but because the situation summoned it.
+      </p>
+      <div class="actions">
+        <a class="btn btn-primary" href="https://github.com/Two-Weeks-Team/memex">View the repository</a>
+        <a class="btn" href="https://two-weeks-team.github.io/memex/">Open the live landing</a>
+      </div>
+      <p class="stage-foot" id="stageFoot" role="status" aria-live="polite">A scene is stepping out of the shadow…</p>
+    </div>
+  </div>
+</header>
+
+<!-- =================== WHAT SURFACES =================== -->
+<section class="panel" aria-labelledby="surfaces-h">
+  <div class="wrap">
+    <h2 id="surfaces-h">The ways a memory comes back into the light</h2>
+    <p class="sub">
+      Each surface is a different stage door for a dormant session to step through —
+      by time, by meaning, by distance, or before you even think to ask.
+    </p>
+    <div class="surfaces" id="surfaces">
+      <div class="card">
+        <h3><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>Time Machine</h3>
+        <p>Replay a session as it unfolded — step back through how a thought actually came together.</p>
+      </div>
+      <div class="card">
+        <h3><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4-4"/></svg>Lens</h3>
+        <p>Named-vector weighted search. Tilt the field toward a meaning and watch related memories lean in.</p>
+      </div>
+      <div class="card">
+        <h3><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="6" cy="6" r="2.4"/><circle cx="18" cy="8" r="2.4"/><circle cx="9" cy="18" r="2.4"/><path d="M7.6 7.6 16 9M8 16l8.4-6.2"/></svg>Topology</h3>
+        <p>A distance matrix becomes a minimum-spanning-tree graph — the shape of how your work connects.</p>
+      </div>
+      <div class="card">
+        <h3><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M5 12h6M13 12h6"/><circle cx="5" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>Mix &amp; Discovery</h3>
+        <p>Pull toward what you like, push away what you don't. Recommendations follow the gradient.</p>
+      </div>
+      <div class="card">
+        <h3><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 3a6 6 0 0 0-6 6c0 3 2 4 2 7h8c0-3 2-4 2-7a6 6 0 0 0-6-6Z"/><path d="M10 19h4"/></svg>Proactive Recall</h3>
+        <p>When your current context resembles a past one, the older scene steps out before you go looking.</p>
+      </div>
+      <div class="card">
+        <h3><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M9 9h6M9 13h6M9 17h3"/></svg>Companion · Wrapped · Loop Breaker</h3>
+        <p>An agent-memory layer that reflects patterns back, sums up where you've been, and flags loops you keep falling into.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- =================== THE HONEST GROUND =================== -->
+<section class="panel" aria-labelledby="truth-h">
+  <div class="wrap">
+    <h2 id="truth-h">What Memex actually is</h2>
+    <p class="sub">No magic claimed. Here is the plain shape of the thing.</p>
+    <dl class="truth">
+      <div class="truth-row">
+        <dt>The corpus</dt>
+        <dd>Your Claude Code / Codex session history (<code>~/.claude/projects/**/*.jsonl</code>), legacy transcripts, and <code>history.jsonl</code> — a record you own.</dd>
+      </div>
+      <div class="truth-row">
+        <dt>LLM-free at runtime</dt>
+        <dd>Recall runs on vector similarity, not a live model. No chatbot in the loop when a scene steps out.</dd>
+      </div>
+      <div class="truth-row">
+        <dt>Backed by Qdrant</dt>
+        <dd>History becomes a navigable spatial memory in a Qdrant vector store — you travel it by similarity, not keywords.</dd>
+      </div>
+      <div class="truth-row">
+        <dt>Why it exists</dt>
+        <dd>Claude Code silently migrates and deletes old sessions. Memex preserves the corpus and lets you return to it.</dd>
+      </div>
+      <div class="truth-row">
+        <dt>Built for</dt>
+        <dd>Qdrant Vector Space Day 2026 — <em>"Think Outside the Bot."</em></dd>
+      </div>
+    </dl>
+  </div>
+</section>
+
+<!-- =================== AGENT INTEGRATION =================== -->
+<section class="panel" aria-labelledby="agent-h">
+  <div class="wrap">
+    <h2 id="agent-h">It lives inside your agents</h2>
+    <p class="sub">
+      11 MCP tools over stdio + HTTP — works in Claude Code, Codex, and Cursor. A
+      server / Docker variant runs Qdrant, the web UI, and MCP together in one image.
+    </p>
+    <div class="agent-card">
+      <p style="margin:0;color:var(--ink-soft);">Add the memory layer to Claude Code:</p>
+<pre><span class="c"># register the Memex MCP server (stdio)</span>
+<span class="k">claude mcp add</span> memex -- memex-mcp
+
+<span class="c"># or run the all-in-one server / Docker variant</span>
+<span class="c"># (Qdrant + web + MCP in a single image)</span></pre>
+      <p style="margin:1.4rem 0 0;color:var(--ink-soft);font-size:0.94rem;">
+        The 11 tools let an agent recall, replay, and connect across your own history —
+        so the thread you had three weeks ago can step back into the light in the work
+        you're doing now. See the
+        <a href="https://github.com/Two-Weeks-Team/memex">repository</a>
+        for the tool list and the server variant.
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- =================== FOOTER =================== -->
+<footer>
+  <div class="wrap">
+    <div class="foot-links">
+      <a href="https://github.com/Two-Weeks-Team/memex">Repository</a>
+      <a href="https://two-weeks-team.github.io/memex/">Live landing</a>
+      <a href="https://github.com/Two-Weeks-Team/memex">Server / Docker variant</a>
+      <a href="https://github.com/Two-Weeks-Team/memex">MCP integration · 11 tools</a>
+    </div>
+    <p class="foot-note">
+      Memex is a non-chatbot tool that turns your agent session history into a spatial,
+      associative memory — inspired by Vannevar Bush's 1945 essay and its idea of
+      associative trails. Built for Qdrant Vector Space Day 2026.
+    </p>
+  </div>
+</footer>
+
+<script>
+(function () {
+  "use strict";
+
+  var reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  /* ------------------------------------------------------------------
+     The scenes — each is a vivid tableau of a remembered coding moment,
+     drawn entirely in hand-authored SVG (gradients + shapes, chiaroscuro).
+     These are full SCENES that step out of the dark, never text snippets.
+     ------------------------------------------------------------------ */
+  var W = 800, H = 500;
+
+  // shared defs reused by every scene: warm key light, cool rim, deep shadow
+  function defs(id) {
+    return ''
+      + '<defs>'
+      + '  <radialGradient id="key' + id + '" cx="50%" cy="30%" r="75%">'
+      + '    <stop offset="0%" stop-color="oklch(90% 0.12 80)" stop-opacity="0.9"/>'
+      + '    <stop offset="45%" stop-color="oklch(78% 0.13 65)" stop-opacity="0.4"/>'
+      + '    <stop offset="100%" stop-color="oklch(20% 0.03 60)" stop-opacity="0"/>'
+      + '  </radialGradient>'
+      + '  <linearGradient id="floor' + id + '" x1="0" y1="0" x2="0" y2="1">'
+      + '    <stop offset="0%" stop-color="oklch(24% 0.03 70)"/>'
+      + '    <stop offset="100%" stop-color="oklch(9% 0.012 275)"/>'
+      + '  </linearGradient>'
+      + '  <linearGradient id="rim' + id + '" x1="0" y1="0" x2="1" y2="0">'
+      + '    <stop offset="0%" stop-color="oklch(82% 0.10 250)" stop-opacity="0.0"/>'
+      + '    <stop offset="100%" stop-color="oklch(82% 0.10 250)" stop-opacity="0.55"/>'
+      + '  </linearGradient>'
+      + '  <radialGradient id="screen' + id + '" cx="50%" cy="42%" r="70%">'
+      + '    <stop offset="0%" stop-color="oklch(78% 0.11 230)" stop-opacity="0.85"/>'
+      + '    <stop offset="100%" stop-color="oklch(40% 0.08 250)" stop-opacity="0.2"/>'
+      + '  </radialGradient>'
+      + '</defs>';
+  }
+
+  // the void backdrop + floor wash + key-light pool common to all scenes
+  function stageBase(id) {
+    return ''
+      + '<rect x="0" y="0" width="' + W + '" height="' + H + '" fill="oklch(9% 0.012 275)"/>'
+      + '<rect x="0" y="320" width="' + W + '" height="180" fill="url(#floor' + id + ')"/>'
+      + '<ellipse cx="400" cy="250" rx="430" ry="320" fill="url(#key' + id + ')"/>';
+  }
+
+  // SCENE 1 — the moment a test finally turns green, late at night
+  function sceneGreen() {
+    var id = 'A';
+    return '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="A late-night desk: a monitor showing a test passing green, a half-empty mug beside it, steam rising into the light">'
+      + defs(id) + stageBase(id)
+      // desk
+      + '<rect x="120" y="338" width="560" height="20" rx="4" fill="oklch(30% 0.03 70)"/>'
+      + '<rect x="120" y="358" width="560" height="60" fill="oklch(16% 0.02 70)"/>'
+      // monitor body lit by its own glow
+      + '<rect x="250" y="150" width="300" height="190" rx="10" fill="oklch(18% 0.02 250)" stroke="oklch(55% 0.04 250)" stroke-width="2"/>'
+      + '<rect x="262" y="162" width="276" height="166" rx="6" fill="url(#screen' + id + ')"/>'
+      // the passing test, abstracted as glowing bars + a check
+      + '<rect x="282" y="186" width="150" height="9" rx="4" fill="oklch(88% 0.06 230)" opacity="0.55"/>'
+      + '<rect x="282" y="206" width="210" height="9" rx="4" fill="oklch(88% 0.06 230)" opacity="0.4"/>'
+      + '<rect x="282" y="252" width="236" height="40" rx="8" fill="oklch(70% 0.17 150)" opacity="0.32"/>'
+      + '<path d="M300 272 l12 12 l24 -26" fill="none" stroke="oklch(86% 0.18 150)" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>'
+      + '<rect x="346" y="266" width="150" height="11" rx="5" fill="oklch(86% 0.16 150)" opacity="0.75"/>'
+      // monitor stand
+      + '<rect x="388" y="340" width="24" height="14" fill="oklch(30% 0.03 250)"/>'
+      // coffee mug + rising steam in the beam
+      + '<rect x="580" y="300" width="46" height="42" rx="6" fill="oklch(40% 0.06 40)"/>'
+      + '<path d="M626 308 q22 6 0 26" fill="none" stroke="oklch(45% 0.05 40)" stroke-width="6"/>'
+      + '<path d="M598 296 q-8 -22 6 -40 q10 -14 0 -30" fill="none" stroke="oklch(86% 0.08 80)" stroke-width="3" opacity="0.35" stroke-linecap="round"/>'
+      + '<path d="M610 296 q8 -20 -4 -38 q-8 -12 2 -26" fill="none" stroke="oklch(86% 0.08 80)" stroke-width="3" opacity="0.25" stroke-linecap="round"/>'
+      // rim light edge on the desk
+      + '<rect x="120" y="338" width="560" height="6" fill="url(#rim' + id + ')"/>'
+      + '</svg>';
+  }
+
+  // SCENE 2 — the whiteboard sketch where the architecture clicked
+  function sceneBoard() {
+    var id = 'B';
+    return '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="A whiteboard caught in a spotlight: boxes and arrows of a system diagram, an idea circled in the corner">'
+      + defs(id) + stageBase(id)
+      // whiteboard panel
+      + '<rect x="190" y="120" width="420" height="250" rx="8" fill="oklch(92% 0.01 90)" opacity="0.92"/>'
+      + '<rect x="190" y="120" width="420" height="250" rx="8" fill="none" stroke="oklch(60% 0.03 250)" stroke-width="3"/>'
+      // boxes + arrows = an architecture diagram
+      + '<g stroke="oklch(30% 0.10 250)" stroke-width="3" fill="oklch(70% 0.10 250)" fill-opacity="0.18">'
+      + '  <rect x="225" y="160" width="92" height="48" rx="6"/>'
+      + '  <rect x="354" y="160" width="92" height="48" rx="6"/>'
+      + '  <rect x="483" y="160" width="92" height="48" rx="6"/>'
+      + '  <rect x="290" y="270" width="120" height="52" rx="6"/>'
+      + '</g>'
+      + '<g stroke="oklch(35% 0.10 250)" stroke-width="3" fill="none" stroke-linecap="round">'
+      + '  <path d="M317 184 h33"/>'
+      + '  <path d="M446 184 h33"/>'
+      + '  <path d="M271 208 q0 40 60 60"/>'
+      + '  <path d="M529 208 q0 40 -90 62"/>'
+      + '</g>'
+      // arrowheads
+      + '<path d="M350 184 l-9 -5 v10 z" fill="oklch(35% 0.10 250)"/>'
+      + '<path d="M479 184 l-9 -5 v10 z" fill="oklch(35% 0.10 250)"/>'
+      // the idea that clicked — circled in warm marker
+      + '<ellipse cx="350" cy="296" rx="74" ry="34" fill="none" stroke="oklch(62% 0.20 35)" stroke-width="4"/>'
+      + '<text x="350" y="302" font-family="ui-monospace, Menlo, monospace" font-size="20" fill="oklch(40% 0.18 35)" text-anchor="middle">Qdrant</text>'
+      // marker tray
+      + '<rect x="200" y="370" width="400" height="10" rx="3" fill="oklch(70% 0.02 90)"/>'
+      + '<rect x="300" y="372" width="60" height="6" rx="3" fill="oklch(55% 0.18 35)"/>'
+      + '<rect x="370" y="372" width="60" height="6" rx="3" fill="oklch(55% 0.16 250)"/>'
+      + '</svg>';
+  }
+
+  // SCENE 3 — the terminal-free "graph" of a debugging breakthrough:
+  // a tangle of threads, one suddenly tracing clear and bright (the fix)
+  function sceneThread() {
+    var id = 'C';
+    return '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="A spotlit tangle of faint threads with one bright golden thread tracing a clear path through the knot — the moment a bug was understood">'
+      + defs(id) + stageBase(id)
+      // the dim tangle (many faint paths)
+      + '<g stroke="oklch(55% 0.04 250)" stroke-width="2" fill="none" opacity="0.4" stroke-linecap="round">'
+      + '  <path d="M210 300 C 280 180, 360 360, 430 220 S 560 300, 600 200"/>'
+      + '  <path d="M230 240 C 300 320, 380 180, 460 320 S 540 200, 610 280"/>'
+      + '  <path d="M200 260 C 290 240, 350 300, 440 240 S 560 260, 600 240"/>'
+      + '  <path d="M250 320 C 320 220, 400 300, 470 200 S 540 320, 590 230"/>'
+      + '</g>'
+      // the one bright thread that traces clear — the breakthrough
+      + '<path d="M196 280 C 300 270, 360 250, 430 248 S 560 245, 612 244" fill="none" stroke="oklch(90% 0.16 85)" stroke-width="5" stroke-linecap="round" opacity="0.95"/>'
+      // glowing nodes along the clear thread
+      + '<circle cx="196" cy="280" r="9" fill="oklch(90% 0.16 85)"/>'
+      + '<circle cx="430" cy="248" r="11" fill="oklch(92% 0.15 95)"/>'
+      + '<circle cx="612" cy="244" r="9" fill="oklch(90% 0.16 85)"/>'
+      // soft halo on the key node
+      + '<circle cx="430" cy="248" r="30" fill="oklch(90% 0.16 85)" opacity="0.18"/>'
+      // a faint floor reflection of the bright node
+      + '<ellipse cx="430" cy="370" rx="60" ry="10" fill="oklch(86% 0.13 80)" opacity="0.12"/>'
+      + '</svg>';
+  }
+
+  var scenes = [
+    { svg: sceneGreen, label: 'The night that test finally turned <b>green</b>.' },
+    { svg: sceneBoard, label: 'The whiteboard where the architecture <b>clicked</b>.' },
+    { svg: sceneThread, label: 'The tangle where the bug <b>came clear</b>.' }
+  ];
+
+  var diorama  = document.getElementById('diorama');
+  var keylight = document.getElementById('keylight');
+  var footEl   = document.getElementById('stageFoot');
+  var idx = 0;
+  var timer = null;
+
+  function paint(i) {
+    var s = scenes[i];
+    diorama.innerHTML = s.svg() + '<figcaption class="scene-label">' + s.label + '</figcaption>';
+  }
+
+  /* ---------------- reduced motion: lit, static, scene 1 ---------------- */
+  if (reduceMotion) {
+    paint(0);
+    diorama.classList.add('lit'); // CSS overrides animation → fully lit static
+    footEl.textContent = 'A scene from your own history, out of the shadow.';
+  } else {
+    // ---- the autonomous cycle: light grows, scene steps out, recedes ----
+    var CYCLE = 7800; // a touch longer than the 7200ms stepOut, for a beat of dark
+
+    function runScene() {
+      paint(idx);
+
+      // the key light swells on its own, then dims as the scene recedes
+      keylight.animate(
+        [
+          { opacity: 0,    transform: 'translateX(-50%) scale(0.7)' },
+          { opacity: 1,    transform: 'translateX(-50%) scale(1)',   offset: 0.30 },
+          { opacity: 1,    transform: 'translateX(-50%) scale(1.02)',offset: 0.78 },
+          { opacity: 0,    transform: 'translateX(-50%) scale(1.06)' }
+        ],
+        { duration: 7200, easing: 'cubic-bezier(.22,.61,.36,1)', fill: 'forwards' }
+      );
+
+      // restart the step-out animation
+      diorama.classList.remove('lit');
+      // force reflow so the animation re-triggers cleanly
+      void diorama.offsetWidth;
+      diorama.classList.add('lit');
+
+      footEl.textContent = 'A scene is stepping out of the shadow…';
+
+      idx = (idx + 1) % scenes.length;
+    }
+
+    function loop() {
+      runScene();
+      timer = setTimeout(loop, CYCLE);
+    }
+
+    // only animate while the stage is on screen (kind to the laptop)
+    var running = false;
+    function startLoop() { if (!running) { running = true; loop(); } }
+    function stopLoop()  { running = false; if (timer) { clearTimeout(timer); timer = null; } }
+
+    if ('IntersectionObserver' in window) {
+      var io = new IntersectionObserver(function (ents) {
+        ents.forEach(function (e) {
+          if (e.isIntersecting) startLoop();
+          else stopLoop();
+        });
+      }, { threshold: 0.15 });
+      io.observe(document.querySelector('.stage'));
+    } else {
+      startLoop();
+    }
+
+    /* ---------------- dust motes drifting in the beam ---------------- */
+    var canvas = document.getElementById('dust');
+    var ctx = canvas.getContext('2d');
+    var DPR = Math.min(window.devicePixelRatio || 1, 2);
+    var motes = [];
+    var cw = 0, ch = 0, draf = null;
+
+    function sizeDust() {
+      cw = canvas.clientWidth; ch = canvas.clientHeight;
+      canvas.width = Math.floor(cw * DPR); canvas.height = Math.floor(ch * DPR);
+      ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+      motes = [];
+      var n = Math.max(24, Math.min(60, Math.round((cw * ch) / 26000)));
+      for (var i = 0; i < n; i++) {
+        motes.push({
+          x: Math.random() * cw,
+          y: Math.random() * ch,
+          r: 0.6 + Math.random() * 1.6,
+          vx: (Math.random() - 0.5) * 0.12,
+          vy: -0.05 - Math.random() * 0.18, // drift upward, like dust in a beam
+          a: 0.05 + Math.random() * 0.18
+        });
+      }
+    }
+
+    function drawDust() {
+      ctx.clearRect(0, 0, cw, ch);
+      var cx = cw / 2, cy = ch * 0.42;
+      for (var i = 0; i < motes.length; i++) {
+        var m = motes[i];
+        m.x += m.vx; m.y += m.vy;
+        if (m.y < -8) { m.y = ch + 8; m.x = Math.random() * cw; }
+        if (m.x < -8) m.x = cw + 8; if (m.x > cw + 8) m.x = -8;
+        // motes are only visible inside the cone of light
+        var dx = (m.x - cx) / (cw * 0.55);
+        var dy = (m.y - cy) / (ch * 0.65);
+        var inBeam = 1 - Math.min(1, dx * dx + dy * dy);
+        if (inBeam <= 0) continue;
+        ctx.fillStyle = 'oklch(90% 0.08 80 / ' + (m.a * inBeam).toFixed(3) + ')';
+        ctx.beginPath();
+        ctx.arc(m.x, m.y, m.r, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      draf = requestAnimationFrame(drawDust);
+    }
+
+    sizeDust();
+    drawDust();
+
+    var rt;
+    window.addEventListener('resize', function () {
+      clearTimeout(rt);
+      rt = setTimeout(sizeDust, 200);
+    });
+  }
+
+  /* ---- surfacing cards on scroll (latent → out of shadow) ---- */
+  var cards = document.querySelectorAll('.card');
+  if (reduceMotion || !('IntersectionObserver' in window)) {
+    cards.forEach(function (c) { c.classList.add('surfaced'); });
+  } else {
+    var cio = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e, i) {
+        if (e.isIntersecting) {
+          var el = e.target;
+          setTimeout(function () { el.classList.add('surfaced'); }, i * 90);
+          cio.unobserve(el);
+        }
+      });
+    }, { threshold: 0.18 });
+    cards.forEach(function (c) { cio.observe(c); });
+  }
+})();
+</script>
+</body>
+</html>

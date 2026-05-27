@@ -1,0 +1,853 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Memex — the pattern resolves into the memory</title>
+<meta name="description" content="Memex turns your Claude Code & Codex session history into a navigable associative memory backed by Qdrant. An organic field of living spots and stripes churns on its own — then settles, unbidden, into the scene of a remembered coding moment, holds, and dissolves back into the churn for the next." />
+<style>
+  :root{
+    --ink:#f0f4ef;
+    --dim:#a6c3a4;
+    --faint:#5f7d62;
+    --rd-cell:#9af0c0;      /* living-cell mint of the reaction field */
+    --rd-deep:#0a160f;      /* the dark "substrate" between cells */
+    --rd-warm:#ffd49a;      /* lamp / laptop warmth that blooms in the scene */
+    --rd-amber:#ffb86b;
+    --accent:#b8f0cf;
+    --bg0:#030806;
+    --bg1:#06110b;
+    --panel: rgba(8,18,13,.58);
+    --hair: rgba(154,240,192,.16);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    background:
+      radial-gradient(1300px 820px at 72% 20%, #0c1f15 0%, transparent 60%),
+      radial-gradient(1500px 980px at 12% 94%, #07140d 0%, transparent 55%),
+      linear-gradient(180deg, var(--bg1), var(--bg0) 72%);
+    color:var(--ink);
+    font:16px/1.6 ui-sans-serif,-apple-system,"Segoe UI",Roboto,Inter,system-ui,sans-serif;
+    overflow-x:hidden;
+    -webkit-font-smoothing:antialiased;
+  }
+  a{color:var(--accent);text-decoration:none}
+  a:hover{text-decoration:underline}
+  code,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+
+  /* ---------- the reaction-diffusion stage ---------- */
+  .stage{position:relative;width:100%;height:100svh;min-height:640px;overflow:hidden}
+  #rd{position:absolute;inset:0;width:100%;height:100%;display:block;
+    image-rendering:auto;filter:saturate(1.05) contrast(1.04)}
+
+  /* a still, settled fallback image painted under the canvas — shown when
+     reduced-motion is on (canvas hidden). It is the resolved scene, static. */
+  .still{position:absolute;inset:0;display:none}
+
+  /* vignette so type stays legible over the churn */
+  .stage::after{
+    content:"";position:absolute;inset:0;pointer-events:none;
+    background:
+      radial-gradient(122% 84% at 50% 42%, transparent 34%, rgba(3,8,6,.62) 100%),
+      linear-gradient(180deg, rgba(3,8,6,.48) 0%, transparent 24%, transparent 60%, rgba(3,8,6,.9) 100%);
+  }
+
+  /* ---------- overlaid copy ---------- */
+  .hud{position:absolute;inset:0;display:flex;flex-direction:column;pointer-events:none;z-index:3}
+  .hud > *{pointer-events:auto}
+
+  .topbar{display:flex;align-items:center;justify-content:space-between;gap:16px;
+    padding:22px clamp(18px,5vw,56px)}
+  .brand{display:flex;align-items:center;gap:11px;font-weight:700;letter-spacing:.16em;
+    text-transform:uppercase;font-size:13px;color:var(--ink)}
+  .brand .dot{width:9px;height:9px;border-radius:50%;background:var(--rd-cell);
+    box-shadow:0 0 10px 2px rgba(154,240,192,.7)}
+  .topbar nav{display:flex;gap:clamp(10px,2.4vw,26px);font-size:13px;color:var(--dim);
+    letter-spacing:.02em}
+  .topbar nav a{color:var(--dim)}
+  .topbar nav a:hover{color:var(--ink)}
+
+  .hero{margin-top:auto;padding:0 clamp(18px,5vw,56px) clamp(26px,6vh,64px);max-width:790px}
+
+  /* the "current situation" that calls the memory up */
+  .moment{display:inline-flex;align-items:center;gap:10px;margin-bottom:20px;
+    padding:8px 14px;border:1px solid var(--hair);border-radius:999px;
+    background:var(--panel);backdrop-filter:blur(6px);
+    font-size:12.5px;letter-spacing:.02em;color:var(--dim)}
+  .moment .pulse{width:7px;height:7px;border-radius:50%;background:var(--rd-cell);
+    box-shadow:0 0 0 0 rgba(154,240,192,.6);animation:pulse 2.6s ease-out infinite}
+  .moment b{color:var(--ink);font-weight:600}
+  @keyframes pulse{
+    0%{box-shadow:0 0 0 0 rgba(154,240,192,.55)}
+    70%{box-shadow:0 0 0 9px rgba(154,240,192,0)}
+    100%{box-shadow:0 0 0 0 rgba(154,240,192,0)}
+  }
+
+  h1{margin:0;font-weight:680;font-size:clamp(33px,6vw,62px);line-height:1.04;
+    letter-spacing:-.018em;color:#fff;text-shadow:0 2px 40px rgba(3,12,8,.72)}
+  h1 .glow{color:var(--rd-cell);text-shadow:0 0 26px rgba(154,240,192,.42)}
+  .lede{margin:18px 0 0;font-size:clamp(15px,2.1vw,18.5px);color:var(--dim);max-width:630px}
+  .lede b{color:var(--ink);font-weight:600}
+
+  .cta{display:flex;flex-wrap:wrap;gap:13px;margin-top:28px}
+  .btn{display:inline-flex;align-items:center;gap:9px;padding:12px 20px;border-radius:11px;
+    font-size:14.5px;font-weight:600;letter-spacing:.01em;border:1px solid transparent;
+    transition:transform .15s ease, box-shadow .25s ease, background .25s ease}
+  .btn:hover{text-decoration:none;transform:translateY(-1px)}
+  .btn-primary{background:linear-gradient(180deg,#dafbe6,#9af0c0);color:#05281a;
+    box-shadow:0 8px 30px rgba(154,240,192,.26)}
+  .btn-primary:hover{box-shadow:0 12px 36px rgba(154,240,192,.4)}
+  .btn-ghost{border-color:var(--hair);color:var(--ink);background:var(--panel);
+    backdrop-filter:blur(6px)}
+  .btn-ghost:hover{border-color:rgba(154,240,192,.42)}
+
+  .legend{margin-top:22px;font-size:12.5px;color:var(--faint);letter-spacing:.01em;
+    display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+  .legend .scene-label{color:var(--rd-cell);font-weight:600;letter-spacing:.03em}
+
+  /* small replay control */
+  .replay{position:absolute;right:clamp(16px,4vw,40px);bottom:clamp(20px,5vh,40px);
+    display:inline-flex;align-items:center;gap:8px;padding:9px 14px;border-radius:999px;
+    border:1px solid var(--hair);background:var(--panel);backdrop-filter:blur(6px);
+    color:var(--dim);font-size:12.5px;cursor:pointer;z-index:4}
+  .replay:hover{color:var(--ink);border-color:rgba(154,240,192,.4)}
+  .replay svg{width:13px;height:13px;fill:currentColor}
+
+  /* ---------- the ground-truth section below the fold ---------- */
+  .below{position:relative;z-index:2;max-width:1080px;margin:0 auto;
+    padding:clamp(56px,10vh,110px) clamp(18px,5vw,40px) 40px}
+  .kicker{font-size:12px;letter-spacing:.22em;text-transform:uppercase;color:var(--faint);
+    margin:0 0 14px}
+  .below h2{font-size:clamp(24px,4vw,38px);line-height:1.12;margin:0;color:#fff;
+    letter-spacing:-.01em;font-weight:660;max-width:790px}
+  .below p.sub{color:var(--dim);max-width:710px;margin:16px 0 0;font-size:16px}
+
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(238px,1fr));gap:16px;
+    margin-top:42px}
+  .card{border:1px solid var(--hair);border-radius:16px;padding:22px 22px 24px;
+    background:linear-gradient(180deg, rgba(12,28,19,.6), rgba(6,16,11,.45));
+    transition:border-color .2s ease, transform .2s ease}
+  .card:hover{border-color:rgba(154,240,192,.4);transform:translateY(-2px)}
+  .card h3{margin:0 0 8px;font-size:16px;color:#fff;letter-spacing:.01em;
+    display:flex;align-items:center;gap:9px}
+  .card h3 .gp{width:8px;height:8px;border-radius:50%;background:var(--rd-cell);
+    box-shadow:0 0 8px 1px rgba(154,240,192,.7);flex:0 0 auto}
+  .card p{margin:0;font-size:14px;color:var(--dim);line-height:1.55}
+
+  .facts{margin-top:44px;border:1px solid var(--hair);border-radius:16px;overflow:hidden;
+    background:rgba(6,16,11,.5)}
+  .facts .row{display:grid;grid-template-columns:160px 1fr;gap:18px;padding:16px 22px;
+    border-top:1px solid rgba(154,240,192,.08);font-size:14.5px}
+  .facts .row:first-child{border-top:0}
+  .facts .row .lab{color:var(--faint);letter-spacing:.04em;font-size:12.5px;
+    text-transform:uppercase;padding-top:2px}
+  .facts .row .val{color:var(--ink)}
+  .facts .row .val .mono{color:var(--rd-cell);font-size:13.5px}
+
+  .addline{margin-top:34px;border:1px solid var(--hair);border-radius:14px;
+    background:#04100a;padding:16px 18px;font-size:13.5px;color:var(--dim);overflow-x:auto}
+  .addline .mono{color:var(--ink)}
+  .addline .c{color:var(--rd-cell)}
+
+  footer{position:relative;z-index:2;border-top:1px solid var(--hair);margin-top:60px}
+  .foot{max-width:1080px;margin:0 auto;padding:28px clamp(18px,5vw,40px) 60px;
+    display:flex;flex-wrap:wrap;gap:18px;justify-content:space-between;align-items:center;
+    color:var(--faint);font-size:13px}
+  .foot a{color:var(--dim)}
+  .foot .links{display:flex;flex-wrap:wrap;gap:18px}
+
+  @media (prefers-reduced-motion: reduce){
+    .moment .pulse{animation:none}
+    #rd{display:none}
+    .still{display:block}
+  }
+
+  @media (max-width:640px){
+    .topbar nav{display:none}
+    .facts .row{grid-template-columns:1fr;gap:4px}
+    .replay{display:none}
+  }
+</style>
+</head>
+<body>
+
+<section class="stage" aria-label="A living field of organic spots and stripes that churns on its own, then settles into the scene of a remembered late-night coding moment, holds, and dissolves back into churn for the next.">
+  <canvas id="rd" aria-hidden="true"></canvas>
+
+  <!-- static fallback for prefers-reduced-motion: the resolved scene, painted
+       once with the same reaction-diffusion palette but no simulation. -->
+  <svg class="still" viewBox="0 0 162 100" preserveAspectRatio="xMidYMid slice"
+       aria-hidden="true">
+    <defs>
+      <radialGradient id="sBg" cx="62%" cy="40%" r="80%">
+        <stop offset="0%" stop-color="#10271a"/>
+        <stop offset="100%" stop-color="#040c08"/>
+      </radialGradient>
+      <radialGradient id="sWarm" cx="50%" cy="50%" r="50%">
+        <stop offset="0%" stop-color="rgba(255,212,154,.85)"/>
+        <stop offset="60%" stop-color="rgba(255,184,107,.28)"/>
+        <stop offset="100%" stop-color="rgba(255,184,107,0)"/>
+      </radialGradient>
+    </defs>
+    <rect width="162" height="100" fill="url(#sBg)"/>
+    <!-- window of pre-dawn light behind the desk -->
+    <rect x="14" y="14" width="34" height="40" rx="2" fill="rgba(120,200,170,.16)"/>
+    <line x1="31" y1="14" x2="31" y2="54" stroke="rgba(154,240,192,.22)" stroke-width="1"/>
+    <line x1="14" y1="34" x2="48" y2="34" stroke="rgba(154,240,192,.22)" stroke-width="1"/>
+    <!-- desk slab -->
+    <rect x="8" y="70" width="148" height="6" fill="rgba(154,240,192,.5)"/>
+    <!-- laptop, warm screen -->
+    <circle cx="108" cy="50" r="22" fill="url(#sWarm)"/>
+    <rect x="96" y="40" width="30" height="20" rx="1.5" fill="rgba(255,212,154,.7)"/>
+    <rect x="92" y="60" width="38" height="4" fill="rgba(154,240,192,.55)"/>
+    <!-- figure hunched toward the laptop -->
+    <circle cx="62" cy="36" r="7" fill="rgba(154,240,192,.7)"/>
+    <path d="M52 70 Q58 44 66 42 Q82 40 86 58 L84 70 Z" fill="rgba(154,240,192,.6)"/>
+    <!-- coffee mug -->
+    <rect x="74" y="62" width="7" height="8" rx="1" fill="rgba(255,184,107,.6)"/>
+  </svg>
+
+  <div class="hud">
+    <header class="topbar">
+      <div class="brand"><span class="dot" aria-hidden="true"></span> Memex</div>
+      <nav aria-label="Primary">
+        <a href="https://github.com/Two-Weeks-Team/memex">Repo</a>
+        <a href="https://two-weeks-team.github.io/memex/">Live</a>
+        <a href="#how">How it works</a>
+        <a href="#agent">For agents</a>
+      </nav>
+    </header>
+
+    <div class="hero">
+      <span class="moment">
+        <span class="pulse" aria-hidden="true"></span>
+        Right now you're <b>untangling a merge that refuses to resolve</b> &mdash; and the field begins to settle&hellip;
+      </span>
+
+      <h1>You never wrote it down.<br>The churn <span class="glow">settles into&nbsp;it.</span></h1>
+
+      <p class="lede">
+        A living field of spots and stripes drifts and divides on its own &mdash; then,
+        unprompted, the cells stop wandering and lock into the
+        <b>scene of the pre-dawn morning that stubborn branch finally merged</b>:
+        the desk, the lamp-lit laptop, you hunched into the glow. It holds for a breath,
+        then dissolves back into the churn as the next memory begins to form.
+      </p>
+
+      <div class="cta">
+        <a class="btn btn-primary" href="https://github.com/Two-Weeks-Team/memex">Get Memex on GitHub</a>
+        <a class="btn btn-ghost" href="https://two-weeks-team.github.io/memex/">See it live</a>
+      </div>
+
+      <p class="legend">
+        <span class="scene-label" id="sceneName">churning&hellip;</span>
+        <span aria-hidden="true">&middot;</span>
+        an association crystallizing out of the field, not a search
+      </p>
+    </div>
+
+    <button class="replay" id="replay" type="button" aria-label="Let the field settle into the scene again">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5V1L7 6l5 5V7a5 5 0 1 1-5 5H5a7 7 0 1 0 7-7z"/></svg>
+      Let it settle again
+    </button>
+  </div>
+</section>
+
+<main class="below">
+  <section id="how">
+    <p class="kicker">What just happened</p>
+    <h2>People don't document every memory &mdash; yet when the moment arrives,
+      the relevant thought surfaces on its own.</h2>
+    <p class="sub">
+      Memex is a non-chatbot, LLM-free-at-runtime tool that reads your existing
+      Claude&nbsp;Code and Codex session history and turns it into a navigable
+      associative memory backed by <b style="color:var(--ink)">Qdrant</b>. You move through your own past by
+      <i>similarity</i>, not keywords &mdash; and the relevant moment can rise to you proactively.
+    </p>
+
+    <div class="grid">
+      <article class="card">
+        <h3><span class="gp" aria-hidden="true"></span>Time Machine</h3>
+        <p>Replay any past session as it happened &mdash; the whole scene, not a snippet.</p>
+      </article>
+      <article class="card">
+        <h3><span class="gp" aria-hidden="true"></span>Lens</h3>
+        <p>Named-vector weighted search to look through your history from one angle at a time.</p>
+      </article>
+      <article class="card">
+        <h3><span class="gp" aria-hidden="true"></span>Topology</h3>
+        <p>A distance-matrix &rarr; MST graph: how your sessions actually connect to one another.</p>
+      </article>
+      <article class="card">
+        <h3><span class="gp" aria-hidden="true"></span>Mix &amp; Discovery</h3>
+        <p>Positive / negative recommendation to pull related work toward you and push noise away.</p>
+      </article>
+      <article class="card">
+        <h3><span class="gp" aria-hidden="true"></span>Proactive Recall</h3>
+        <p>The piece that settled the field above: a relevant past moment surfaces because the current one evoked it.</p>
+      </article>
+      <article class="card">
+        <h3><span class="gp" aria-hidden="true"></span>Companion · Wrapped · Loop&nbsp;Breaker</h3>
+        <p>An agent-memory layer over your corpus &mdash; recap what you've done, and catch yourself circling.</p>
+      </article>
+    </div>
+
+    <div class="facts" aria-label="What Memex is">
+      <div class="row"><div class="lab">Reads</div>
+        <div class="val"><span class="mono">~/.claude/projects/**/*.jsonl</span>, legacy transcripts, and <span class="mono">history.jsonl</span></div></div>
+      <div class="row"><div class="lab">Backed by</div>
+        <div class="val">Qdrant &mdash; navigate by vector similarity, no runtime LLM</div></div>
+      <div class="row"><div class="lab">Why</div>
+        <div class="val">Claude&nbsp;Code silently migrates and deletes old sessions. Memex keeps a corpus <b style="color:var(--ink)">you own.</b></div></div>
+      <div class="row"><div class="lab">Built for</div>
+        <div class="val">Qdrant Vector Space Day 2026 &mdash; <i>"Think Outside the Bot."</i></div></div>
+    </div>
+  </section>
+
+  <section id="agent">
+    <p class="kicker" style="margin-top:56px">For your agent</p>
+    <h2 style="font-size:clamp(20px,3vw,28px)">11 MCP tools over stdio + HTTP &mdash;
+      works in Claude&nbsp;Code, Codex, and Cursor.</h2>
+    <p class="sub">A server / Docker variant runs Qdrant, the web UI, and the MCP server in one image.
+      The tools let an agent recall, replay, and connect across your own history.</p>
+    <div class="addline mono">
+      <span class="c">$</span> claude mcp add memex -- memex-mcp
+    </div>
+    <p style="margin-top:18px;font-size:14px">
+      <a href="https://github.com/Two-Weeks-Team/memex#server--docker">Server / Docker variant</a>
+      &nbsp;&middot;&nbsp;
+      <a href="https://github.com/Two-Weeks-Team/memex">MCP integration &amp; the 11 tools</a>
+    </p>
+  </section>
+</main>
+
+<footer>
+  <div class="foot">
+    <div>Memex &mdash; a memory you own, surfaced by association.</div>
+    <div class="links">
+      <a href="https://github.com/Two-Weeks-Team/memex">GitHub</a>
+      <a href="https://two-weeks-team.github.io/memex/">Live landing</a>
+      <a href="https://github.com/Two-Weeks-Team/memex#server--docker">Docker</a>
+    </div>
+  </div>
+</footer>
+
+<script>
+(function(){
+  "use strict";
+
+  /* ===========================================================================
+     P86 · REACTION–DIFFUSION → MEMORY
+
+     A genuine Gray–Scott reaction-diffusion simulation runs on a small grid,
+     producing organic, living Turing patterns (spots that split and crawl,
+     stripes that braid). The whole field churns by itself.
+
+     The "memory arises" beat: a hand-authored SCENE MASK locally re-tunes the
+     feed/kill rates so that *inside the scene's shapes* the chemistry settles
+     into solid form, while *outside* it keeps wandering. Ramp that bias up and
+     the remembered tableau crystallizes OUT OF the pattern field — holds —
+     then the bias releases and the form melts back into free churn.
+
+     Distinct from P83 (discrete particle swarm) and P90 (TV-static over a
+     painted scene): here the medium itself is a continuous, biological
+     chemistry, and the scene is an emergent state of that chemistry.
+
+     Performance: sim runs on a ~GW×GH grid (small), a few sim sub-steps per
+     animation frame, then the U/V concentration is painted to an offscreen
+     ImageData at grid resolution and stretched to the stage by the GPU. Paused
+     when off-screen; reduced-motion shows a static painted scene instead.
+  =========================================================================== */
+
+  var canvas = document.getElementById('rd');
+  var ctx = canvas.getContext('2d');
+  var sceneName = document.getElementById('sceneName');
+  var replayBtn = document.getElementById('replay');
+
+  var reduce = window.matchMedia &&
+               window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // ---- simulation grid (kept small for performance) --------------------------
+  // The grid is laid out at the stage aspect; the canvas paints it stretched to
+  // fill the stage. The grid is kept deliberately COARSE — coarse cells make the
+  // Turing blobs read large and biological, and keep the per-frame cost low. The
+  // GPU upscale (imageSmoothingEnabled) blends cells into a continuous organic
+  // field, so a small grid still looks full-bleed and smooth.
+  var GW = 120, GH = 74;      // grid columns / rows (recomputed by device class)
+  var N  = GW * GH;
+
+  // two chemical concentration fields (double-buffered)
+  var U, V, U2, V2;
+  // per-cell feed (F) and kill (K) rates — these are what the scene mask warps
+  var F, K;
+  // Gray–Scott parameters, validated to SUSTAIN a lively pattern at every grid
+  // size this code picks (the "u-skate" regime): dense, crawling cellular spots
+  // that split and wander — the churning organic field.
+  var BASE_F = 0.062, BASE_K = 0.0609;
+  // SCENE rates → a high kill rate locally QUIETS the chemistry, so V is
+  // suppressed inside the scene's shapes. The cleared, settled regions are then
+  // painted as the LIT tableau (mint structure / warm glow) while the busy,
+  // high-V surround is painted as the darker churning substrate. That inversion
+  // is what makes the remembered scene read as a luminous form rising out of the
+  // field. (Verified ~5x figure/ground contrast, field stays alive.)
+  var SCENE_F = 0.062, SCENE_K = 0.070;
+  var Du = 1.0, Dv = 0.5;     // diffusion coefficients (U faster than V)
+  var DT = 1.0;               // explicit Euler time step (Pearson scaling)
+
+  // sceneBias 0..1 — how strongly the mask pulls local rates toward SCENE_*
+  var sceneBias = 0;
+
+  // scene mask: maskVal[i] in 0..1 (1 = strong scene presence) and a tint kind
+  var mask, maskKind;         // Float / Uint8 per cell
+  // kinds: 0 nothing · 1 structure(figure/desk/window mint) · 2 warm(lamp/screen)
+
+  // offscreen image buffer the sim paints into (grid-resolution)
+  var img, imgData32, imgBuf;
+
+  // ---------------------------------------------------------------------------
+  // SCENE AUTHORING — the remembered moment, authored in a normalized [0..1]
+  // box (x right, y down). Polygons/discs are rasterized into the mask. A
+  // DIFFERENT moment than the sibling concepts: "the pre-dawn morning the
+  // stubborn branch finally merged" — a figure hunched into a lamp-lit laptop,
+  // a window of first light behind, a coffee mug, the desk they sit at.
+  // ---------------------------------------------------------------------------
+  var SCENE = {
+    discs: [
+      // warm bloom of the laptop screen (kind 2) — the emotional glow
+      { x:0.66, y:0.50, r:0.085, kind:2, soft:1 },
+      // figure's head (kind 1)
+      { x:0.385, y:0.33, r:0.052, kind:1, soft:0 },
+      // lamp warmth, smaller (kind 2)
+      { x:0.90, y:0.30, r:0.045, kind:2, soft:1 }
+    ],
+    polys: [
+      // ---- desk slab the scene rests on (kind 1) ----
+      { kind:1, p:[[0.05,0.70],[0.96,0.70],[0.96,0.755],[0.05,0.755]] },
+
+      // ---- window of pre-dawn light behind the desk (kind 1, framed) ----
+      { kind:1, p:[[0.085,0.14],[0.30,0.14],[0.30,0.535],[0.085,0.535]] },
+
+      // ---- figure: torso hunched FORWARD toward the laptop (kind 1) ----
+      { kind:1, p:[[0.330,0.36],[0.405,0.38],[0.520,0.52],[0.500,0.70],
+                   [0.340,0.70],[0.300,0.52]] },
+      // upper arm / shoulder reaching toward the keyboard
+      { kind:1, p:[[0.405,0.40],[0.560,0.55],[0.545,0.61],[0.395,0.50]] },
+
+      // ---- laptop: lid (warm screen, kind 2) ----
+      { kind:2, p:[[0.595,0.405],[0.745,0.405],[0.730,0.555],[0.610,0.555]] },
+      // laptop base / keyboard wedge (kind 1)
+      { kind:1, p:[[0.575,0.560],[0.760,0.560],[0.785,0.600],[0.555,0.600]] },
+
+      // ---- coffee mug on the desk between figure and laptop (kind 2 warm) ----
+      { kind:2, p:[[0.470,0.610],[0.520,0.610],[0.516,0.700],[0.474,0.700]] },
+
+      // ---- desk lamp arm bending in from the right (kind 1) ----
+      { kind:1, p:[[0.905,0.34],[0.922,0.345],[0.880,0.700],[0.862,0.695]] },
+      { kind:1, p:[[0.905,0.34],[0.922,0.345],[0.825,0.260],[0.842,0.250]] }
+    ]
+  };
+
+  // ---- point-in-polygon + disc rasterization into the mask --------------------
+  function pointInPoly(px, py, poly){
+    var inside=false, n=poly.length;
+    for (var i=0,j=n-1;i<n;j=i++){
+      var xi=poly[i][0], yi=poly[i][1], xj=poly[j][0], yj=poly[j][1];
+      var hit=((yi>py)!==(yj>py)) &&
+              (px < (xj-xi)*(py-yi)/((yj-yi)||1e-9)+xi);
+      if (hit) inside=!inside;
+    }
+    return inside;
+  }
+
+  function buildMask(){
+    mask = new Float32Array(N);
+    maskKind = new Uint8Array(N);
+    for (var gy=0; gy<GH; gy++){
+      var ny = (gy + 0.5) / GH;
+      for (var gx=0; gx<GW; gx++){
+        var nx = (gx + 0.5) / GW;
+        var i = gy*GW + gx;
+        var best = 0, kind = 0;
+
+        // polygons → hard fill (value 1, soft edge handled below by blur pass)
+        for (var s=0; s<SCENE.polys.length; s++){
+          if (pointInPoly(nx, ny, SCENE.polys[s].p)){
+            if (1 > best){ best = 1; kind = SCENE.polys[s].kind; }
+          }
+        }
+        // discs → radial falloff
+        for (var d=0; d<SCENE.discs.length; d++){
+          var dd = SCENE.discs[d];
+          var dx = (nx - dd.x), dy = (ny - dd.y);
+          // correct for aspect so discs read round on the stretched stage
+          dx *= (GW/GH) * (GH/GW); // (no-op; kept explicit for clarity)
+          var dist = Math.sqrt(dx*dx + dy*dy);
+          var v = dd.soft ? Math.max(0, 1 - dist/dd.r)
+                          : (dist < dd.r ? 1 : 0);
+          if (v > best){ best = v; kind = dd.kind; }
+        }
+        mask[i] = best;
+        maskKind[i] = kind;
+      }
+    }
+    // one light blur pass so scene edges feel organic, not stencilled
+    var tmp = new Float32Array(N);
+    for (var y2=0;y2<GH;y2++){
+      for (var x2=0;x2<GW;x2++){
+        var ii = y2*GW + x2;
+        var acc = mask[ii]*4;
+        acc += mask[((y2-1+GH)%GH)*GW + x2];
+        acc += mask[((y2+1)%GH)*GW + x2];
+        acc += mask[y2*GW + ((x2-1+GW)%GW)];
+        acc += mask[y2*GW + ((x2+1)%GW)];
+        tmp[ii] = acc/8;
+      }
+    }
+    mask = tmp;
+  }
+
+  // ---- (re)allocate fields for the current grid -------------------------------
+  function allocFields(){
+    N = GW*GH;
+    U = new Float32Array(N);
+    V = new Float32Array(N);
+    U2 = new Float32Array(N);
+    V2 = new Float32Array(N);
+    F = new Float32Array(N);
+    K = new Float32Array(N);
+  }
+
+  // ---- seed the chemistry: U=1 everywhere, scattered V blobs to kick patterns -
+  function seed(){
+    for (var i=0;i<N;i++){ U[i]=1; V[i]=0; }
+    // sprinkle V seeds so the whole field develops patterns (lifelike, irregular).
+    // 3x3 blobs are large enough to ignite the reaction instead of diffusing away.
+    var seeds = Math.round(N*0.06);
+    for (var s=0;s<seeds;s++){
+      var gx = (Math.random()*GW)|0;
+      var gy = (Math.random()*GH)|0;
+      for (var oy=0; oy<3; oy++){
+        for (var ox=0; ox<3; ox++){
+          var x=(gx+ox)%GW, y=(gy+oy)%GH, idx=y*GW+x;
+          V[idx]=0.5;
+        }
+      }
+    }
+  }
+
+  // ---- update per-cell F/K from base + scene bias ----------------------------
+  function applyRates(){
+    for (var i=0;i<N;i++){
+      var m = mask[i] * sceneBias;          // 0..1 local pull toward scene rates
+      F[i] = BASE_F + (SCENE_F - BASE_F) * m;
+      K[i] = BASE_K + (SCENE_K - BASE_K) * m;
+    }
+  }
+
+  // ---- one Gray–Scott step (toroidal wrap, 9-point Laplacian) ----------------
+  // The 9-point kernel (orthogonal 0.2, diagonal 0.05, center -1) is the standard
+  // for stable reaction-diffusion — it keeps fronts isotropic so the cells look
+  // round/organic rather than blocky.
+  function step(){
+    for (var y=0;y<GH;y++){
+      var yu = ((y-1+GH)%GH)*GW;
+      var yd = ((y+1)%GH)*GW;
+      var yc = y*GW;
+      for (var x=0;x<GW;x++){
+        var xl = (x-1+GW)%GW;
+        var xr = (x+1)%GW;
+        var i = yc + x;
+
+        var u = U[i], v = V[i];
+        var lu = (U[yc+xl] + U[yc+xr] + U[yu+x] + U[yd+x]) * 0.2
+               + (U[yu+xl] + U[yu+xr] + U[yd+xl] + U[yd+xr]) * 0.05
+               - u;
+        var lv = (V[yc+xl] + V[yc+xr] + V[yu+x] + V[yd+x]) * 0.2
+               + (V[yu+xl] + V[yu+xr] + V[yd+xl] + V[yd+xr]) * 0.05
+               - v;
+
+        var uvv = u*v*v;
+        var f = F[i], k = K[i];
+        var nu = u + (Du*lu - uvv + f*(1-u)) * DT;
+        var nv = v + (Dv*lv + uvv - (k+f)*v) * DT;
+        // clamp for stability
+        U2[i] = nu < 0 ? 0 : (nu > 1 ? 1 : nu);
+        V2[i] = nv < 0 ? 0 : (nv > 1 ? 1 : nv);
+      }
+    }
+    var tu=U; U=U2; U2=tu;
+    var tv=V; V=V2; V2=tv;
+  }
+
+  // ---- paint the V field to the grid-resolution ImageData --------------------
+  // Two colormaps, blended by sceneBias:
+  //   • CHURN map: high V (the busy crawling cells) reads as a dim teal-green
+  //     substrate texture — the living field churning in the dark.
+  //   • SCENE map: inside the mask the chemistry has been QUIETED (V→0), so we
+  //     INVERT — the cleared, settled cells are painted as the lit tableau
+  //     (mint for structure, warm amber for the lamp/screen), brightest exactly
+  //     where the field went calm. That is the memory crystallizing out of the
+  //     churn as a luminous form. Outside the mask the churn map still rules, so
+  //     the lit scene sits against a darker living field.
+  function paint(){
+    for (var i=0;i<N;i++){
+      var v = V[i];
+      var t = v*1.7; if (t>1) t=1;     // tone curve for the churn texture
+
+      // --- churn substrate colour (busy where V is high) ---
+      var r = 8  + t*36;
+      var g = 20 + t*110;
+      var b = 16 + t*64;
+
+      // --- scene contribution (only where the mask is active & biased) ---
+      var m = mask[i] * sceneBias;
+      if (m > 0.02){
+        // "calm" = how cleared this cell is (0 churn .. 1 fully settled)
+        var calm = 1 - Math.min(1, v*3.2);
+        // edge emphasis: the rim of the cleared region glows a touch brighter
+        var lit = calm * m;
+        var sr, sg, sb;
+        if (maskKind[i] === 2){
+          // warm glow — lamp / laptop screen (the emotional payload)
+          sr = 38 + lit*230;
+          sg = 26 + lit*168;
+          sb = 14 + lit*86;
+        } else {
+          // structure — figure / desk / window, luminous mint
+          sr = 24 + lit*120;
+          sg = 44 + lit*224;
+          sb = 30 + lit*150;
+        }
+        // blend churn → scene as the bias rises
+        r = r*(1-m) + sr*m;
+        g = g*(1-m) + sg*m;
+        b = b*(1-m) + sb*m;
+      }
+
+      if (r>255)r=255; if (g>255)g=255; if (b>255)b=255;
+      // little-endian RGBA packing
+      imgData32[i] = (255<<24) | ((b&255)<<16) | ((g&255)<<8) | (r&255);
+    }
+    // paint the small grid stretched across the whole stage
+    octx.putImageData(img, 0, 0);
+    ctx.clearRect(0,0,cw,ch);
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(off, 0, 0, GW, GH, 0, 0, cw, ch);
+  }
+
+  // offscreen grid-resolution canvas
+  var off = document.createElement('canvas');
+  var octx = off.getContext('2d');
+  var cw=0, ch=0;        // display canvas CSS px size
+
+  function setupBuffers(){
+    off.width = GW; off.height = GH;
+    img = octx.createImageData(GW, GH);
+    // a typed view onto the ImageData for fast 32-bit writes
+    imgBuf = new Uint8ClampedArray(img.data.buffer);
+    imgData32 = new Uint32Array(img.data.buffer);
+  }
+
+  // ---- resize: choose a grid density by screen area, keep aspect to stage ----
+  function resize(){
+    var box = canvas.parentElement.getBoundingClientRect();
+    cw = Math.max(1, Math.round(box.width));
+    ch = Math.max(1, Math.round(box.height));
+    // display canvas at CSS pixels (the sim grid is what we actually upscale)
+    canvas.style.width = cw+'px';
+    canvas.style.height = ch+'px';
+    canvas.width = cw;
+    canvas.height = ch;
+
+    // Pick grid columns by area, but keep them in the COARSE range that reliably
+    // ignites and sustains the pattern at every size (verified 96–128 cols).
+    // Coarser also = larger, more biological blobs and a cheaper per-step cost.
+    var area = cw*ch;
+    var cols = area < 360000 ? 96 : (area < 950000 ? 112 : 128);
+    GW = cols;
+    GH = Math.max(56, Math.round(cols * (ch/cw)));
+    allocFields();
+    setupBuffers();
+    buildMask();
+    seed();
+    applyRates();
+    if (!reduce) prewarm();
+  }
+
+  // ---- ignite the field before the first frame ------------------------------
+  // Gray–Scott has a slow ignition: V seeds first decay, then fronts propagate
+  // and fill the field over ~hundreds of steps. We run that warm-up once at
+  // layout (cheap on a coarse grid) so the page opens onto an ALREADY-living
+  // field churning — never a blank or sparse stage.
+  function prewarm(){
+    var was = sceneBias; sceneBias = 0; applyRates();
+    for (var s=0; s<900; s++) step();
+    sceneBias = was; applyRates();
+  }
+
+  // ---- cycle state machine ---------------------------------------------------
+  // CHURN → RESOLVE(bias↑) → HOLD → DISSOLVE(bias↓) → (repeat)
+  var phase = 'churn';
+  var phaseStart = 0;
+  var CHURN_MS   = 3000;   // free Turing churn before the memory arrives
+  var RESOLVE_MS = 3400;   // scene crystallizes out of the field
+  var HOLD_MS    = 3200;   // the remembered scene holds, lit
+  var DISSOLVE_MS= 2200;   // form melts back into churn
+  var SIM_PER_FRAME_BASE = 6; // Gray–Scott sub-steps per animation frame
+
+  function setPhase(name, now){ phase = name; phaseStart = now; }
+  function easeInOut(t){ return t<0.5 ? 2*t*t : 1-Math.pow(-2*t+2,2)/2; }
+
+  var rafId = 0, running = false, lastT = 0, pausedAt = 0;
+  // accumulate sim time so churn speed is consistent regardless of fps
+  var simAcc = 0;
+
+  function startLoop(){
+    if (running) return;
+    running = true;
+    if (pausedAt && phaseStart){ phaseStart += (performance.now() - pausedAt); }
+    pausedAt = 0; lastT = 0;
+    rafId = requestAnimationFrame(frame);
+  }
+  function stopLoop(){
+    if (running) pausedAt = performance.now();
+    running = false;
+    cancelAnimationFrame(rafId); rafId = 0;
+  }
+
+  function frame(now){
+    if (!running) return;
+    if (!phaseStart) phaseStart = now;
+    if (!lastT) lastT = now;
+    var el = now - phaseStart;
+    var dtMs = Math.min(50, now - lastT);   // guard big tab-switch gaps
+    lastT = now;
+
+    // ---- drive sceneBias from the phase ----
+    if (phase === 'churn'){
+      sceneBias = 0;
+      if (el >= CHURN_MS) setPhase('resolve', now);
+    } else if (phase === 'resolve'){
+      sceneBias = easeInOut(Math.min(1, el / RESOLVE_MS));
+      if (el >= RESOLVE_MS){ sceneBias = 1; setPhase('hold', now); }
+    } else if (phase === 'hold'){
+      sceneBias = 1;
+      if (el >= HOLD_MS) setPhase('dissolve', now);
+    } else { // dissolve
+      sceneBias = 1 - easeInOut(Math.min(1, el / DISSOLVE_MS));
+      if (el >= DISSOLVE_MS){
+        // re-seed a few fresh V blobs so the next churn looks lively, then loop
+        reseedSparse();
+        setPhase('churn', now);
+      }
+    }
+    applyRates();
+
+    // ---- advance the chemistry. Run a fixed number of sub-steps, scaled by
+    //      frame time so the churn rate is stable. Cap to avoid spiral-of-death.
+    simAcc += dtMs;
+    var sub = SIM_PER_FRAME_BASE;
+    // when resolving/holding, a touch more iteration sharpens the form
+    if (phase === 'resolve' || phase === 'hold') sub += 2;
+    var iters = Math.min(14, Math.max(2, Math.round(sub * (dtMs/16.7))));
+    for (var s=0; s<iters; s++) step();
+
+    paint();
+    updateLabel();
+
+    if (running) rafId = requestAnimationFrame(frame);
+  }
+
+  // drop a handful of new seeds so post-dissolve churn re-energizes
+  function reseedSparse(){
+    var seeds = Math.round(N*0.02);
+    for (var s=0;s<seeds;s++){
+      var gx=(Math.random()*GW)|0, gy=(Math.random()*GH)|0, idx=gy*GW+gx;
+      U[idx]=0.5; V[idx]=0.3;
+    }
+  }
+
+  function updateLabel(){
+    var want;
+    if (phase === 'hold' || (phase==='resolve' && sceneBias>0.7)){
+      want = 'the morning it finally merged';
+    } else if (phase === 'dissolve'){
+      want = 'dissolving…';
+    } else if (phase === 'resolve'){
+      want = 'settling…';
+    } else {
+      want = 'churning…';
+    }
+    if (sceneName.textContent !== want) sceneName.textContent = want;
+  }
+
+  // ---- start / lifecycle -----------------------------------------------------
+  function start(){
+    stopLoop();
+    resize();
+    if (reduce){
+      // reduced motion: no simulation. The SVG .still already shows the resolved
+      // scene; keep the canvas hidden (handled by CSS). Nothing to animate.
+      sceneName.textContent = 'the morning it finally merged';
+      return;
+    }
+    phase='churn'; phaseStart=0; lastT=0; pausedAt=0; sceneBias=0; simAcc=0;
+    sceneName.textContent = 'churning…';
+    startLoop();
+  }
+
+  replayBtn.addEventListener('click', function(){
+    reduce = window.matchMedia &&
+             window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (reduce){ return; }   // static scene already shown
+    stopLoop();
+    seed(); reseedSparse();
+    phase='churn'; phaseStart=0; lastT=0; pausedAt=0; sceneBias=0;
+    sceneName.textContent = 'churning…';
+    startLoop();
+  });
+
+  var rT;
+  window.addEventListener('resize', function(){
+    clearTimeout(rT);
+    rT = setTimeout(function(){
+      var wasRunning = running;
+      stopLoop();
+      resize();
+      if (!reduce && wasRunning){
+        // resume the cycle cleanly after a layout change
+        phaseStart = 0; lastT = 0; pausedAt = 0;
+        startLoop();
+      }
+    }, 180);
+  });
+
+  // pause when the stage scrolls out of view (perf + battery)
+  if ('IntersectionObserver' in window){
+    var io = new IntersectionObserver(function(entries){
+      entries.forEach(function(e){
+        if (reduce) return;
+        if (e.isIntersecting) startLoop(); else stopLoop();
+      });
+    }, {threshold:0.02});
+    io.observe(canvas);
+  }
+
+  // honor live changes to the motion preference
+  if (window.matchMedia){
+    try{
+      window.matchMedia('(prefers-reduced-motion: reduce)')
+        .addEventListener('change', function(e){
+          reduce = e.matches;
+          if (reduce){ stopLoop(); }
+          start();
+        });
+    }catch(_){}
+  }
+
+  start();
+})();
+</script>
+</body>
+</html>

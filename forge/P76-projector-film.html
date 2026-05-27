@@ -1,0 +1,812 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Memex — the memory threads and plays</title>
+<style>
+  /* ============================================================
+     P76 · Projector / film grain
+     The memory plays like film. A projector beam cuts the dark,
+     the leader counts down, and a SCENE of a remembered coding
+     moment threads + plays full-bleed — dust, gate-weave, flicker.
+     The scene of the memory literally screens in front of you.
+     ============================================================ */
+
+  :root{
+    --ink:#0a0806;
+    --amber:#ffb24a;
+    --amber-soft:#ffd79a;
+    --warm-white:#fff4e2;
+    --beam:#fff0d0;
+    --paper:#e7dcc8;
+    --dim:#8a7b66;
+    --green:#7fe0a6;
+    --rust:#e2754a;
+    --sky:#5fa9d4;
+    --mono:"SFMono-Regular",ui-monospace,"JetBrains Mono",Menlo,Consolas,monospace;
+    --serif:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;
+    --sans:"Helvetica Neue",Arial,system-ui,sans-serif;
+  }
+
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:#000;
+    color:var(--paper);
+    font-family:var(--sans);
+    -webkit-font-smoothing:antialiased;
+    overflow-x:hidden;
+  }
+  a{color:inherit}
+
+  .skip{
+    position:absolute;left:-999px;top:0;z-index:200;
+    background:var(--amber);color:#1a1206;padding:.6rem 1rem;
+    font-family:var(--mono);font-size:.8rem;border-radius:0 0 6px 0;
+  }
+  .skip:focus{left:0}
+
+  /* ===========================================================
+     THE THEATER — full-bleed stage where the memory screens
+     =========================================================== */
+  .theater{
+    position:relative;
+    width:100%;
+    min-height:100svh;
+    background:
+      radial-gradient(120% 90% at 50% 8%, #15110b 0%, #0a0806 55%, #050402 100%);
+    overflow:hidden;
+    display:flex;
+    flex-direction:column;
+  }
+
+  /* the projector booth (top-right), throwing the beam down to screen */
+  .booth{
+    position:absolute;
+    top:1.1rem;right:1.4rem;
+    z-index:14;
+    display:flex;align-items:center;gap:.55rem;
+    font-family:var(--mono);font-size:.66rem;letter-spacing:.16em;
+    text-transform:uppercase;color:var(--dim);
+  }
+  .booth svg{display:block;filter:drop-shadow(0 0 6px rgba(255,178,74,.35))}
+  .reel-spin{transform-origin:center;animation:reel 2.4s linear infinite}
+  .reel-spin.b{animation-duration:3.1s}
+  @keyframes reel{to{transform:rotate(360deg)}}
+
+  /* the beam — a volumetric cone of light from booth to screen */
+  .beam{
+    position:absolute;
+    top:0;left:0;width:100%;height:62vh;
+    z-index:3;pointer-events:none;
+    mix-blend-mode:screen;
+    opacity:.0;
+    background:
+      conic-gradient(from 196deg at 88% 4%,
+        transparent 0deg,
+        rgba(255,224,170,.00) 14deg,
+        rgba(255,224,170,.14) 22deg,
+        rgba(255,240,210,.30) 30deg,
+        rgba(255,224,170,.12) 40deg,
+        transparent 50deg);
+    filter:blur(2px);
+    transition:opacity 1s ease;
+  }
+  .beam.on{opacity:1;animation:beamflick 5.5s steps(1) infinite}
+  @keyframes beamflick{
+    0%,100%{opacity:1}
+    51%{opacity:.86}
+    52%{opacity:1}
+    73%{opacity:.92}
+    74%{opacity:1}
+  }
+
+  /* ===========================================================
+     THE SCREEN — a framed cinema screen, full-bleed centerpiece
+     =========================================================== */
+  .stage{
+    position:relative;z-index:6;
+    flex:1;
+    display:flex;align-items:center;justify-content:center;
+    padding:clamp(1rem,4vw,3.5rem);
+    padding-top:clamp(3.2rem,7vw,5rem);
+  }
+  .frame{
+    position:relative;
+    width:min(94vw,1080px);
+    aspect-ratio:16/9;
+    border-radius:6px;
+    /* matte screen border + warm halo */
+    box-shadow:
+      0 0 0 2px rgba(0,0,0,.9),
+      0 0 0 14px #110d08,
+      0 0 0 16px rgba(255,178,74,.10),
+      0 30px 90px -20px rgba(0,0,0,.9),
+      0 0 120px -10px rgba(255,178,74,.18);
+    background:#070504;
+    overflow:hidden;
+  }
+
+  /* the SCENE itself — the remembered coding moment, as a tableau */
+  .scene{
+    position:absolute;inset:0;
+    opacity:0;
+    transition:opacity .9s ease;
+  }
+  .scene.live{opacity:1}
+
+  /* SCENE backdrop: a late-night desk, monitor glow, window with city */
+  .room{
+    position:absolute;inset:0;
+    background:
+      radial-gradient(80% 70% at 50% 64%, rgba(95,169,212,.10) 0%, transparent 60%),
+      linear-gradient(180deg, #0c1726 0%, #0a1320 40%, #0b0f17 100%);
+  }
+  /* window of night city, left third */
+  .window{
+    position:absolute;left:6%;top:14%;width:30%;height:54%;
+    background:linear-gradient(180deg,#0a1a2e 0%,#0e2238 60%,#102a44 100%);
+    box-shadow:inset 0 0 0 3px #060d16, 0 0 40px rgba(95,169,212,.12);
+    overflow:hidden;border-radius:2px;
+  }
+  .window::before{ /* mullion */
+    content:"";position:absolute;left:50%;top:0;width:3px;height:100%;
+    background:#060d16;transform:translateX(-50%);
+  }
+  .window::after{
+    content:"";position:absolute;left:0;top:50%;width:100%;height:3px;
+    background:#060d16;transform:translateY(-50%);
+  }
+  .citylight{position:absolute;width:3px;height:3px;background:var(--amber-soft);
+    border-radius:1px;opacity:.0;box-shadow:0 0 6px var(--amber);}
+  .scene.live .citylight{animation:twinkle 4s ease-in-out infinite}
+  @keyframes twinkle{0%,100%{opacity:.25}50%{opacity:.9}}
+
+  /* desk surface */
+  .desk{
+    position:absolute;left:0;right:0;bottom:0;height:26%;
+    background:linear-gradient(180deg,#1d160d 0%,#120c06 100%);
+    box-shadow:inset 0 8px 24px -10px rgba(0,0,0,.8);
+  }
+  /* the monitor — the memory's focal point: a fix landing on screen */
+  .monitor{
+    position:absolute;right:8%;top:20%;width:48%;height:50%;
+    background:#05080d;border-radius:4px;
+    box-shadow:0 0 0 6px #1a130b, 0 14px 40px -8px rgba(0,0,0,.7),
+      0 0 60px rgba(127,224,166,.14);
+    overflow:hidden;
+    font-family:var(--mono);
+  }
+  .mon-glow{
+    position:absolute;inset:0;
+    background:radial-gradient(70% 80% at 50% 45%, rgba(127,224,166,.12), transparent 70%);
+    pointer-events:none;
+  }
+  .code{
+    position:absolute;inset:0;padding:7% 7% 0;
+    font-size:clamp(7px,1.15vw,13px);line-height:1.5;letter-spacing:.01em;
+  }
+  .ln{opacity:0;white-space:pre;}
+  .scene.live .ln{animation:typein .01s forwards}
+  .ln .k{color:var(--sky)}
+  .ln .s{color:var(--amber-soft)}
+  .ln .c{color:#5f6f63}
+  .ln .ok{color:var(--green)}
+  .ln .er{color:var(--rust)}
+  @keyframes typein{to{opacity:1}}
+  /* terminal pass/fail badge that pulses when the fix lands */
+  .verdict{
+    position:absolute;right:6%;bottom:9%;
+    font-family:var(--mono);font-size:clamp(8px,1.1vw,13px);
+    color:var(--green);opacity:0;
+    text-shadow:0 0 12px rgba(127,224,166,.6);
+  }
+  .scene.live .verdict{animation:pop 1.1s ease .1s forwards, verdpulse 2.2s ease 1.2s infinite}
+  @keyframes pop{0%{opacity:0;transform:translateY(6px) scale(.9)}100%{opacity:1;transform:none}}
+  @keyframes verdpulse{0%,100%{text-shadow:0 0 12px rgba(127,224,166,.45)}50%{text-shadow:0 0 22px rgba(127,224,166,.9)}}
+
+  /* the figure — a silhouette at the desk, leaning toward the screen */
+  .figure{
+    position:absolute;left:30%;bottom:0;width:26%;height:56%;
+    background:linear-gradient(180deg, rgba(8,12,18,.0) 0%, #06090e 40%, #04060a 100%);
+    border-radius:46% 46% 0 0 / 70% 70% 0 0;
+    filter:blur(.4px);
+  }
+  .figure::before{ /* head */
+    content:"";position:absolute;left:50%;top:-14%;width:46%;height:32%;
+    background:#06090e;border-radius:50%;transform:translateX(-50%);
+  }
+  /* steam rising from an off-frame mug */
+  .steam{
+    position:absolute;left:24%;bottom:28%;width:2px;height:30px;
+    background:linear-gradient(180deg, rgba(255,244,226,.5), transparent);
+    opacity:0;filter:blur(2px);
+  }
+  .scene.live .steam{animation:steam 3.4s ease-in-out infinite}
+  @keyframes steam{0%{opacity:0;transform:translateY(6px) scaleY(.6)}30%{opacity:.5}100%{opacity:0;transform:translateY(-26px) scaleY(1.3) translateX(8px)}}
+
+  /* the SCENE's caption strip — the moment named, like a subtitle/slate */
+  .slate{
+    position:absolute;left:0;right:0;bottom:0;
+    padding:.85rem clamp(1rem,3vw,2rem);
+    background:linear-gradient(0deg, rgba(4,3,2,.92) 0%, rgba(4,3,2,.55) 70%, transparent 100%);
+    font-family:var(--mono);
+    display:flex;align-items:flex-end;justify-content:space-between;gap:1rem;
+    opacity:0;transition:opacity .8s ease .3s;
+  }
+  .scene.live .slate{opacity:1}
+  .slate .meta{font-size:clamp(.6rem,1.5vw,.74rem);letter-spacing:.14em;text-transform:uppercase;color:var(--amber)}
+  .slate .said{font-size:clamp(.78rem,2vw,1rem);color:var(--warm-white);max-width:60ch;font-family:var(--serif);font-style:italic;line-height:1.35}
+  .slate .tag{font-size:clamp(.58rem,1.4vw,.7rem);color:var(--dim);text-align:right;white-space:nowrap}
+
+  /* ===========================================================
+     OPTICAL EFFECTS layered over the screen (film authenticity)
+     =========================================================== */
+  .optics{position:absolute;inset:0;z-index:8;pointer-events:none}
+
+  /* film grain (animated noise via SVG turbulence) */
+  .grain{position:absolute;inset:-20%;opacity:.16;mix-blend-mode:overlay}
+  .grain.run{animation:grainshift .6s steps(6) infinite}
+  @keyframes grainshift{
+    0%{transform:translate(0,0)}
+    20%{transform:translate(-3%,2%)}
+    40%{transform:translate(2%,-3%)}
+    60%{transform:translate(-2%,-2%)}
+    80%{transform:translate(3%,1%)}
+    100%{transform:translate(-1%,3%)}
+  }
+
+  /* gate weave — the whole frame jitters like film through a gate */
+  .gate{position:absolute;inset:0}
+  .gate.weave{animation:weave 3.7s ease-in-out infinite}
+  @keyframes weave{
+    0%,100%{transform:translate(0,0)}
+    25%{transform:translate(.18%,-.22%)}
+    50%{transform:translate(-.14%,.16%)}
+    75%{transform:translate(.1%,.12%)}
+  }
+
+  /* dust + hair specks drifting on the gate */
+  .dust{position:absolute;inset:0;opacity:.0}
+  .dust.on{opacity:1}
+  .speck{position:absolute;background:rgba(255,244,226,.7);border-radius:50%;}
+  .hair{position:absolute;width:1px;height:18px;background:rgba(20,14,8,.6);transform-origin:top}
+
+  /* vignette + scratches */
+  .vig{
+    position:absolute;inset:0;
+    background:radial-gradient(120% 100% at 50% 50%, transparent 52%, rgba(0,0,0,.55) 100%);
+  }
+  .scratch{position:absolute;top:0;height:100%;width:1px;background:rgba(255,244,226,.0)}
+  .scratch.on{background:rgba(255,244,226,.12);box-shadow:0 0 4px rgba(255,244,226,.2)}
+
+  /* flicker overlay — warm exposure breathing */
+  .flick{position:absolute;inset:0;background:rgba(255,178,74,.05);mix-blend-mode:screen;opacity:0}
+  .flick.on{animation:expose 2.7s ease-in-out infinite}
+  @keyframes expose{0%,100%{opacity:0}40%{opacity:.10}43%{opacity:.02}46%{opacity:.12}50%{opacity:.04}}
+
+  /* ===========================================================
+     COUNTDOWN LEADER — threads before the scene plays
+     =========================================================== */
+  .leader{
+    position:absolute;inset:0;z-index:9;
+    background:radial-gradient(60% 60% at 50% 50%, #1a130a 0%, #0a0805 70%);
+    display:flex;align-items:center;justify-content:center;
+    opacity:1;transition:opacity .6s ease;
+  }
+  .leader.gone{opacity:0;pointer-events:none}
+  .leader svg{width:min(46%,360px);height:auto}
+  .countnum{
+    font-family:var(--mono);font-weight:700;
+    fill:var(--amber);
+    font-size:120px;text-anchor:middle;dominant-baseline:central;
+  }
+  .sweep{
+    transform-origin:200px 200px;
+    stroke:var(--amber);stroke-width:7;fill:none;opacity:.9;
+  }
+
+  /* ===========================================================
+     CURRENT-CONTEXT cue — what evokes the memory (above screen)
+     The visitor does NOT act. A live situation is shown, and the
+     projector threads the matching memory on its own.
+     =========================================================== */
+  .cue{
+    position:relative;z-index:10;
+    margin:0 auto;
+    width:min(94vw,1080px);
+    padding:1.1rem clamp(1rem,3vw,2rem) .4rem;
+    text-align:center;
+  }
+  .cue .now{
+    font-family:var(--mono);font-size:.66rem;letter-spacing:.22em;
+    text-transform:uppercase;color:var(--dim);margin-bottom:.5rem;
+  }
+  .cue .now b{color:var(--amber);font-weight:600}
+  .cue .situation{
+    font-family:var(--serif);font-size:clamp(1.05rem,3.4vw,1.7rem);
+    line-height:1.3;color:var(--warm-white);
+  }
+  .cue .situation .typed{border-right:2px solid var(--amber);padding-right:2px}
+  .cue .threading{
+    margin-top:.6rem;font-family:var(--mono);font-size:.66rem;letter-spacing:.1em;
+    color:var(--amber);opacity:0;transition:opacity .4s;
+    text-transform:uppercase;
+  }
+  .cue .threading.show{opacity:.85}
+
+  /* ===========================================================
+     HEADLINE + intro (below the theater fold)
+     =========================================================== */
+  .lede{
+    position:relative;z-index:10;
+    max-width:760px;margin:0 auto;
+    padding:2.2rem clamp(1.2rem,4vw,2rem) 1rem;
+    text-align:center;
+  }
+  .lede h1{
+    font-family:var(--serif);
+    font-size:clamp(1.8rem,5.5vw,3.1rem);
+    line-height:1.08;margin:0 0 1rem;
+    color:var(--warm-white);font-weight:600;
+  }
+  .lede h1 em{color:var(--amber);font-style:italic}
+  .lede p{
+    font-size:clamp(1rem,2.6vw,1.15rem);line-height:1.6;color:var(--paper);
+    margin:0 auto;max-width:60ch;
+  }
+
+  /* CONTENT band */
+  .content{
+    background:linear-gradient(180deg,#0a0806 0%,#0d0a07 100%);
+    padding:1rem 0 4rem;
+  }
+  .wrap{max-width:980px;margin:0 auto;padding:0 clamp(1.2rem,4vw,2rem)}
+
+  .reels{
+    display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));
+    gap:1.1rem;margin:2.4rem 0;
+  }
+  .surface{
+    border:1px solid #221a10;border-radius:10px;
+    background:linear-gradient(180deg,#100c08,#0b0805);
+    padding:1.3rem 1.3rem 1.4rem;
+  }
+  .surface h3{
+    font-family:var(--mono);font-size:.74rem;letter-spacing:.16em;
+    text-transform:uppercase;color:var(--amber);margin:0 0 .5rem;
+  }
+  .surface p{font-size:.92rem;line-height:1.55;color:var(--paper);margin:0;opacity:.92}
+
+  .terminal{
+    margin:2.4rem 0;border:1px solid #221a10;border-radius:10px;overflow:hidden;
+    background:#070504;
+  }
+  .terminal .bar{
+    display:flex;align-items:center;gap:.4rem;padding:.55rem .9rem;
+    background:#120d08;border-bottom:1px solid #221a10;
+  }
+  .terminal .bar span{width:11px;height:11px;border-radius:50%;background:#3a2c1a}
+  .terminal .bar .ttl{margin-left:.6rem;font-family:var(--mono);font-size:.7rem;color:var(--dim)}
+  .terminal pre{
+    margin:0;padding:1.1rem 1.2rem;font-family:var(--mono);
+    font-size:.82rem;line-height:1.7;color:var(--paper);overflow-x:auto;
+  }
+  .terminal .pp{color:var(--amber)}
+  .terminal .cc{color:var(--warm-white)}
+  .terminal .gg{color:#5f6f63}
+
+  .truth{
+    font-family:var(--serif);font-style:italic;
+    font-size:clamp(1.1rem,3vw,1.45rem);line-height:1.45;
+    color:var(--amber-soft);text-align:center;
+    max-width:50ch;margin:2.6rem auto 1rem;
+  }
+
+  .links{
+    display:flex;flex-wrap:wrap;gap:.8rem;justify-content:center;margin:2rem 0 .5rem;
+  }
+  .links a{
+    text-decoration:none;font-family:var(--mono);font-size:.82rem;
+    letter-spacing:.04em;padding:.7rem 1.2rem;border-radius:8px;
+    border:1px solid #2a2012;color:var(--warm-white);
+    transition:border-color .2s,background .2s,color .2s;
+  }
+  .links a:hover,.links a:focus-visible{
+    border-color:var(--amber);color:var(--amber);background:rgba(255,178,74,.06);outline:none;
+  }
+  .links a.primary{background:var(--amber);color:#1a1206;border-color:var(--amber);font-weight:600}
+  .links a.primary:hover,.links a.primary:focus-visible{background:var(--amber-soft);color:#1a1206}
+
+  footer{
+    text-align:center;padding:2rem 1rem 2.6rem;color:var(--dim);
+    font-family:var(--mono);font-size:.72rem;line-height:1.8;
+  }
+  footer a{color:var(--amber);text-decoration:none}
+  footer a:hover,footer a:focus-visible{text-decoration:underline}
+
+  /* ===========================================================
+     REDUCED MOTION — a single still frame. No flicker, no weave,
+     no countdown sweep, no drifting dust. The scene simply IS.
+     =========================================================== */
+  @media (prefers-reduced-motion: reduce){
+    .reel-spin,.reel-spin.b,.beam.on,
+    .grain.run,.gate.weave,.flick.on,
+    .scene.live .citylight,.scene.live .steam,
+    .scene.live .verdict,.cue .situation .typed .typed{
+      animation:none !important;
+    }
+    .beam{opacity:.5}
+    .flick{opacity:.04}
+    .grain{opacity:.10}
+    .dust.on{opacity:.5}
+    .cue .situation .typed{border-right:none}
+    .scene.live .ln{opacity:1}
+    .scene.live .verdict{opacity:1}
+    .scene.live .slate{opacity:1}
+  }
+</style>
+</head>
+<body>
+<a class="skip" href="#read">Skip the reel — read about Memex</a>
+
+<!-- ============================================================
+     THE THEATER : the memory threads + plays full-bleed
+     ============================================================ -->
+<section class="theater" aria-label="A remembered coding moment plays like film">
+
+  <!-- projector booth + reels -->
+  <div class="booth" aria-hidden="true">
+    <svg width="42" height="22" viewBox="0 0 42 22">
+      <circle class="reel-spin" cx="11" cy="11" r="9" fill="none" stroke="#ffb24a" stroke-width="2"/>
+      <circle cx="11" cy="11" r="2.4" fill="#ffb24a"/>
+      <circle class="reel-spin b" cx="31" cy="11" r="9" fill="none" stroke="#ffb24a" stroke-width="2"/>
+      <circle cx="31" cy="11" r="2.4" fill="#ffb24a"/>
+    </svg>
+    <span>reel&nbsp;rolling</span>
+  </div>
+
+  <!-- the projector beam -->
+  <div class="beam" id="beam" aria-hidden="true"></div>
+
+  <!-- the current situation that evokes the memory (recall, not search) -->
+  <div class="cue">
+    <div class="now">● now playing in your editor — <b>context detected</b></div>
+    <div class="situation">you're staring at <span class="typed" id="typed">a flaky auth-retry test</span></div>
+    <div class="threading" id="threading">⟳ threading the reel — a past moment loads itself…</div>
+  </div>
+
+  <!-- the screen -->
+  <div class="stage">
+    <div class="frame">
+
+      <!-- the SCENE: a remembered coding night, played as a tableau -->
+      <div class="scene" id="scene" role="img"
+           aria-label="A remembered scene: late one night you fixed the same auth-retry timeout — the test bar turns green on the monitor as a figure leans back from the desk.">
+        <div class="room"></div>
+        <div class="window" id="window"></div>
+        <div class="figure" aria-hidden="true"></div>
+        <div class="steam" aria-hidden="true"></div>
+        <div class="monitor" aria-hidden="true">
+          <div class="mon-glow"></div>
+          <div class="code" id="code"></div>
+          <div class="verdict">✓ 14 passed</div>
+        </div>
+        <div class="desk" aria-hidden="true"></div>
+
+        <!-- subtitle slate: names the moment, in your own words -->
+        <div class="slate">
+          <div>
+            <div class="meta">memex · 2026-02-09 · 01:47</div>
+            <div class="said">“retry budget was resetting on every 401 — move the counter outside the loop.”</div>
+          </div>
+          <div class="tag">from your<br>Claude&nbsp;Code session</div>
+        </div>
+      </div>
+
+      <!-- optical layers -->
+      <div class="optics" aria-hidden="true">
+        <div class="gate" id="gate">
+          <svg class="grain" id="grain" width="100%" height="100%" preserveAspectRatio="none">
+            <filter id="noise"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/></filter>
+            <rect width="100%" height="100%" filter="url(#noise)"/>
+          </svg>
+          <div class="dust" id="dust"></div>
+          <div class="flick" id="flick"></div>
+          <div class="scratch" id="scr1" style="left:24%"></div>
+          <div class="scratch" id="scr2" style="left:71%"></div>
+          <div class="vig"></div>
+        </div>
+      </div>
+
+      <!-- countdown leader (threads in, then clears) -->
+      <div class="leader" id="leader" aria-hidden="true">
+        <svg viewBox="0 0 400 400">
+          <circle cx="200" cy="200" r="180" fill="none" stroke="#3a2c1a" stroke-width="2"/>
+          <line x1="200" y1="20" x2="200" y2="380" stroke="#3a2c1a" stroke-width="1.5"/>
+          <line x1="20" y1="200" x2="380" y2="200" stroke="#3a2c1a" stroke-width="1.5"/>
+          <circle cx="200" cy="200" r="150" fill="none" stroke="#2a2012" stroke-width="1"/>
+          <path class="sweep" id="sweep" d="M200 200 L200 50 A150 150 0 0 1 200 50 Z"/>
+          <text class="countnum" id="countnum" x="200" y="200">3</text>
+        </svg>
+      </div>
+
+    </div>
+  </div>
+
+</section>
+
+<!-- ============================================================
+     LEDE
+     ============================================================ -->
+<div class="lede" id="read">
+  <h1>You didn't go looking for it.<br><em>The moment threaded itself.</em></h1>
+  <p>You don't document every memory — yet the instant the situation rhymes with
+     something you've lived, the relevant past plays back on its own. Memex turns
+     your coding history into a place you can move through by likeness, so the
+     scene you need surfaces unbidden, the way a memory does.</p>
+</div>
+
+<!-- ============================================================
+     CONTENT
+     ============================================================ -->
+<div class="content">
+  <div class="wrap">
+
+    <div class="reels">
+      <div class="surface">
+        <h3>Time Machine</h3>
+        <p>Replay any past session as it actually unfolded — the reel of a night
+           you'd half-forgotten, restored frame by frame.</p>
+      </div>
+      <div class="surface">
+        <h3>Lens</h3>
+        <p>Named-vector weighted recall: shift the lens and different facets of a
+           memory come into focus, by meaning rather than keyword.</p>
+      </div>
+      <div class="surface">
+        <h3>Topology</h3>
+        <p>A distance-matrix becomes an MST graph of how your sessions relate —
+           the associative trails between moments, drawn out.</p>
+      </div>
+      <div class="surface">
+        <h3>Proactive Recall</h3>
+        <p>The matching memory threads itself when the current context evokes it —
+           you receive it, you don't query for it.</p>
+      </div>
+      <div class="surface">
+        <h3>Mix &amp; Discovery</h3>
+        <p>Positive / negative recommendation steers what surfaces next, nudging
+           toward the threads worth re-watching.</p>
+      </div>
+      <div class="surface">
+        <h3>Companion · Wrapped · Loop Breaker</h3>
+        <p>An agent-memory layer over the same space — a year in review, and a nudge
+           when you're circling the same problem again.</p>
+      </div>
+    </div>
+
+    <div class="terminal" aria-label="How to give your agent the same memory">
+      <div class="bar"><span></span><span></span><span></span><span class="ttl">your-shell — memex</span></div>
+<pre><span class="gg"># give Claude Code / Codex / Cursor the same associative memory</span>
+<span class="pp">$</span> <span class="cc">claude mcp add memex -- memex serve --stdio</span>
+
+<span class="gg"># or run the server / Docker variant (Qdrant + web UI + MCP in one image)</span>
+<span class="pp">$</span> <span class="cc">docker run -p 8080:8080 ghcr.io/two-weeks-team/memex</span>
+
+<span class="gg"># 11 MCP tools surface the same space to your agent — over stdio + HTTP</span></pre>
+    </div>
+
+    <p class="truth">A non-chatbot, LLM-free-at-runtime memory over a corpus you own —
+       built for Qdrant Vector Space Day 2026, “Think Outside the Bot.”</p>
+
+    <div class="links">
+      <a class="primary" href="https://github.com/Two-Weeks-Team/memex">View the repo →</a>
+      <a href="https://two-weeks-team.github.io/memex/">Live landing</a>
+      <a href="https://github.com/Two-Weeks-Team/memex#docker">Server / Docker variant</a>
+      <a href="https://github.com/Two-Weeks-Team/memex#mcp">11 MCP tools</a>
+    </div>
+  </div>
+
+  <footer>
+    Memex preserves your Claude Code &amp; Codex sessions — Claude Code silently migrates
+    and deletes old ones; this keeps a corpus you own.<br>
+    <a href="https://github.com/Two-Weeks-Team/memex">github.com/Two-Weeks-Team/memex</a>
+    · concept P76 · projector &amp; film grain
+  </footer>
+</div>
+
+<script>
+(function(){
+  "use strict";
+  var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  var beam      = document.getElementById("beam");
+  var grain     = document.getElementById("grain");
+  var gate      = document.getElementById("gate");
+  var dust      = document.getElementById("dust");
+  var flick     = document.getElementById("flick");
+  var leader    = document.getElementById("leader");
+  var sweep     = document.getElementById("sweep");
+  var countnum  = document.getElementById("countnum");
+  var scene     = document.getElementById("scene");
+  var threading = document.getElementById("threading");
+  var win       = document.getElementById("window");
+  var codeEl    = document.getElementById("code");
+  var typed     = document.getElementById("typed");
+  var scr1      = document.getElementById("scr1");
+  var scr2      = document.getElementById("scr2");
+
+  /* ---- populate the window's city lights ---- */
+  for (var i=0;i<26;i++){
+    var c = document.createElement("div");
+    c.className = "citylight";
+    c.style.left = (Math.random()*92+3) + "%";
+    c.style.top  = (Math.random()*86+5) + "%";
+    c.style.animationDelay = (Math.random()*4) + "s";
+    win.appendChild(c);
+  }
+
+  /* ---- the code lines that "land the fix" on the monitor ---- */
+  var lines = [
+    ['c','# auth_retry.py'],
+    ['k','def <span class="s">request_with_retry</span>(url, token):'],
+    ['',''],
+    ['er','-    for attempt in range(MAX):'],
+    ['er','-        budget = MAX            # reset every loop  ✗'],
+    ['ok','+    budget = MAX                # moved outside  ✓'],
+    ['ok','+    for attempt in range(budget):'],
+    ['k','        resp = <span class="s">send</span>(url, token)'],
+    ['k','        if resp.status != <span class="s">401</span>: <span class="k">return</span> resp'],
+    ['c','        # 401 → refresh once, keep the budget honest']
+  ];
+  function paintCode(animate){
+    codeEl.innerHTML = "";
+    lines.forEach(function(pair, idx){
+      var d = document.createElement("div");
+      d.className = "ln";
+      var cls = pair[0];
+      d.innerHTML = cls ? '<span class="'+cls+'">'+pair[1]+'</span>' : (pair[1]||'&nbsp;');
+      if (animate){ d.style.animationDelay = (0.18*idx + 0.2) + "s"; }
+      else { d.style.opacity = 1; }
+      codeEl.appendChild(d);
+    });
+  }
+
+  /* ---- scatter dust specks + a stray hair on the gate ---- */
+  function scatterDust(){
+    dust.innerHTML = "";
+    for (var i=0;i<9;i++){
+      var s = document.createElement("div");
+      s.className="speck";
+      var sz=(Math.random()*2+1).toFixed(1);
+      s.style.width=sz+"px";s.style.height=sz+"px";
+      s.style.left=(Math.random()*100)+"%";
+      s.style.top=(Math.random()*100)+"%";
+      s.style.opacity=(Math.random()*.5+.3).toFixed(2);
+      dust.appendChild(s);
+    }
+    var h=document.createElement("div");
+    h.className="hair";
+    h.style.left=(Math.random()*70+15)+"%";
+    h.style.top="0";
+    h.style.transform="rotate("+(Math.random()*30-15)+"deg)";
+    dust.appendChild(h);
+  }
+
+  /* =========================================================
+     REDUCED MOTION: a single still frame — the scene simply IS.
+     ========================================================= */
+  if (reduce){
+    leader.classList.add("gone");
+    beam.classList.add("on");
+    grain.classList.remove("run");
+    dust.classList.add("on");
+    scatterDust();
+    paintCode(false);
+    scene.classList.add("live");
+    threading.classList.remove("show");
+    return;
+  }
+
+  /* =========================================================
+     FULL MOTION: thread → countdown leader → scene plays.
+     This runs ON ITS OWN. The visitor never clicks to find it.
+     ========================================================= */
+
+  // 1) the situation types itself in (the context that evokes recall)
+  var phrases = [
+    "a flaky auth-retry test",
+    "a 401 that won't stop looping",
+    "a timeout you swear you've fixed before"
+  ];
+  var pIdx = 0;
+
+  function typePhrase(str, done){
+    typed.textContent = "";
+    var i = 0;
+    (function step(){
+      if (i <= str.length){
+        typed.textContent = str.slice(0,i);
+        i++;
+        setTimeout(step, 38);
+      } else { setTimeout(done, 700); }
+    })();
+  }
+
+  // 2) thread the reel: beam on, grain runs, gate weaves, dust drifts
+  function thread(){
+    beam.classList.add("on");
+    grain.classList.add("run");
+    gate.classList.add("weave");
+    flick.classList.add("on");
+    dust.classList.add("on");
+    scatterDust();
+    threading.classList.add("show");
+    // intermittent scratch flicker
+    scratchTick();
+  }
+
+  function scratchTick(){
+    var on = Math.random() > .6;
+    scr1.classList.toggle("on", on);
+    scr2.classList.toggle("on", Math.random() > .75);
+    setTimeout(scratchTick, 400 + Math.random()*900);
+  }
+
+  // 3) the academy countdown leader: 3 · 2 · 1
+  function leaderCountdown(done){
+    var n = 3;
+    function tick(){
+      countnum.textContent = n;
+      // sweeping wedge
+      var ang = ((3-n)/3)*360;
+      sweep.setAttribute("transform","rotate("+ang+" 200 200)");
+      // brief flash on each beat
+      flick.style.opacity = ".18";
+      setTimeout(function(){ flick.style.opacity=""; }, 90);
+      n--;
+      if (n >= 1){ setTimeout(tick, 760); }
+      else { setTimeout(function(){ leader.classList.add("gone"); done(); }, 760); }
+    }
+    tick();
+  }
+
+  // 4) the scene plays
+  function playScene(){
+    paintCode(true);
+    scene.classList.add("live");
+    threading.classList.remove("show");
+    // re-scatter dust periodically while it plays
+    var dustTimer = setInterval(scatterDust, 1400);
+    // after a dwell, fade out, re-type the next phrase, re-thread (lifelike, irregular)
+    setTimeout(function(){
+      clearInterval(dustTimer);
+      scene.classList.remove("live");
+      leader.classList.remove("gone");
+      countnum.textContent = "3";
+      setTimeout(nextCycle, 1100);
+    }, 7200 + Math.random()*1800);
+  }
+
+  function runOnce(){
+    thread();
+    leaderCountdown(playScene);
+  }
+
+  function nextCycle(){
+    pIdx = (pIdx + 1) % phrases.length;
+    typePhrase(phrases[pIdx], runOnce);
+  }
+
+  // kick off shortly after load so the WOW is near-immediate
+  setTimeout(function(){
+    typed.textContent = phrases[0];
+    runOnce();
+  }, 600);
+
+})();
+</script>
+</body>
+</html>

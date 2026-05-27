@@ -1,0 +1,649 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<title>Memex — memory that surfaces on its own</title>
+<meta name="description" content="A non-chatbot, LLM-free-at-runtime tool over your Claude Code / Codex history. Move through your own corpus by similarity, not keywords." />
+<style>
+  /* ---------- design tokens (OKLCH) ---------- */
+  :root {
+    --bg:        oklch(16% 0.02 270);
+    --bg-2:      oklch(20% 0.03 275);
+    --surface:   oklch(24% 0.035 278);
+    --surface-2: oklch(29% 0.04 280);
+    --ink:       oklch(96% 0.01 270);
+    --ink-soft:  oklch(78% 0.02 275);
+    --ink-faint: oklch(60% 0.02 275);
+    --line:      oklch(38% 0.03 278);
+    --accent:    oklch(78% 0.15 195);   /* surfaced thought — teal */
+    --accent-2:  oklch(72% 0.17 320);   /* trail link — magenta */
+    --latent:    oklch(45% 0.04 270);   /* dormant fragment */
+    --ok:        oklch(80% 0.15 150);
+    --tap: 48px;
+    --maxw: 460px;
+    --r: 18px;
+    font-size: 16px;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg:        oklch(97% 0.01 270);
+      --bg-2:      oklch(94% 0.015 275);
+      --surface:   oklch(99% 0.005 270);
+      --surface-2: oklch(96% 0.012 278);
+      --ink:       oklch(22% 0.02 270);
+      --ink-soft:  oklch(38% 0.02 275);
+      --ink-faint: oklch(52% 0.02 275);
+      --line:      oklch(86% 0.02 278);
+      --accent:    oklch(55% 0.14 200);
+      --accent-2:  oklch(52% 0.18 322);
+      --latent:    oklch(80% 0.02 270);
+    }
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background:
+      radial-gradient(120% 80% at 50% -10%, var(--bg-2), var(--bg) 60%),
+      var(--bg);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+  }
+  a { color: inherit; }
+  :focus-visible {
+    outline: 3px solid var(--accent);
+    outline-offset: 3px;
+    border-radius: 6px;
+  }
+
+  /* ---------- phone shell ---------- */
+  .stage {
+    max-width: var(--maxw);
+    margin: 0 auto;
+    padding: 0 14px;
+  }
+  .phone {
+    position: relative;
+    background: var(--bg);
+    min-height: 100vh;
+  }
+  /* On wide screens, frame the column like a held phone */
+  @media (min-width: 760px) {
+    body {
+      padding: 28px 0 0;
+    }
+    .phone {
+      max-width: 440px;
+      margin: 0 auto;
+      border: 1px solid var(--line);
+      border-radius: 40px;
+      box-shadow: 0 30px 80px oklch(0% 0 0 / 0.45),
+                  inset 0 0 0 9px var(--bg-2);
+      overflow: hidden;
+      min-height: calc(100vh - 56px);
+    }
+    .desktop-note {
+      position: fixed;
+      top: 22px; left: 50%;
+      transform: translateX(-50%);
+      font-size: 0.72rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--ink-faint);
+    }
+  }
+  .desktop-note { display: none; }
+  @media (min-width: 760px) { .desktop-note { display: block; } }
+
+  /* ---------- status bar (decorative, phone-honest) ---------- */
+  .statusbar {
+    position: sticky;
+    top: 0;
+    z-index: 40;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 18px 8px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--ink-soft);
+    background: linear-gradient(var(--bg) 70%, transparent);
+    backdrop-filter: blur(8px);
+  }
+  .statusbar .glyphs { display: flex; gap: 7px; align-items: center; }
+  .statusbar svg { display: block; }
+
+  /* ---------- scroll progress (the "context approaching") ---------- */
+  .progress {
+    position: sticky;
+    top: 36px;
+    z-index: 39;
+    height: 2px;
+    background: transparent;
+  }
+  .progress > i {
+    display: block;
+    height: 100%;
+    width: var(--p, 0%);
+    background: linear-gradient(90deg, var(--accent), var(--accent-2));
+    transition: width 0.1s linear;
+  }
+
+  /* ---------- generic section ---------- */
+  section { padding: 30px 6px 14px; }
+  .eyebrow {
+    font-size: 0.74rem;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0 0 10px;
+    font-weight: 700;
+  }
+  h1 {
+    font-size: clamp(1.85rem, 8.5vw, 2.5rem);
+    line-height: 1.12;
+    letter-spacing: -0.02em;
+    margin: 0 0 14px;
+    font-weight: 800;
+  }
+  h2 {
+    font-size: clamp(1.3rem, 5.5vw, 1.6rem);
+    line-height: 1.2;
+    letter-spacing: -0.01em;
+    margin: 0 0 12px;
+    font-weight: 750;
+  }
+  p { margin: 0 0 14px; color: var(--ink-soft); }
+  .lead { color: var(--ink); font-size: 1.06rem; }
+
+  /* ---------- HERO: latent fragments surfacing ---------- */
+  .hero { padding-top: 18px; }
+  .canvaswrap {
+    position: relative;
+    margin: 6px 0 22px;
+    border-radius: var(--r);
+    background: var(--surface);
+    border: 1px solid var(--line);
+    overflow: hidden;
+    aspect-ratio: 1 / 1;
+  }
+  .canvaswrap svg { display: block; width: 100%; height: 100%; }
+
+  /* fragment nodes rise & fade in as scroll-context approaches */
+  .frag {
+    transform-box: fill-box;
+    transform-origin: center;
+  }
+  .frag text {
+    font-family: system-ui, -apple-system, sans-serif;
+    font-size: 8.5px;
+    fill: var(--ink-soft);
+    pointer-events: none;
+  }
+  .frag .dot { fill: var(--latent); transition: fill .4s ease; }
+  .frag.lit .dot { fill: var(--accent); }
+  .trail {
+    stroke: var(--accent-2);
+    stroke-width: 1.1;
+    fill: none;
+    stroke-dasharray: 4 3;
+    opacity: 0;
+    transition: opacity .6s ease;
+  }
+  .trail.lit { opacity: 0.7; }
+
+  .hint {
+    font-size: 0.82rem;
+    color: var(--ink-faint);
+    text-align: center;
+    margin: -8px 0 4px;
+  }
+
+  /* ---------- CTA buttons ---------- */
+  .cta-row { display: flex; flex-direction: column; gap: 10px; margin: 4px 0 8px; }
+  .btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-height: var(--tap);
+    padding: 13px 18px;
+    border-radius: 14px;
+    font-size: 1rem;
+    font-weight: 650;
+    text-decoration: none;
+    border: 1px solid transparent;
+    transition: transform .12s ease, background .2s ease;
+  }
+  .btn:active { transform: scale(0.98); }
+  .btn-primary {
+    background: linear-gradient(120deg, var(--accent), var(--accent-2));
+    color: oklch(18% 0.02 270);
+  }
+  .btn-ghost {
+    background: var(--surface);
+    color: var(--ink);
+    border-color: var(--line);
+  }
+
+  /* ---------- surfacing list (tap to reveal neighbors) ---------- */
+  .surf-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
+  .surf-item {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--r);
+    overflow: hidden;
+  }
+  .surf-trigger {
+    all: unset;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    min-height: var(--tap);
+    padding: 14px 16px;
+    box-sizing: border-box;
+  }
+  .surf-trigger:focus-visible { outline: 3px solid var(--accent); outline-offset: -3px; }
+  .surf-trigger .chip {
+    flex: none;
+    width: 36px; height: 36px;
+    border-radius: 10px;
+    display: grid; place-items: center;
+    background: var(--surface-2);
+    color: var(--accent);
+  }
+  .surf-trigger .label { flex: 1; min-width: 0; }
+  .surf-trigger .label b { display: block; font-size: 1rem; color: var(--ink); }
+  .surf-trigger .label span { font-size: 0.84rem; color: var(--ink-faint); }
+  .surf-trigger .caret {
+    flex: none; color: var(--ink-faint);
+    transition: transform .3s ease;
+  }
+  .surf-item[aria-expanded="true"] .caret { transform: rotate(90deg); }
+
+  /* neighbors panel — the associative trail surfacing */
+  .neighbors {
+    display: grid;
+    grid-template-rows: 0fr;
+    transition: grid-template-rows .35s ease;
+  }
+  .surf-item[aria-expanded="true"] .neighbors { grid-template-rows: 1fr; }
+  .neighbors > div { overflow: hidden; }
+  .neighbors ul { list-style: none; margin: 0; padding: 0 16px 14px; }
+  .neighbors li {
+    display: flex; align-items: center; gap: 10px;
+    padding: 9px 0;
+    border-top: 1px solid var(--line);
+    font-size: 0.9rem;
+    color: var(--ink-soft);
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  .surf-item[aria-expanded="true"] .neighbors li {
+    animation: rise .4s ease forwards;
+  }
+  .surf-item[aria-expanded="true"] .neighbors li:nth-child(2) { animation-delay: .06s; }
+  .surf-item[aria-expanded="true"] .neighbors li:nth-child(3) { animation-delay: .12s; }
+  .surf-item[aria-expanded="true"] .neighbors li:nth-child(4) { animation-delay: .18s; }
+  @keyframes rise { to { opacity: 1; transform: none; } }
+  .neighbors .sim {
+    margin-left: auto; flex: none;
+    font-variant-numeric: tabular-nums;
+    font-size: 0.78rem;
+    color: var(--accent);
+  }
+  .neighbors .thread { color: var(--accent-2); }
+
+  /* ---------- reveal-on-scroll ---------- */
+  .reveal { opacity: 0; transform: translateY(16px); transition: opacity .6s ease, transform .6s ease; }
+  .reveal.in { opacity: 1; transform: none; }
+
+  /* ---------- surfaces grid ---------- */
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 14px 13px;
+  }
+  .card h3 { margin: 8px 0 4px; font-size: 0.98rem; }
+  .card p { margin: 0; font-size: 0.82rem; color: var(--ink-faint); }
+  .card .ico { color: var(--accent); }
+
+  /* ---------- code / mcp ---------- */
+  pre {
+    background: oklch(13% 0.02 270);
+    color: var(--ink-soft);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 14px;
+    overflow-x: auto;
+    font-size: 0.82rem;
+    line-height: 1.5;
+    margin: 0 0 12px;
+  }
+  pre b { color: var(--accent); font-weight: 600; }
+  .toolnote { font-size: 0.84rem; color: var(--ink-faint); }
+
+  /* ---------- honesty block ---------- */
+  .facts { background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--r); padding: 16px; }
+  .facts ul { margin: 6px 0 0; padding-left: 18px; }
+  .facts li { color: var(--ink-soft); font-size: 0.9rem; margin-bottom: 7px; }
+
+  /* ---------- sticky thumb CTA (bottom, mobile-first) ---------- */
+  .thumbbar {
+    position: sticky;
+    bottom: 0;
+    z-index: 50;
+    display: flex;
+    gap: 8px;
+    padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
+    background: linear-gradient(transparent, var(--bg) 30%);
+    backdrop-filter: blur(6px);
+  }
+  .thumbbar .btn { flex: 1; margin: 0; box-shadow: 0 6px 24px oklch(0% 0 0 / 0.4); }
+
+  /* ---------- bottom nav ---------- */
+  footer {
+    padding: 26px 8px calc(96px + env(safe-area-inset-bottom));
+    text-align: center;
+    color: var(--ink-faint);
+    font-size: 0.82rem;
+  }
+  footer a { color: var(--accent); text-decoration: none; }
+  footer a:hover { text-decoration: underline; }
+  .footlinks { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px 16px; margin: 12px 0; }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { scroll-behavior: auto !important; }
+    .reveal { opacity: 1; transform: none; transition: none; }
+    .neighbors li { animation: none !important; opacity: 1; transform: none; }
+    .progress > i { transition: none; }
+    .frag { transition: none; }
+  }
+</style>
+</head>
+<body>
+<div class="desktop-note">Memex · designed thumb-first, scales up</div>
+<div class="stage">
+<main class="phone">
+
+  <!-- status bar -->
+  <div class="statusbar" aria-hidden="true">
+    <span>9:41</span>
+    <span class="glyphs">
+      <svg width="17" height="11" viewBox="0 0 17 11"><rect x="0" y="7" width="3" height="4" rx="1" fill="currentColor"/><rect x="4.5" y="5" width="3" height="6" rx="1" fill="currentColor"/><rect x="9" y="2.5" width="3" height="8.5" rx="1" fill="currentColor"/><rect x="13.5" y="0" width="3" height="11" rx="1" fill="currentColor"/></svg>
+      <svg width="22" height="11" viewBox="0 0 22 11"><rect x="0.5" y="0.5" width="18" height="10" rx="3" fill="none" stroke="currentColor"/><rect x="2" y="2" width="13" height="7" rx="1.5" fill="currentColor"/><rect x="20" y="3.5" width="1.6" height="4" rx="0.8" fill="currentColor"/></svg>
+    </span>
+  </div>
+
+  <!-- scroll progress = "a context approaching" -->
+  <div class="progress" aria-hidden="true"><i id="prog"></i></div>
+
+  <div class="stage">
+
+  <!-- HERO -->
+  <section class="hero">
+    <p class="eyebrow">Memex · Qdrant Vector Space Day 2026</p>
+    <h1>The thought<br>surfaces<br>on its own.</h1>
+    <p class="lead">You don't document every memory. Yet when the moment
+      arrives, the relevant thought comes back to you. Memex makes your
+      Claude&nbsp;Code &amp; Codex history behave the same way.</p>
+
+    <div class="canvaswrap" id="canvas" role="img"
+         aria-label="A field of dormant memory fragments. As you scroll, related fragments light up and connect along associative trails.">
+      <svg viewBox="0 0 320 320" preserveAspectRatio="xMidYMid meet">
+        <!-- trails (drawn first, under nodes) -->
+        <path class="trail" data-step="1" d="M70,90 C120,110 160,120 196,150"/>
+        <path class="trail" data-step="2" d="M196,150 C220,180 200,220 150,236"/>
+        <path class="trail" data-step="3" d="M150,236 C100,250 80,200 95,160"/>
+        <path class="trail" data-step="2" d="M196,150 C250,130 270,170 248,210"/>
+
+        <!-- latent fragments; .lit applied progressively on scroll -->
+        <g class="frag" data-step="0">
+          <circle class="dot" cx="70" cy="90" r="7"/>
+          <text x="70" y="78" text-anchor="middle">auth retry bug</text>
+        </g>
+        <g class="frag" data-step="1">
+          <circle class="dot" cx="196" cy="150" r="8"/>
+          <text x="196" y="136" text-anchor="middle">jwt refresh</text>
+        </g>
+        <g class="frag" data-step="2">
+          <circle class="dot" cx="150" cy="236" r="7"/>
+          <text x="150" y="256" text-anchor="middle">token expiry note</text>
+        </g>
+        <g class="frag" data-step="3">
+          <circle class="dot" cx="95" cy="160" r="6"/>
+          <text x="95" y="148" text-anchor="middle">that Codex chat</text>
+        </g>
+        <g class="frag" data-step="2">
+          <circle class="dot" cx="248" cy="210" r="6"/>
+          <text x="248" y="230" text-anchor="middle">cookie flags</text>
+        </g>
+        <!-- faint dormant background dots -->
+        <g class="frag" data-step="4"><circle class="dot" cx="40" cy="220" r="3"/></g>
+        <g class="frag" data-step="4"><circle class="dot" cx="280" cy="80" r="3"/></g>
+        <g class="frag" data-step="4"><circle class="dot" cx="260" cy="270" r="3"/></g>
+        <g class="frag" data-step="4"><circle class="dot" cx="120" cy="60" r="3"/></g>
+      </svg>
+    </div>
+    <p class="hint">Scroll — fragments rise and link. Not a search box, not a chatbot.</p>
+
+    <div class="cta-row">
+      <a class="btn btn-primary" href="https://github.com/Two-Weeks-Team/memex">
+        <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38l-.01-1.49c-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.6 7.6 0 0 1 2-.27c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48l-.01 2.2c0 .21.15.46.55.38A8 8 0 0 0 8 0Z"/></svg>
+        Read the source
+      </a>
+      <a class="btn btn-ghost" href="https://two-weeks-team.github.io/memex/">
+        Open the live landing
+      </a>
+    </div>
+  </section>
+
+  <!-- WHAT IT IS -->
+  <section class="reveal">
+    <p class="eyebrow">What it is</p>
+    <h2>Your sessions, as a space you move through.</h2>
+    <p>Claude&nbsp;Code silently migrates and deletes old sessions. Memex reads your
+      history — <code>~/.claude/projects/**/*.jsonl</code>, legacy transcripts and
+      <code>history.jsonl</code> — and keeps a corpus <b>you own</b>, backed by
+      <b>Qdrant</b>. You move through it by <b>similarity</b>, not keywords.</p>
+    <p class="toolnote">No chatbot. No LLM call at runtime. Built for
+      Qdrant Vector Space Day 2026 — <em>“Think Outside the Bot.”</em></p>
+  </section>
+
+  <!-- SURFACING INTERACTION: tap a fragment, neighbors rise -->
+  <section class="reveal">
+    <p class="eyebrow">Tap a fragment</p>
+    <h2>One memory pulls its neighbors up.</h2>
+    <p>Tap any item below. Its associative trail surfaces — the way one thought
+      brings back the next. (Illustrative; the real graph is built from your own history.)</p>
+
+    <ul class="surf-list" id="surfList">
+      <li class="surf-item" aria-expanded="false">
+        <button class="surf-trigger" aria-controls="n1">
+          <span class="chip" aria-hidden="true">◎</span>
+          <span class="label"><b>"jwt refresh"</b><span>fragment from a debugging session</span></span>
+          <span class="caret" aria-hidden="true">›</span>
+        </button>
+        <div class="neighbors"><div><ul id="n1">
+          <li>auth retry bug <span class="sim">0.91</span></li>
+          <li>cookie SameSite flags <span class="sim">0.84</span></li>
+          <li>token expiry note <span class="sim">0.79</span></li>
+          <li class="thread">↳ continues in a Codex thread <span class="sim">trail</span></li>
+        </ul></div></div>
+      </li>
+
+      <li class="surf-item" aria-expanded="false">
+        <button class="surf-trigger" aria-controls="n2">
+          <span class="chip" aria-hidden="true">◎</span>
+          <span class="label"><b>"that Qdrant filter"</b><span>you wrote it weeks ago</span></span>
+          <span class="caret" aria-hidden="true">›</span>
+        </button>
+        <div class="neighbors"><div><ul id="n2">
+          <li>payload index setup <span class="sim">0.88</span></li>
+          <li>MST distance matrix <span class="sim">0.81</span></li>
+          <li>named-vector weights <span class="sim">0.77</span></li>
+          <li class="thread">↳ replay it in Time Machine <span class="sim">trail</span></li>
+        </ul></div></div>
+      </li>
+
+      <li class="surf-item" aria-expanded="false">
+        <button class="surf-trigger" aria-controls="n3">
+          <span class="chip" aria-hidden="true">◎</span>
+          <span class="label"><b>"the deploy script"</b><span>which session was that?</span></span>
+          <span class="caret" aria-hidden="true">›</span>
+        </button>
+        <div class="neighbors"><div><ul id="n3">
+          <li>Docker one-image variant <span class="sim">0.86</span></li>
+          <li>env var checklist <span class="sim">0.80</span></li>
+          <li>rollback note <span class="sim">0.74</span></li>
+          <li class="thread">↳ proactive Recall flagged this <span class="sim">trail</span></li>
+        </ul></div></div>
+      </li>
+    </ul>
+  </section>
+
+  <!-- SURFACES -->
+  <section class="reveal">
+    <p class="eyebrow">Surfaces</p>
+    <h2>Ways through the space.</h2>
+    <div class="grid">
+      <div class="card"><div class="ico" aria-hidden="true">⏱</div><h3>Time Machine</h3><p>Replay a session as it unfolded.</p></div>
+      <div class="card"><div class="ico" aria-hidden="true">◎</div><h3>Lens</h3><p>Named-vector weighted search.</p></div>
+      <div class="card"><div class="ico" aria-hidden="true">⬡</div><h3>Topology</h3><p>Distance-matrix → MST graph.</p></div>
+      <div class="card"><div class="ico" aria-hidden="true">∿</div><h3>Mix / Discovery</h3><p>Positive / negative recommendation.</p></div>
+      <div class="card"><div class="ico" aria-hidden="true">↑</div><h3>Recall</h3><p>Surfaces the relevant memory proactively.</p></div>
+      <div class="card"><div class="ico" aria-hidden="true">◇</div><h3>Companion</h3><p>Wrapped &amp; Loop Breaker agent-memory layer.</p></div>
+    </div>
+  </section>
+
+  <!-- AGENT INTEGRATION -->
+  <section class="reveal">
+    <p class="eyebrow">For your agent</p>
+    <h2>11 MCP tools, over stdio + HTTP.</h2>
+    <p>Works in Claude&nbsp;Code, Codex, and Cursor. A server / Docker variant runs
+      Qdrant, the web UI, and MCP in one image. Add it:</p>
+    <pre><code><b>claude mcp add</b> memex -- memex-mcp</code></pre>
+    <p class="toolnote">11 tools expose Time&nbsp;Machine, Lens, Topology, Mix,
+      Recall and the Companion layer to your agent — so recall happens inside the
+      tools you already use.</p>
+  </section>
+
+  <!-- HONEST FACTS -->
+  <section class="reveal">
+    <p class="eyebrow">Straight answers</p>
+    <div class="facts">
+      <h2>What this is — and isn't.</h2>
+      <ul>
+        <li><b>Is:</b> a navigable spatial / associative memory over your own session history.</li>
+        <li><b>Isn't:</b> a chatbot. There's no LLM call at runtime.</li>
+        <li><b>Storage:</b> Qdrant vector store; the corpus stays yours.</li>
+        <li><b>Why:</b> old sessions get migrated and deleted — this preserves them and lets you move by similarity.</li>
+      </ul>
+    </div>
+  </section>
+
+  <footer>
+    <p>Memex — built for Qdrant Vector Space Day 2026, “Think Outside the Bot.”</p>
+    <div class="footlinks">
+      <a href="https://github.com/Two-Weeks-Team/memex">GitHub repo</a>
+      <a href="https://two-weeks-team.github.io/memex/">Live landing</a>
+      <a href="https://github.com/Two-Weeks-Team/memex#docker">Server / Docker variant</a>
+      <a href="https://github.com/Two-Weeks-Team/memex#mcp">MCP integration</a>
+    </div>
+  </footer>
+
+  </div><!-- /inner stage -->
+
+  <!-- THUMB CTA — always within reach -->
+  <nav class="thumbbar" aria-label="Primary actions">
+    <a class="btn btn-primary" href="https://github.com/Two-Weeks-Team/memex">Get Memex</a>
+    <a class="btn btn-ghost" href="https://two-weeks-team.github.io/memex/">Live demo</a>
+  </nav>
+
+</main>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  var reduce = window.matchMedia &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  /* ----- scroll progress + hero fragments surfacing ----- */
+  var prog = document.getElementById("prog");
+  var frags = Array.prototype.slice.call(document.querySelectorAll(".frag"));
+  var trails = Array.prototype.slice.call(document.querySelectorAll(".trail"));
+
+  function onScroll() {
+    var doc = document.documentElement;
+    var max = doc.scrollHeight - doc.clientHeight;
+    var p = max > 0 ? (doc.scrollTop || window.pageYOffset) / max : 0;
+    if (prog) prog.style.setProperty("--p", (p * 100).toFixed(1) + "%");
+
+    // map scroll position to how many "steps" of the trail are lit
+    var step = Math.floor(p * 12); // 0..~12 across the page
+    frags.forEach(function (g) {
+      var s = parseInt(g.getAttribute("data-step"), 10);
+      g.classList.toggle("lit", step >= s);
+    });
+    trails.forEach(function (t) {
+      var s = parseInt(t.getAttribute("data-step"), 10);
+      t.classList.toggle("lit", step >= s + 1);
+    });
+  }
+  if (reduce) {
+    // surface everything immediately, no scroll-coupling
+    frags.forEach(function (g) { g.classList.add("lit"); });
+    trails.forEach(function (t) { t.classList.add("lit"); });
+  } else {
+    window.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("resize", onScroll, { passive: true });
+    onScroll();
+  }
+
+  /* ----- reveal-on-scroll sections ----- */
+  var reveals = document.querySelectorAll(".reveal");
+  if (reduce || !("IntersectionObserver" in window)) {
+    reveals.forEach(function (el) { el.classList.add("in"); });
+  } else {
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) {
+        if (e.isIntersecting) { e.target.classList.add("in"); io.unobserve(e.target); }
+      });
+    }, { threshold: 0.12 });
+    reveals.forEach(function (el) { io.observe(el); });
+  }
+
+  /* ----- tap-to-surface neighbors (accordion) ----- */
+  document.querySelectorAll(".surf-item").forEach(function (item) {
+    var btn = item.querySelector(".surf-trigger");
+    var panel = item.querySelector(".neighbors ul");
+    btn.setAttribute("aria-expanded", "false");
+    if (panel) { btn.setAttribute("aria-controls", panel.id); }
+    btn.addEventListener("click", function () {
+      var open = item.getAttribute("aria-expanded") === "true";
+      // close siblings so one thought leads to the next, not clutter
+      document.querySelectorAll(".surf-item").forEach(function (other) {
+        if (other !== item) {
+          other.setAttribute("aria-expanded", "false");
+          var ob = other.querySelector(".surf-trigger");
+          if (ob) ob.setAttribute("aria-expanded", "false");
+        }
+      });
+      item.setAttribute("aria-expanded", open ? "false" : "true");
+      btn.setAttribute("aria-expanded", open ? "false" : "true");
+    });
+  });
+})();
+</script>
+</body>
+</html>

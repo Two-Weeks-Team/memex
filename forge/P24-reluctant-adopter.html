@@ -1,0 +1,459 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Memex — for people who don't trust new tools</title>
+<meta name="description" content="A skeptic's look at Memex: it surfaces the right past session on its own — you don't search, you don't prompt. Here are the reasons not to use it, answered honestly.">
+<style>
+  :root{
+    /* OKLCH palette — calm, low-saturation, ink-on-paper-at-night */
+    --bg:        oklch(0.17 0.018 265);
+    --bg-raise:  oklch(0.215 0.022 265);
+    --bg-card:   oklch(0.235 0.024 265);
+    --line:      oklch(0.34 0.02 265);
+    --ink:       oklch(0.93 0.012 265);
+    --ink-soft:  oklch(0.74 0.018 265);
+    --ink-faint: oklch(0.58 0.02 265);
+    --accent:    oklch(0.74 0.13 205);   /* muted teal — recognition */
+    --accent-dim:oklch(0.5 0.08 205);
+    --warn:      oklch(0.78 0.13 75);    /* honest-limitation amber */
+    --good:      oklch(0.78 0.12 155);
+    --bad:       oklch(0.66 0.16 25);
+    --maxw: 860px;
+    --r: 12px;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  @media (prefers-reduced-motion: reduce){ html{scroll-behavior:auto} }
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font:16px/1.6 system-ui,-apple-system,sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  a{color:var(--accent)}
+  a:focus-visible,button:focus-visible{outline:2px solid var(--accent); outline-offset:3px; border-radius:4px}
+  .wrap{max-width:var(--maxw); margin:0 auto; padding:0 20px}
+  header.site{padding:18px 0; border-bottom:1px solid var(--line)}
+  header.site .wrap{display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap}
+  .brand{display:flex; align-items:center; gap:10px; font-weight:600; letter-spacing:.2px}
+  .brand svg{display:block}
+  .navlinks a{color:var(--ink-soft); text-decoration:none; margin-left:18px; font-size:14px}
+  .navlinks a:hover{color:var(--ink)}
+
+  /* ---- Section: the objection-first opener ---- */
+  section{padding:56px 0; border-bottom:1px solid var(--line)}
+  .eyebrow{font-size:12.5px; letter-spacing:.14em; text-transform:uppercase; color:var(--accent-dim); margin:0 0 14px}
+  h1{font-size:clamp(28px,5vw,42px); line-height:1.15; margin:0 0 18px; letter-spacing:-.01em}
+  h2{font-size:clamp(22px,3.5vw,30px); margin:0 0 12px; letter-spacing:-.01em}
+  h3{font-size:17px; margin:0 0 6px}
+  .lede{font-size:18px; color:var(--ink-soft); max-width:62ch}
+  .why-list{list-style:none; margin:24px 0 0; padding:0; display:grid; gap:10px}
+  .why-list li{
+    background:var(--bg-raise); border:1px solid var(--line); border-radius:var(--r);
+    padding:14px 16px; color:var(--ink-soft); display:flex; gap:12px; align-items:flex-start;
+  }
+  .why-list .mark{color:var(--bad); font-weight:700; flex:0 0 auto; margin-top:1px}
+  .turn{margin-top:22px; font-size:16px; color:var(--ink)}
+  .turn b{color:var(--accent)}
+
+  /* ---- Section: the unbidden demo ---- */
+  .demo-frame{
+    background:var(--bg-card); border:1px solid var(--line); border-radius:var(--r);
+    overflow:hidden; margin-top:8px;
+  }
+  .demo-top{display:flex; align-items:center; gap:8px; padding:10px 14px; border-bottom:1px solid var(--line); background:var(--bg-raise)}
+  .dot{width:11px;height:11px;border-radius:50%;background:var(--line)}
+  .demo-label{margin-left:6px; font-size:12.5px; color:var(--ink-faint); font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  .terminal{padding:18px; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:13.5px; line-height:1.7; min-height:150px}
+  .t-prompt{color:var(--ink-faint)}
+  .t-you{color:var(--ink)}
+  .caret{display:inline-block; width:8px; height:15px; background:var(--accent); vertical-align:-2px; margin-left:2px; animation:blink 1.05s step-end infinite}
+  @keyframes blink{50%{opacity:0}}
+  @media (prefers-reduced-motion: reduce){ .caret{animation:none} }
+
+  /* the recall card that arrives on its own */
+  .recall{
+    margin:16px; padding:0; max-height:0; opacity:0; overflow:hidden;
+    border:1px solid var(--accent-dim); border-left:3px solid var(--accent);
+    border-radius:10px; background:linear-gradient(180deg, oklch(0.25 0.03 205 / .35), var(--bg-raise));
+    transition:max-height .6s ease, opacity .6s ease, margin .6s ease;
+  }
+  .recall.show{max-height:320px; opacity:1; margin:16px}
+  @media (prefers-reduced-motion: reduce){ .recall{transition:none} }
+  .recall-inner{padding:14px 16px}
+  .recall-flag{font-size:11.5px; letter-spacing:.12em; text-transform:uppercase; color:var(--accent); display:flex; align-items:center; gap:8px; margin-bottom:8px}
+  .recall-flag .pulse{width:8px;height:8px;border-radius:50%;background:var(--accent); box-shadow:0 0 0 0 oklch(0.74 0.13 205 / .6); animation:ring 1.8s ease-out infinite}
+  @keyframes ring{0%{box-shadow:0 0 0 0 oklch(0.74 0.13 205 / .55)}70%{box-shadow:0 0 0 9px oklch(0.74 0.13 205 / 0)}100%{box-shadow:0 0 0 0 oklch(0.74 0.13 205 / 0)}}
+  @media (prefers-reduced-motion: reduce){ .recall-flag .pulse{animation:none} }
+  .recall h3{font-family:system-ui,sans-serif; color:var(--ink); margin-bottom:4px}
+  .recall .meta{font-family:ui-monospace,monospace; font-size:12px; color:var(--ink-faint); margin-bottom:8px}
+  .recall p{margin:0; color:var(--ink-soft); font-size:14px; font-family:system-ui,sans-serif}
+  .recall .sim{display:inline-block; margin-top:10px; font-size:12px; color:var(--accent); font-family:ui-monospace,monospace}
+
+  .demo-note{font-size:13.5px; color:var(--ink-faint); margin-top:14px}
+  .demo-controls{margin-top:14px; display:flex; gap:10px; flex-wrap:wrap; align-items:center}
+  button.ghost{
+    background:transparent; color:var(--ink-soft); border:1px solid var(--line);
+    border-radius:8px; padding:8px 14px; font:inherit; font-size:14px; cursor:pointer;
+  }
+  button.ghost:hover{border-color:var(--accent-dim); color:var(--ink)}
+  .replay-hint{font-size:13px; color:var(--ink-faint)}
+
+  /* ---- Comparison table (honest, weaknesses shown) ---- */
+  .table-scroll{overflow-x:auto; margin-top:8px}
+  table{border-collapse:collapse; width:100%; min-width:560px; font-size:14.5px}
+  caption{caption-side:top; text-align:left; color:var(--ink-faint); font-size:13.5px; margin-bottom:12px}
+  th,td{text-align:left; padding:12px 14px; border-bottom:1px solid var(--line); vertical-align:top}
+  thead th{color:var(--ink); font-size:13px; letter-spacing:.04em; text-transform:uppercase; border-bottom:1px solid var(--line)}
+  tbody th{color:var(--ink-soft); font-weight:500}
+  .col-us{background:oklch(0.25 0.02 205 / .25)}
+  .yes{color:var(--good)} .no{color:var(--bad)} .partial{color:var(--warn)}
+  td small{display:block; color:var(--ink-faint); font-size:12.5px; margin-top:2px}
+
+  /* ---- Honest limitations ---- */
+  .limits{display:grid; gap:12px; margin-top:8px}
+  .limit{
+    background:var(--bg-raise); border:1px solid var(--line); border-left:3px solid var(--warn);
+    border-radius:10px; padding:14px 16px;
+  }
+  .limit h3{color:var(--warn)}
+  .limit p{margin:0; color:var(--ink-soft); font-size:14.5px}
+
+  /* ---- Trust signals ---- */
+  .trust{display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:12px; margin-top:8px}
+  .trust .sig{background:var(--bg-raise); border:1px solid var(--line); border-radius:10px; padding:16px}
+  .trust .sig .k{font-size:13px; color:var(--ink-faint); margin-bottom:4px}
+  .trust .sig .v{font-size:15px; color:var(--ink)}
+  .trust code{font-family:ui-monospace,monospace; font-size:12.5px; color:var(--accent)}
+
+  /* ---- CTA ---- */
+  .cta-row{display:flex; gap:12px; flex-wrap:wrap; margin-top:18px}
+  .btn{
+    display:inline-flex; align-items:center; gap:8px; text-decoration:none;
+    padding:11px 18px; border-radius:10px; font-size:15px; font-weight:500;
+  }
+  .btn.primary{background:var(--accent); color:oklch(0.17 0.02 265)}
+  .btn.primary:hover{background:oklch(0.8 0.13 205)}
+  .btn.line{border:1px solid var(--line); color:var(--ink)}
+  .btn.line:hover{border-color:var(--accent-dim)}
+  .codeblock{
+    background:var(--bg); border:1px solid var(--line); border-radius:10px;
+    padding:14px 16px; margin-top:16px; font-family:ui-monospace,monospace; font-size:13px;
+    color:var(--ink-soft); overflow-x:auto;
+  }
+  .codeblock .c{color:var(--ink-faint)}
+
+  footer{padding:40px 0 60px; color:var(--ink-faint); font-size:13.5px}
+  footer a{color:var(--ink-soft)}
+  footer .links{display:flex; gap:18px; flex-wrap:wrap; margin-bottom:14px}
+  .skip{position:absolute; left:-999px}
+  .skip:focus{position:static; display:inline-block; margin:8px; color:var(--accent)}
+</style>
+</head>
+<body>
+<a href="#main" class="skip">Skip to content</a>
+
+<header class="site">
+  <div class="wrap">
+    <span class="brand" aria-label="Memex">
+      <svg width="22" height="22" viewBox="0 0 22 22" role="img" aria-hidden="true">
+        <circle cx="6" cy="6" r="2.4" fill="none" stroke="oklch(0.74 0.13 205)" stroke-width="1.4"/>
+        <circle cx="16" cy="8" r="2.4" fill="none" stroke="oklch(0.74 0.13 205)" stroke-width="1.4"/>
+        <circle cx="9" cy="16" r="2.4" fill="oklch(0.74 0.13 205)"/>
+        <path d="M8 7 L14 8 M8 8 L9 13.6 M14 10 L10.5 14.5" stroke="oklch(0.5 0.08 205)" stroke-width="1.1" fill="none"/>
+      </svg>
+      Memex
+    </span>
+    <nav class="navlinks" aria-label="Primary">
+      <a href="#demo">See it happen</a>
+      <a href="#compare">Compare</a>
+      <a href="#limits">What it won't do</a>
+      <a href="https://github.com/Two-Weeks-Team/memex">Source</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+
+  <!-- OBJECTION-FIRST: why a skeptic would refuse -->
+  <section>
+    <div class="wrap">
+      <p class="eyebrow">For the reluctant adopter</p>
+      <h1>You probably don't want another tool. Here's why you'd refuse this one — and the one reason that might change your mind.</h1>
+      <p class="lede">No pitch yet. Let's start with the honest case <em>against</em> Memex. If none of these objections land, you're not the audience and that's fine.</p>
+
+      <ul class="why-list">
+        <li><span class="mark" aria-hidden="true">✕</span><div>"It's another chatbot wrapper. I have enough of those." — Fair. So Memex runs <b style="color:var(--ink)">no LLM at runtime</b> and has no chat box.</div></li>
+        <li><span class="mark" aria-hidden="true">✕</span><div>"I'd have to remember to use it." — That's the usual trap. Most memory tools make <b style="color:var(--ink)">you</b> do the recalling.</div></li>
+        <li><span class="mark" aria-hidden="true">✕</span><div>"Search tools never find the thing I actually meant." — Keyword search doesn't. Memex moves by <b style="color:var(--ink)">similarity</b>, not exact words.</div></li>
+        <li><span class="mark" aria-hidden="true">✕</span><div>"My session history is private. I'm not uploading it." — Correct stance. The corpus stays <b style="color:var(--ink)">on your machine</b>; you own it.</div></li>
+      </ul>
+
+      <p class="turn">The objection that matters most is the second one. So here is the only claim worth making: <b>you don't recall anything. The relevant past session arrives on its own — because the moment called it up.</b> Don't take the word for it. Watch it happen below, without touching anything.</p>
+    </div>
+  </section>
+
+  <!-- THE UNBIDDEN DEMO: retrieval happens TO you -->
+  <section id="demo">
+    <div class="wrap">
+      <p class="eyebrow">Show, don't tell</p>
+      <h2>You're mid-task. You didn't ask for help.</h2>
+      <p class="lede">Below is a context — a problem you're working on right now. You're not searching. You're not typing into Memex. Just read along. When the situation matches something in your past sessions, the memory rises on its own.</p>
+
+      <div class="demo-frame" role="region" aria-label="Demonstration of an unbidden recall">
+        <div class="demo-top">
+          <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+          <span class="demo-label">claude-code — auth-service — live session</span>
+        </div>
+        <div class="terminal" id="terminal" aria-live="off">
+          <div class="t-prompt">$ <span class="t-you" id="typed"></span><span class="caret" id="caret" aria-hidden="true"></span></div>
+        </div>
+
+        <!-- This card is NOT triggered by the visitor. It arrives because the context matched. -->
+        <div class="recall" id="recall" role="status" aria-live="polite">
+          <div class="recall-inner">
+            <div class="recall-flag"><span class="pulse" aria-hidden="true"></span>Memex recalled this — you didn't go looking</div>
+            <h3>That 401-on-refresh loop. You solved it three weeks ago.</h3>
+            <div class="meta">~/.claude/projects/payments-api · 2026-05-04 · 17 turns</div>
+            <p>"…the retry kept re-sending the <em>expired</em> token. The fix was to await the refresh before queuing the retry, not after — the interceptor was firing twice."</p>
+            <span class="sim" aria-hidden="true">surfaced by similarity · distance 0.21 · no query typed</span>
+          </div>
+        </div>
+      </div>
+
+      <p class="demo-note">Notice what didn't happen: no search box, no "explore" button, no hovering over a graph to make something light up. You were debugging an auth retry; a forgotten session that solved the same shape of problem returned to you. The way a name comes back the moment you stop chasing it.</p>
+
+      <div class="demo-controls">
+        <button class="ghost" id="replay" type="button">Replay the moment</button>
+        <span class="replay-hint" id="hint">It will start on its own in a moment…</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- HONEST COMPARISON: weaknesses shown -->
+  <section id="compare">
+    <div class="wrap">
+      <p class="eyebrow">The skeptic's table</p>
+      <h2>How it differs — including where it's weaker</h2>
+      <div class="table-scroll">
+        <table>
+          <caption>An honest comparison. We mark our own gaps in amber, not green.</caption>
+          <thead>
+            <tr>
+              <th scope="col">&nbsp;</th>
+              <th scope="col">Keyword search<br><small>grep / history</small></th>
+              <th scope="col">Chatbot over your logs<br><small>"ask your data"</small></th>
+              <th scope="col" class="col-us">Memex</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <th scope="row">Surfaces things you forgot to ask for</th>
+              <td class="no">No</td>
+              <td class="no">No — you must prompt it</td>
+              <td class="col-us yes">Yes — proactive Recall<small>arrives from context, unbidden</small></td>
+            </tr>
+            <tr>
+              <th scope="row">Finds by meaning, not exact words</th>
+              <td class="no">No</td>
+              <td class="yes">Yes</td>
+              <td class="col-us yes">Yes<small>named-vector Lens search</small></td>
+            </tr>
+            <tr>
+              <th scope="row">Runs without sending data to an LLM</th>
+              <td class="yes">Yes</td>
+              <td class="no">No</td>
+              <td class="col-us yes">Yes — LLM-free at runtime<small>embeddings indexed locally in Qdrant</small></td>
+            </tr>
+            <tr>
+              <th scope="row">Conversational answers / summaries</th>
+              <td class="no">No</td>
+              <td class="yes">Yes — its strength</td>
+              <td class="col-us partial">No, by design<small>it points you to the real session, doesn't paraphrase it</small></td>
+            </tr>
+            <tr>
+              <th scope="row">Zero setup, works instantly</th>
+              <td class="yes">Yes</td>
+              <td class="partial">Sometimes</td>
+              <td class="col-us partial">No — needs an index build first<small>Qdrant + initial embedding pass</small></td>
+            </tr>
+            <tr>
+              <th scope="row">Useful with no prior session history</th>
+              <td class="yes">N/A</td>
+              <td class="yes">Yes</td>
+              <td class="col-us no">No — it's only as good as your corpus<small>nothing to recall on day one</small></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="demo-note">If your honest answer to row one is "I don't actually forget anything useful," then Memex isn't for you, and we'd rather you keep your <code>grep</code>.</p>
+    </div>
+  </section>
+
+  <!-- WHAT IT WON'T DO -->
+  <section id="limits">
+    <div class="wrap">
+      <p class="eyebrow">Disclosure</p>
+      <h2>What Memex will not do</h2>
+      <div class="limits">
+        <div class="limit">
+          <h3>It won't answer questions in prose.</h3>
+          <p>There is no chat. It returns the actual past session that matches your current context — you read the real thing, not a generated summary that might invent details.</p>
+        </div>
+        <div class="limit">
+          <h3>It won't work on an empty history.</h3>
+          <p>Recall surfaces <em>your</em> past. With no Claude Code / Codex sessions to index, there's nothing to rise unbidden. It earns its value over time.</p>
+        </div>
+        <div class="limit">
+          <h3>It won't run with zero setup.</h3>
+          <p>You build an index first (Qdrant + an embedding pass over <code>~/.claude/projects/**/*.jsonl</code>). The server/Docker variant bundles Qdrant + web + MCP in one image to keep this short.</p>
+        </div>
+        <div class="limit">
+          <h3>It won't guarantee the right memory every time.</h3>
+          <p>Surfacing is by vector similarity. It's an associative trail, not an oracle — sometimes the thing it brings up is adjacent, not exact. We'd rather say that plainly.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- TRUST SIGNALS -->
+  <section>
+    <div class="wrap">
+      <p class="eyebrow">For the people who read the source first</p>
+      <h2>Trust signals, not promises</h2>
+      <div class="trust">
+        <div class="sig"><div class="k">Source</div><div class="v">Open. Read it before you run it.<br><a href="https://github.com/Two-Weeks-Team/memex">github.com/Two-Weeks-Team/memex</a></div></div>
+        <div class="sig"><div class="k">Where your data lives</div><div class="v">On your machine. The corpus is yours; Memex preserves sessions Claude Code silently migrates or deletes.</div></div>
+        <div class="sig"><div class="k">No runtime LLM</div><div class="v">Embeddings + Qdrant similarity. Nothing is sent to a model at query time.</div></div>
+        <div class="sig"><div class="k">Agent integration</div><div class="v">11 MCP tools over stdio + HTTP. Works in Claude Code, Codex, Cursor.<br><code>claude mcp add</code></div></div>
+        <div class="sig"><div class="k">Built for</div><div class="v">Qdrant Vector Space Day 2026 — "Think Outside the Bot."</div></div>
+        <div class="sig"><div class="k">Surfaces it ships with</div><div class="v">Time Machine, Lens, Topology, Mix/Discovery, proactive Recall, Dashboard, Companion / Wrapped / Loop Breaker.</div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- CTA -->
+  <section>
+    <div class="wrap">
+      <p class="eyebrow">If — and only if — the demo landed</p>
+      <h2>Try it on your own history, where the real recall happens</h2>
+      <p class="lede">The demo above used a staged context. The convincing version is when a session <em>you</em> forgot rises while you're working. That only happens against your own corpus.</p>
+
+      <div class="codeblock">
+<span class="c"># add Memex to your agent (11 MCP tools, stdio + HTTP)</span>
+claude mcp add memex
+<span class="c"># or run the all-in-one server: Qdrant + web + MCP in one image</span>
+docker run -p 6333:6333 -p 8080:8080 memex/server
+      </div>
+
+      <div class="cta-row">
+        <a class="btn primary" href="https://github.com/Two-Weeks-Team/memex">Read the source &amp; setup</a>
+        <a class="btn line" href="https://two-weeks-team.github.io/memex/">See the live landing</a>
+        <a class="btn line" href="#demo">Replay the demo</a>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="links">
+      <a href="https://github.com/Two-Weeks-Team/memex">Repository</a>
+      <a href="https://two-weeks-team.github.io/memex/">Live landing</a>
+      <a href="#compare">Honest comparison</a>
+      <a href="#limits">Known limits</a>
+    </div>
+    <p>Memex turns your Claude Code / Codex session history into a navigable, associative memory backed by Qdrant — a corpus you own. No chatbot. No runtime LLM. Built for Qdrant Vector Space Day 2026. Vannevar Bush had the idea in 1945; the associative trail is the point.</p>
+  </div>
+</footer>
+
+<script>
+(function(){
+  "use strict";
+  var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  var typed   = document.getElementById('typed');
+  var caret   = document.getElementById('caret');
+  var recall  = document.getElementById('recall');
+  var replay  = document.getElementById('replay');
+  var hint    = document.getElementById('hint');
+  var section = document.getElementById('demo');
+
+  // The line the visitor is "in the middle of" — context, not a query to Memex.
+  var line = "fixing 401 on token refresh — retry keeps sending the stale token";
+  var timers = [];
+  var played = false;
+
+  function clearTimers(){ timers.forEach(clearTimeout); timers = []; }
+
+  function reset(){
+    clearTimers();
+    typed.textContent = "";
+    recall.classList.remove('show');
+    if (caret) caret.style.display = '';
+  }
+
+  function showRecallNow(){
+    // Memory arrives on its own — not from a visitor action.
+    recall.classList.add('show');
+    if (caret) caret.style.display = 'none';
+    hint.textContent = "That memory wasn't requested — the context summoned it.";
+  }
+
+  function run(){
+    reset();
+    played = true;
+    hint.textContent = "You're typing your problem. You are NOT querying Memex…";
+
+    if (reduce){
+      // Respect reduced motion: no typing animation, no blink. Show end state with a short, single delay.
+      typed.textContent = line;
+      timers.push(setTimeout(showRecallNow, 600));
+      return;
+    }
+
+    // Lifelike, irregular typing cadence — then a pause, then the unbidden arrival.
+    var i = 0;
+    function step(){
+      typed.textContent = line.slice(0, i);
+      i++;
+      if (i <= line.length){
+        // irregular timing: occasional longer pause, like real typing/thinking
+        var base = 34 + Math.random()*46;
+        var ch = line.charAt(i-2);
+        if (ch === ' ' && Math.random() < 0.35) base += 180;
+        timers.push(setTimeout(step, base));
+      } else {
+        // the quiet beat before recognition
+        timers.push(setTimeout(showRecallNow, 850));
+      }
+    }
+    step();
+  }
+
+  if (replay){
+    replay.addEventListener('click', function(){ run(); });
+  }
+
+  // Autonomous start: it begins on its own when the demo scrolls into view —
+  // the visitor does not press play. (Recall is recipient-driven.)
+  if ('IntersectionObserver' in window){
+    var io = new IntersectionObserver(function(entries){
+      entries.forEach(function(e){
+        if (e.isIntersecting && !played){
+          timers.push(setTimeout(run, 700));
+          io.disconnect();
+        }
+      });
+    }, {threshold: 0.45});
+    io.observe(section);
+  } else {
+    // Fallback: start shortly after load.
+    timers.push(setTimeout(run, 1200));
+  }
+})();
+</script>
+</body>
+</html>

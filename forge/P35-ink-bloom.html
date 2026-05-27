@@ -1,0 +1,875 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Memex — the moment surfaces on its own</title>
+<style>
+  :root{
+    --ink:#e8edf2;
+    --dim:#8b93a3;
+    --faint:#5a6072;
+    --gold:#f2c879;
+    --teal:#5fd6c4;
+    --rose:#f08a8a;
+    --violet:#b89cf0;
+    --bg:#05070c;
+    --panel:rgba(12,16,26,.62);
+    --line:rgba(255,255,255,.10);
+    --mono:"SFMono-Regular",ui-monospace,"Cascadia Code","JetBrains Mono",Menlo,Consolas,monospace;
+    --sans:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  @media (prefers-reduced-motion: reduce){html{scroll-behavior:auto}}
+  body{
+    background:var(--bg);
+    color:var(--ink);
+    font-family:var(--sans);
+    -webkit-font-smoothing:antialiased;
+    line-height:1.55;
+    overflow-x:hidden;
+  }
+
+  /* ---------- The stage: full-bleed ink field ---------- */
+  .stage{
+    position:relative;
+    width:100%;
+    height:100svh;
+    min-height:600px;
+    overflow:hidden;
+    background:
+      radial-gradient(140% 120% at 50% 8%, #0a0f1a 0%, #06080f 46%, #04050a 100%);
+  }
+  /* layered canvases: scene painted underneath, ink mask + ink color on top */
+  #scene, #ink{
+    position:absolute; inset:0;
+    width:100%; height:100%;
+    display:block;
+  }
+  #scene{ z-index:1; }
+  #ink{ z-index:2; mix-blend-mode:screen; }
+
+  /* subtle living vignette + grain over everything */
+  .stage::after{
+    content:"";
+    position:absolute; inset:0; z-index:3; pointer-events:none;
+    background:radial-gradient(120% 90% at 50% 40%, transparent 52%, rgba(2,3,7,.72) 100%);
+  }
+
+  /* ---------- The "current moment" line that calls memory up ---------- */
+  .now{
+    position:absolute; z-index:5; left:0; right:0; top:clamp(20px,5vh,54px);
+    display:flex; justify-content:center; pointer-events:none;
+    padding:0 18px;
+  }
+  .now-inner{
+    max-width:760px; width:100%;
+    text-align:center;
+  }
+  .now-eyebrow{
+    font-family:var(--mono);
+    font-size:11px; letter-spacing:.22em; text-transform:uppercase;
+    color:var(--faint);
+    display:flex; align-items:center; justify-content:center; gap:9px;
+  }
+  .now-eyebrow .dot{
+    width:6px;height:6px;border-radius:50%;
+    background:var(--teal);
+    box-shadow:0 0 12px var(--teal);
+    animation:pulse 2.4s ease-in-out infinite;
+  }
+  @keyframes pulse{0%,100%{opacity:.4}50%{opacity:1}}
+  @media (prefers-reduced-motion: reduce){.now-eyebrow .dot{animation:none;opacity:.9}}
+  .now-context{
+    margin-top:12px;
+    font-family:var(--mono);
+    font-size:clamp(14px,2.1vw,19px);
+    color:var(--dim);
+    min-height:1.5em;
+  }
+  .now-context b{ color:var(--ink); font-weight:600; }
+  .caret{
+    display:inline-block; width:2px; height:1em; margin-left:2px;
+    background:var(--teal); vertical-align:-2px;
+    animation:blink 1s steps(2,start) infinite;
+  }
+  @keyframes blink{50%{opacity:0}}
+  @media (prefers-reduced-motion: reduce){.caret{animation:none;opacity:.7}}
+
+  /* ---------- The surfaced memory: scene caption (the recollection click) ---------- */
+  .recall{
+    position:absolute; z-index:5; left:0; right:0; bottom:clamp(96px,16vh,150px);
+    display:flex; justify-content:center; pointer-events:none;
+    padding:0 18px;
+  }
+  .recall-card{
+    max-width:600px; width:100%;
+    text-align:center;
+    opacity:0; transform:translateY(14px);
+    transition:opacity .9s ease, transform .9s ease;
+  }
+  .recall-card.show{ opacity:1; transform:translateY(0); }
+  .recall-kicker{
+    font-family:var(--mono); font-size:11px; letter-spacing:.2em;
+    text-transform:uppercase; color:var(--gold);
+  }
+  .recall-line{
+    margin-top:8px;
+    font-size:clamp(20px,3.4vw,32px);
+    font-weight:600; line-height:1.3;
+    letter-spacing:-.01em;
+    text-shadow:0 2px 30px rgba(0,0,0,.85);
+  }
+  .recall-meta{
+    margin-top:10px; font-family:var(--mono); font-size:12.5px; color:var(--dim);
+  }
+  .recall-meta .sim{ color:var(--teal); }
+
+  /* ---------- Title block bottom-left, quiet, anchoring the page ---------- */
+  .brand{
+    position:absolute; z-index:5; left:clamp(18px,4vw,46px);
+    bottom:clamp(26px,5vh,42px); pointer-events:auto;
+    max-width:min(92vw,640px);
+  }
+  .brand h1{
+    margin:0; font-size:clamp(26px,4.6vw,46px); font-weight:700;
+    letter-spacing:-.025em; line-height:1.04;
+  }
+  .brand h1 .em{
+    background:linear-gradient(100deg,var(--gold),var(--teal) 60%,var(--violet));
+    -webkit-background-clip:text; background-clip:text; color:transparent;
+  }
+  .brand p{
+    margin:12px 0 0; max-width:48ch;
+    color:var(--dim); font-size:clamp(13.5px,1.6vw,15.5px);
+  }
+  .brand .cta{
+    margin-top:18px; display:flex; gap:10px; flex-wrap:wrap;
+  }
+  .btn{
+    font-family:var(--sans); font-size:13.5px; font-weight:600;
+    text-decoration:none; color:var(--ink);
+    padding:10px 16px; border-radius:10px;
+    border:1px solid var(--line); background:rgba(255,255,255,.04);
+    transition:border-color .2s, background .2s, transform .12s;
+  }
+  .btn:hover{ background:rgba(255,255,255,.09); border-color:rgba(255,255,255,.22); }
+  .btn:active{ transform:translateY(1px); }
+  .btn.primary{
+    background:linear-gradient(100deg,rgba(242,200,121,.18),rgba(95,214,196,.18));
+    border-color:rgba(95,214,196,.4); color:#fff;
+  }
+  .btn:focus-visible{ outline:2px solid var(--teal); outline-offset:3px; }
+
+  /* a thin progress rail showing the irregular cadence of arrivals */
+  .rail{
+    position:absolute; z-index:5; right:clamp(16px,4vw,38px);
+    bottom:clamp(28px,5vh,44px);
+    display:flex; gap:7px; align-items:center; pointer-events:none;
+  }
+  .rail .pip{
+    width:7px;height:7px;border-radius:50%;
+    background:rgba(255,255,255,.16);
+    transition:background .4s, box-shadow .4s, transform .4s;
+  }
+  .rail .pip.on{
+    background:var(--gold);
+    box-shadow:0 0 10px var(--gold);
+    transform:scale(1.25);
+  }
+
+  /* skip / static reveal hint for keyboard users */
+  .sr-only{
+    position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;
+    clip:rect(0,0,0,0);white-space:nowrap;border:0;
+  }
+
+  /* ---------- Below the fold: the honest facts ---------- */
+  .fold{
+    position:relative; z-index:6;
+    max-width:1080px; margin:0 auto; padding:clamp(56px,9vw,108px) 22px 40px;
+  }
+  .fold h2{
+    font-size:clamp(22px,3.4vw,34px); font-weight:700; letter-spacing:-.02em;
+    margin:0 0 8px;
+  }
+  .fold .lede{ color:var(--dim); max-width:60ch; margin:0 0 40px; font-size:15.5px; }
+
+  .grid{
+    display:grid; gap:16px;
+    grid-template-columns:repeat(auto-fit,minmax(248px,1fr));
+  }
+  .feat{
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:14px; padding:20px 20px 22px;
+    backdrop-filter:blur(6px);
+  }
+  .feat h3{
+    margin:0 0 7px; font-size:15.5px; font-weight:650;
+    display:flex; align-items:center; gap:9px;
+  }
+  .feat h3 .g{
+    width:9px;height:9px;border-radius:2px;flex:none;
+    background:var(--teal);
+  }
+  .feat:nth-child(2) h3 .g{background:var(--gold)}
+  .feat:nth-child(3) h3 .g{background:var(--violet)}
+  .feat:nth-child(4) h3 .g{background:var(--rose)}
+  .feat:nth-child(5) h3 .g{background:var(--teal)}
+  .feat:nth-child(6) h3 .g{background:var(--gold)}
+  .feat p{ margin:0; color:var(--dim); font-size:13.5px; line-height:1.6; }
+
+  .how{
+    margin-top:40px;
+    background:var(--panel); border:1px solid var(--line);
+    border-radius:14px; padding:22px 22px 24px; backdrop-filter:blur(6px);
+  }
+  .how h3{ margin:0 0 4px; font-size:15.5px; }
+  .how p{ margin:0 0 14px; color:var(--dim); font-size:13.5px; }
+  pre{
+    margin:0; padding:16px 18px; overflow:auto;
+    background:#04060c; border:1px solid var(--line); border-radius:10px;
+    font-family:var(--mono); font-size:12.5px; line-height:1.7; color:#cdd6e2;
+  }
+  pre .c{ color:var(--faint); }
+  pre .k{ color:var(--teal); }
+  pre .s{ color:var(--gold); }
+
+  footer{
+    position:relative; z-index:6;
+    border-top:1px solid var(--line);
+    max-width:1080px; margin:48px auto 0; padding:26px 22px 60px;
+    display:flex; flex-wrap:wrap; gap:14px 22px; align-items:center;
+    color:var(--faint); font-size:13px;
+  }
+  footer a{ color:var(--dim); text-decoration:none; border-bottom:1px solid transparent; }
+  footer a:hover{ color:var(--ink); border-bottom-color:var(--line); }
+  footer .spacer{ flex:1 1 auto; }
+  footer .made{ font-family:var(--mono); font-size:11.5px; }
+
+  @media (max-width:640px){
+    .recall{ bottom:auto; top:clamp(98px,22vh,180px); }
+    .brand{ position:static; padding:clamp(28px,8vw,46px) 22px 0; max-width:none; }
+    .stage{ height:auto; min-height:74svh; }
+    .brand .cta{ margin-bottom:8px; }
+  }
+</style>
+</head>
+<body>
+
+  <!-- ================= STAGE ================= -->
+  <section class="stage" aria-label="A coding memory blooming into view">
+    <canvas id="scene" aria-hidden="true"></canvas>
+    <canvas id="ink" aria-hidden="true"></canvas>
+
+    <div class="now" aria-hidden="true">
+      <div class="now-inner">
+        <div class="now-eyebrow"><span class="dot"></span> right now, you're working on</div>
+        <div class="now-context"><span id="ctx"></span><span class="caret"></span></div>
+      </div>
+    </div>
+
+    <div class="recall" aria-live="polite">
+      <div class="recall-card" id="recall">
+        <div class="recall-kicker">↑ a moment surfaces, unbidden</div>
+        <div class="recall-line" id="recallLine"></div>
+        <div class="recall-meta"><span id="recallWhen"></span> · <span class="sim" id="recallSim"></span></div>
+      </div>
+    </div>
+
+    <div class="brand">
+      <h1>You didn't go looking.<br><span class="em">The moment found you.</span></h1>
+      <p>
+        Memex turns your Claude&nbsp;Code and Codex session history into a navigable
+        associative memory. When the context lines up, a past moment surfaces on its
+        own — the way a forgotten fix returns mid-task.
+      </p>
+      <div class="cta">
+        <a class="btn primary" href="https://github.com/Two-Weeks-Team/memex" rel="noopener">View the source</a>
+        <a class="btn" href="https://two-weeks-team.github.io/memex/" rel="noopener">Live landing</a>
+        <a class="btn" href="#how" >How recall works</a>
+      </div>
+    </div>
+
+    <div class="rail" id="rail" aria-hidden="true"></div>
+
+    <p class="sr-only">
+      This page shows coding memories that surface automatically as the context changes.
+      A reduced-motion setting shows a single memory rendered statically.
+      The full project is described in the section below.
+    </p>
+  </section>
+
+  <!-- ================= FACTS ================= -->
+  <main class="fold" id="how">
+    <h2>Not a search box. Not a chatbot.</h2>
+    <p class="lede">
+      Claude&nbsp;Code silently migrates and deletes old sessions. Memex preserves a
+      corpus <b>you own</b> — your <code>~/.claude/projects/**/*.jsonl</code>, legacy
+      transcripts, and <code>history.jsonl</code> — and lets you move through it by
+      similarity rather than keywords. It runs LLM-free at query time, backed by Qdrant.
+    </p>
+
+    <div class="grid">
+      <div class="feat">
+        <h3><span class="g"></span>Time Machine</h3>
+        <p>Replay any past session in order — scrub back through how a decision actually unfolded.</p>
+      </div>
+      <div class="feat">
+        <h3><span class="g"></span>Lens</h3>
+        <p>Named-vector weighted search: tilt retrieval toward intent, errors, code, or tone.</p>
+      </div>
+      <div class="feat">
+        <h3><span class="g"></span>Topology</h3>
+        <p>Distance matrix to an MST graph — see how your sessions actually relate in space.</p>
+      </div>
+      <div class="feat">
+        <h3><span class="g"></span>Mix &amp; Discovery</h3>
+        <p>Positive/negative recommendation — “more like this, less like that” across your history.</p>
+      </div>
+      <div class="feat">
+        <h3><span class="g"></span>Proactive Recall</h3>
+        <p>The piece on this page: relevant past moments rise on their own as the context shifts.</p>
+      </div>
+      <div class="feat">
+        <h3><span class="g"></span>Companion · Wrapped · Loop&nbsp;Breaker</h3>
+        <p>An agent-memory layer over the corpus — patterns, summaries, and repeated-mistake nudges.</p>
+      </div>
+    </div>
+
+    <div class="how">
+      <h3>Wire it into your agent</h3>
+      <p>11 MCP tools over stdio + HTTP. Works in Claude&nbsp;Code, Codex, and Cursor. A
+         server/Docker variant runs Qdrant + web + MCP in one image.</p>
+<pre aria-label="Add Memex as an MCP server"><span class="c"># add the Memex MCP server (stdio)</span>
+<span class="k">claude</span> mcp add memex <span class="s">"memex serve --mcp"</span>
+
+<span class="c"># or run the all-in-one server variant</span>
+<span class="k">docker</span> run -p <span class="s">8080:8080</span> two-weeks-team/memex</pre>
+    </div>
+  </main>
+
+  <footer>
+    <span class="made">Built for Qdrant Vector Space Day 2026 — “Think Outside the Bot.”</span>
+    <span class="spacer"></span>
+    <a href="https://github.com/Two-Weeks-Team/memex" rel="noopener">Source</a>
+    <a href="https://two-weeks-team.github.io/memex/" rel="noopener">Live landing</a>
+    <a href="https://github.com/Two-Weeks-Team/memex#server" rel="noopener">Server / Docker</a>
+    <a href="https://github.com/Two-Weeks-Team/memex#mcp" rel="noopener">MCP tools</a>
+  </footer>
+
+<script>
+(function(){
+  "use strict";
+
+  var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  var sceneCv = document.getElementById("scene");
+  var inkCv   = document.getElementById("ink");
+  var sctx = sceneCv.getContext("2d");
+  var ictx = inkCv.getContext("2d");
+
+  var ctxEl   = document.getElementById("ctx");
+  var recall  = document.getElementById("recall");
+  var rLine   = document.getElementById("recallLine");
+  var rWhen   = document.getElementById("recallWhen");
+  var rSim    = document.getElementById("recallSim");
+  var railEl  = document.getElementById("rail");
+
+  // ---- DPI-aware sizing -------------------------------------------------
+  var W = 0, H = 0, DPR = 1;
+  function resize(){
+    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    var r = sceneCv.parentNode.getBoundingClientRect();
+    W = Math.max(1, Math.floor(r.width));
+    H = Math.max(1, Math.floor(r.height));
+    [sceneCv, inkCv].forEach(function(cv){
+      cv.width  = W * DPR;
+      cv.height = H * DPR;
+    });
+    sctx.setTransform(DPR,0,0,DPR,0,0);
+    ictx.setTransform(DPR,0,0,DPR,0,0);
+  }
+  resize();
+  window.addEventListener("resize", function(){ resize(); if(reduce) drawStatic(MEMORIES[0]); });
+
+  // ======================================================================
+  //  THE MEMORIES — each is a hand-painted SCENE (a tableau), not a quote.
+  //  Each scene is a small function that paints onto the underlying canvas.
+  //  Palettes are deliberately distinct so each bloom feels like a new world.
+  // ======================================================================
+
+  function lerp(a,b,t){ return a+(b-a)*t; }
+
+  // shared scene helpers — all coordinates in CSS px, centered around (cx,cy)
+  function glowDot(ctx,x,y,r,col,a){
+    var g = ctx.createRadialGradient(x,y,0,x,y,r);
+    g.addColorStop(0, col);
+    g.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.globalAlpha = a; ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+
+  // A scene = { context, recall line, when, sim, palette glow, paint(ctx,cx,cy,s) }
+  var MEMORIES = [
+    {
+      ctx: "debugging an auth retry that 401s on refresh",
+      line: "The night the token refresh finally held — you found the clock-skew, not the secret.",
+      when: "session · 6 weeks ago", sim: "0.91 similar",
+      bg: ["#0c1322","#1a2b3a"],
+      paint: function(c,cx,cy,s){
+        // late-night desk: a glowing monitor with a green-pass line, a mug, window with city lights
+        // window / night sky
+        c.fillStyle = "rgba(20,34,52,.6)";
+        roundRect(c, cx-300*s, cy-200*s, 600*s, 400*s, 18*s); c.fill();
+        // city lights in the window
+        for(var i=0;i<26;i++){
+          var lx = cx-280*s + Math.random()*560*s;
+          var ly = cy-150*s + Math.random()*150*s;
+          glowDot(c,lx,ly,3*s,"rgba(242,200,121,.9)",.5+Math.random()*.4);
+        }
+        // monitor body
+        c.fillStyle="#060a12";
+        roundRect(c, cx-180*s, cy-110*s, 360*s, 220*s, 10*s); c.fill();
+        c.strokeStyle="rgba(95,214,196,.35)"; c.lineWidth=2*s; c.stroke();
+        // screen content: a passing test, code lines
+        c.save(); c.beginPath(); roundRect(c, cx-168*s, cy-98*s, 336*s, 196*s, 6*s); c.clip();
+        c.fillStyle="rgba(8,14,22,.95)"; c.fillRect(cx-168*s,cy-98*s,336*s,196*s);
+        var rows=8;
+        for(var r2=0;r2<rows;r2++){
+          var y=cy-86*s + r2*22*s;
+          var w=(60+Math.random()*180)*s;
+          c.fillStyle = r2===4 ? "rgba(95,214,196,.9)" : "rgba(120,140,170,.35)";
+          roundRect(c, cx-150*s, y, r2===4?220*s:w, 7*s, 3*s); c.fill();
+        }
+        // the green PASS check on the highlighted row
+        glowDot(c, cx+96*s, cy+2*s, 26*s, "rgba(95,214,196,.8)", .9);
+        c.strokeStyle="#0a0c10"; c.lineWidth=4*s; c.lineCap="round";
+        c.beginPath(); c.moveTo(cx+86*s,cy+2*s); c.lineTo(cx+93*s,cy+9*s); c.lineTo(cx+106*s,cy-7*s); c.stroke();
+        c.restore();
+        // monitor glow spill on desk
+        glowDot(c, cx, cy+150*s, 240*s, "rgba(95,214,196,.16)", 1);
+        // coffee mug, faint steam
+        c.fillStyle="#1c2533"; roundRect(c, cx-250*s, cy+120*s, 52*s, 46*s, 8*s); c.fill();
+        c.strokeStyle="rgba(242,200,121,.5)"; c.lineWidth=3*s;
+        c.beginPath();
+        c.moveTo(cx-224*s,cy+118*s);
+        c.bezierCurveTo(cx-214*s,cy+100*s,cx-234*s,cy+92*s,cx-224*s,cy+74*s);
+        c.stroke();
+      }
+    },
+    {
+      ctx: "untangling a migration that dropped a column twice",
+      line: "When you read your own commit message back and realized the rollback was already written.",
+      when: "session · 3 months ago", sim: "0.88 similar",
+      bg: ["#140c1e","#2a1736"],
+      paint: function(c,cx,cy,s){
+        // a branching git graph lighting up — past commits as nodes on a violet vine
+        var nodes=[
+          [cx-220*s,cy+90*s],[cx-120*s,cy+40*s],[cx-20*s,cy+70*s],
+          [cx+70*s,cy-10*s],[cx+30*s,cy-110*s],[cx+150*s,cy-70*s],
+          [cx+210*s,cy+30*s]
+        ];
+        c.strokeStyle="rgba(184,156,240,.55)"; c.lineWidth=3*s; c.lineCap="round";
+        c.beginPath();
+        for(var i=0;i<nodes.length-1;i++){
+          c.moveTo(nodes[i][0],nodes[i][1]);
+          var mx=(nodes[i][0]+nodes[i+1][0])/2;
+          c.quadraticCurveTo(mx, nodes[i][1]-26*s, nodes[i+1][0],nodes[i+1][1]);
+        }
+        c.stroke();
+        // a side-branch (the rollback) glowing gold
+        c.strokeStyle="rgba(242,200,121,.7)"; c.lineWidth=3*s;
+        c.beginPath();
+        c.moveTo(nodes[3][0],nodes[3][1]);
+        c.quadraticCurveTo(cx+120*s,cy+80*s, cx+60*s, cy+150*s);
+        c.stroke();
+        glowDot(c, cx+60*s, cy+150*s, 34*s, "rgba(242,200,121,.85)",.95);
+        // nodes
+        for(var n=0;n<nodes.length;n++){
+          var hot = n===3;
+          glowDot(c, nodes[n][0],nodes[n][1], hot?30*s:16*s, hot?"rgba(184,156,240,.95)":"rgba(184,156,240,.55)", hot?1:.7);
+          c.fillStyle = hot ? "#fff" : "#cdb8ff";
+          c.beginPath(); c.arc(nodes[n][0],nodes[n][1], hot?6*s:4*s,0,Math.PI*2); c.fill();
+        }
+        glowDot(c, cx, cy, 300*s, "rgba(184,156,240,.10)",1);
+      }
+    },
+    {
+      ctx: "a flaky test that only fails in CI at 3 a.m.",
+      line: "The afternoon the race condition revealed itself — two writers, one unguarded map.",
+      when: "session · last spring", sim: "0.86 similar",
+      bg: ["#0a1614","#13302a"],
+      paint: function(c,cx,cy,s){
+        // two timelines crossing — a race condition as two light-threads colliding at a node
+        c.lineCap="round";
+        // thread A (teal)
+        c.strokeStyle="rgba(95,214,196,.75)"; c.lineWidth=3.5*s;
+        c.beginPath();
+        c.moveTo(cx-300*s,cy-80*s);
+        c.bezierCurveTo(cx-100*s,cy-120*s, cx-40*s,cy+10*s, cx+10*s,cy+4*s);
+        c.stroke();
+        // thread B (rose)
+        c.strokeStyle="rgba(240,138,138,.75)"; c.lineWidth=3.5*s;
+        c.beginPath();
+        c.moveTo(cx-300*s,cy+110*s);
+        c.bezierCurveTo(cx-90*s,cy+150*s, cx-30*s,cy-6*s, cx+10*s,cy+4*s);
+        c.stroke();
+        // collision flash at the contested write
+        glowDot(c, cx+10*s, cy+4*s, 60*s, "rgba(255,236,180,.9)", 1);
+        glowDot(c, cx+10*s, cy+4*s, 18*s, "#ffffff", 1);
+        // the shared map: a small grid both threads reach for
+        c.strokeStyle="rgba(255,255,255,.35)"; c.lineWidth=1.4*s;
+        for(var gx=0;gx<3;gx++)for(var gy=0;gy<3;gy++){
+          var x=cx+90*s+gx*30*s, y=cy-30*s+gy*30*s;
+          c.strokeRect(x,y,26*s,26*s);
+          if(gx===1&&gy===1){ glowDot(c,x+13*s,y+13*s,22*s,"rgba(240,138,138,.8)",.9); }
+        }
+        c.strokeStyle="rgba(255,255,255,.25)"; c.lineWidth=2*s;
+        c.beginPath(); c.moveTo(cx+10*s,cy+4*s); c.lineTo(cx+90*s,cy-2*s); c.stroke();
+        glowDot(c, cx, cy, 300*s, "rgba(95,214,196,.08)",1);
+      }
+    },
+    {
+      ctx: "shaving 400ms off a query that scans the whole table",
+      line: "The moment the latency graph dropped off a cliff — the index you almost didn't add.",
+      when: "session · 8 days ago", sim: "0.90 similar",
+      bg: ["#1a1206","#33260c"],
+      paint: function(c,cx,cy,s){
+        // a latency graph plunging — gold area chart on a dark grid, the cliff lit up
+        c.strokeStyle="rgba(255,255,255,.08)"; c.lineWidth=1*s;
+        for(var gy=0;gy<6;gy++){ var y=cy-130*s+gy*46*s; c.beginPath(); c.moveTo(cx-280*s,y); c.lineTo(cx+280*s,y); c.stroke(); }
+        // the curve: high, then a sharp drop, then low+flat
+        var pts=[
+          [cx-280*s,cy-90*s],[cx-200*s,cy-104*s],[cx-130*s,cy-86*s],
+          [cx-70*s,cy-100*s],[cx-40*s,cy-96*s],
+          [cx-10*s,cy+70*s],   // the cliff
+          [cx+60*s,cy+96*s],[cx+160*s,cy+90*s],[cx+280*s,cy+98*s]
+        ];
+        // filled area
+        c.beginPath(); c.moveTo(pts[0][0],pts[0][1]);
+        for(var p=1;p<pts.length;p++) c.lineTo(pts[p][0],pts[p][1]);
+        c.lineTo(cx+280*s,cy+140*s); c.lineTo(cx-280*s,cy+140*s); c.closePath();
+        var gg=c.createLinearGradient(0,cy-110*s,0,cy+140*s);
+        gg.addColorStop(0,"rgba(242,200,121,.45)"); gg.addColorStop(1,"rgba(242,200,121,0)");
+        c.fillStyle=gg; c.fill();
+        // line
+        c.strokeStyle="rgba(255,214,140,.95)"; c.lineWidth=3*s; c.lineJoin="round";
+        c.beginPath(); c.moveTo(pts[0][0],pts[0][1]);
+        for(var p2=1;p2<pts.length;p2++) c.lineTo(pts[p2][0],pts[p2][1]);
+        c.stroke();
+        // mark the cliff
+        glowDot(c, pts[5][0], (pts[4][1]+pts[5][1])/2, 50*s, "rgba(255,236,180,.7)", .9);
+        c.fillStyle="#fff";
+        c.beginPath(); c.arc(pts[5][0],pts[5][1],5*s,0,Math.PI*2); c.fill();
+        glowDot(c, cx, cy+40*s, 320*s, "rgba(242,200,121,.07)",1);
+      }
+    }
+  ];
+
+  // tiny rounded-rect helper
+  function roundRect(c,x,y,w,h,r){
+    c.beginPath();
+    c.moveTo(x+r,y);
+    c.arcTo(x+w,y,x+w,y+h,r);
+    c.arcTo(x+w,y+h,x,y+h,r);
+    c.arcTo(x,y+h,x,y,r);
+    c.arcTo(x,y,x+w,y,r);
+    c.closePath();
+  }
+
+  // build the cadence rail
+  MEMORIES.forEach(function(){
+    var p=document.createElement("span"); p.className="pip"; railEl.appendChild(p);
+  });
+  var pips = railEl.querySelectorAll(".pip");
+
+  // ======================================================================
+  //  INK SIMULATION
+  //  A drop hits the field and blooms outward as a cloud of swirling
+  //  particles (curl-noise-ish flow). Where ink has spread, we reveal the
+  //  scene painted underneath using a soft destination-in mask.
+  // ======================================================================
+
+  function paintScene(mem){
+    sctx.clearRect(0,0,W,H);
+    // moody background wash for this memory
+    var g = sctx.createLinearGradient(0,0,W,H);
+    g.addColorStop(0, mem.bg[0]); g.addColorStop(1, mem.bg[1]);
+    sctx.globalAlpha=.5; sctx.fillStyle=g; sctx.fillRect(0,0,W,H); sctx.globalAlpha=1;
+    var cx=W/2, cy=H*0.46;
+    var s = Math.min(W,H)/640;   // scale scene to viewport
+    s = Math.max(0.55, Math.min(s, 1.5));
+    mem.paint(sctx, cx, cy, s);
+  }
+
+  // particle cloud for the ink
+  var parts=[];
+  function seedDrop(cx,cy,mem){
+    parts.length=0;
+    var n = Math.floor( (W*H)/9000 );
+    n = Math.max(140, Math.min(n, 520));
+    // ink hue derived from the memory palette
+    var hue = mem.inkHue || 190;
+    for(var i=0;i<n;i++){
+      var ang = Math.random()*Math.PI*2;
+      var spd = Math.random()*1.4+0.2;
+      parts.push({
+        x:cx + (Math.random()-.5)*16,
+        y:cy + (Math.random()-.5)*16,
+        vx:Math.cos(ang)*spd, vy:Math.sin(ang)*spd,
+        r: Math.random()*26+10,
+        life:0, max: 90 + Math.random()*70,
+        seed: Math.random()*1000,
+        hue: hue + (Math.random()*40-20)
+      });
+    }
+  }
+
+  // pseudo curl noise via layered sin — cheap but organic
+  function flow(x,y,t,seed){
+    var a = Math.sin(x*0.008 + t*0.6 + seed)*0.9
+          + Math.sin(y*0.011 - t*0.4 + seed*1.3)*0.7
+          + Math.cos((x+y)*0.006 + t*0.3)*0.6;
+    return a;
+  }
+
+  var blooming=false, bloomT=0, current=0, maskRevealed=0;
+
+  function bloomStep(dt){
+    bloomT += dt;
+    var t = bloomT*0.001;
+
+    // 1) advance particles
+    ictx.setTransform(DPR,0,0,DPR,0,0);
+    ictx.clearRect(0,0,W,H);
+    ictx.globalCompositeOperation="lighter";
+    var alive=0;
+    for(var i=0;i<parts.length;i++){
+      var p=parts[i];
+      if(p.life>p.max) continue;
+      alive++;
+      var f = flow(p.x,p.y,t,p.seed);
+      // curl: rotate velocity by the field, plus slow outward drift
+      var ca=Math.cos(f), sa=Math.sin(f);
+      var nvx=p.vx*0.985 + ca*0.16;
+      var nvy=p.vy*0.985 + sa*0.16;
+      p.vx=nvx; p.vy=nvy;
+      p.x+=p.vx; p.y+=p.vy;
+      p.r += 0.42;            // diffuse / grow
+      p.life += dt*0.06;
+      var lifeRatio = p.life/p.max;
+      var alpha = Math.sin(Math.min(lifeRatio,1)*Math.PI) * 0.5; // fade in then out
+      // draw soft ink blob
+      var col = "hsla("+p.hue+",70%,62%,"+ (alpha*0.9) +")";
+      var gd = ictx.createRadialGradient(p.x,p.y,0,p.x,p.y,p.r);
+      gd.addColorStop(0, col);
+      gd.addColorStop(1, "hsla("+p.hue+",70%,40%,0)");
+      ictx.fillStyle=gd;
+      ictx.beginPath(); ictx.arc(p.x,p.y,p.r,0,Math.PI*2); ictx.fill();
+    }
+    ictx.globalCompositeOperation="source-over";
+
+    // 2) reveal the scene where ink has spread:
+    // build a mask from the same particle field on the SCENE layer.
+    // We progressively un-dim the scene by drawing a growing soft reveal.
+    var reveal = Math.min(1, bloomT/2600);
+    maskRevealed = reveal;
+
+    return alive>0 || reveal<1;
+  }
+
+  // we render the scene fully, but keep a dark veil over it that the ink "eats away"
+  function compositeVeil(){
+    // a dark veil canvas drawn over scene that the bloom erases.
+    // Implemented by re-rendering: scene already painted; we overlay darkness
+    // minus the bloomed area. Use the ink particle positions as the reveal.
+    // For performance we approximate the reveal with one expanding radial.
+  }
+
+  // --- orchestration: type context, drop ink, bloom, surface recall -------
+  var typeTimer=null;
+  function typeContext(text, done){
+    ctxEl.innerHTML="";
+    var i=0;
+    clearInterval(typeTimer);
+    typeTimer=setInterval(function(){
+      i++;
+      ctxEl.innerHTML = escapeHtml(text.slice(0,i));
+      if(i>=text.length){ clearInterval(typeTimer); done&&done(); }
+    }, 26);
+  }
+  function escapeHtml(s){ return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+
+  function surfaceRecall(mem){
+    rLine.textContent = mem.line;
+    rWhen.textContent = mem.when;
+    rSim.textContent = mem.sim;
+    recall.classList.add("show");
+  }
+  function hideRecall(){ recall.classList.remove("show"); }
+
+  function setPips(idx){
+    for(var i=0;i<pips.length;i++) pips[i].classList.toggle("on", i===idx);
+  }
+
+  // ---- the loop ----------------------------------------------------------
+  var lastFrame=0, mode="idle", modeStart=0, activeMem=null;
+  // assign ink hues per memory (teal/violet/rose/gold worlds)
+  MEMORIES[0].inkHue=180; MEMORIES[1].inkHue=270; MEMORIES[2].inkHue=350; MEMORIES[3].inkHue=42;
+
+  function startCycle(idx){
+    activeMem = MEMORIES[idx];
+    setPips(idx);
+    hideRecall();
+    // 1) the current context types in
+    typeContext(activeMem.ctx, function(){
+      // 2) after a beat, the drop hits and blooms
+      setTimeout(function(){
+        paintScene(activeMem);
+        seedDrop(W/2, H*0.46, activeMem);
+        // overlay the veil that the bloom reveals through
+        beginBloom();
+      }, 420);
+    });
+  }
+
+  // veil: a separate offscreen so the scene fades in masked by the bloom
+  var veilAlpha=1;
+  function beginBloom(){
+    mode="bloom"; modeStart=performance.now(); bloomT=0; veilAlpha=1;
+    if(reduce){ // shouldn't reach here, static path handles it
+      veilAlpha=0; surfaceRecall(activeMem); return;
+    }
+  }
+
+  function frame(ts){
+    var dt = lastFrame ? Math.min(ts-lastFrame, 48) : 16;
+    lastFrame=ts;
+
+    if(mode==="bloom"){
+      var alive = bloomStep(dt);
+      // veil fades as the bloom reveals
+      veilAlpha = Math.max(0, 1 - (bloomT/1800));
+      // draw veil over the scene (on the scene canvas top, via globalAlpha trick:
+      // we redraw scene then dark veil scaled by veilAlpha each frame)
+      // To keep scene crisp, we paint veil on the ink canvas behind particles instead:
+      // simpler: dim the whole stage via a CSS-less overlay drawn on scene.
+      drawVeilOnScene(activeMem, veilAlpha);
+
+      var elapsed = ts-modeStart;
+      if(elapsed>1500 && recall.classList.contains("show")===false){
+        surfaceRecall(activeMem);
+      }
+      if(!alive && elapsed>3200){
+        mode="hold"; modeStart=ts;
+      }
+    } else if(mode==="hold"){
+      // let the scene + recollection breathe, then dissolve to the next
+      if(ts-modeStart > 3600){
+        mode="fadeout"; modeStart=ts;
+        hideRecall();
+      }
+    } else if(mode==="fadeout"){
+      var k=Math.min(1,(ts-modeStart)/900);
+      drawVeilOnScene(activeMem, k); // veil back up → scene recedes into the dark
+      ictx.clearRect(0,0,W,H);
+      ictx.globalAlpha=1-k;
+      // gently fade the ink too (already cleared; nothing to do)
+      if(k>=1){
+        sctx.clearRect(0,0,W,H);
+        // irregular, lifelike pause before the next moment arrives unbidden
+        var pause = 900 + Math.random()*1400;
+        mode="idle"; modeStart=ts;
+        nextPause=pause;
+        current=(current+1)%MEMORIES.length;
+      }
+    } else if(mode==="idle"){
+      if(ts-modeStart > (nextPause||1200)){
+        startCycle(current);
+        mode="waiting";
+      }
+    }
+    raf=requestAnimationFrame(frame);
+  }
+
+  // draw the scene under a dark veil of given alpha (1=hidden, 0=fully visible),
+  // with the bloomed region punched out so the scene shows through the ink.
+  function drawVeilOnScene(mem, vAlpha){
+    // re-render scene fresh
+    paintScene(mem);
+    if(vAlpha<=0) return;
+    // veil
+    sctx.save();
+    sctx.globalCompositeOperation="source-over";
+    sctx.fillStyle="rgba(4,5,10,"+ (0.94*vAlpha) +")";
+    sctx.fillRect(0,0,W,H);
+    // punch holes where ink is, so the scene blooms through the spreading ink
+    sctx.globalCompositeOperation="destination-out";
+    for(var i=0;i<parts.length;i++){
+      var p=parts[i];
+      if(p.life>p.max) continue;
+      var lifeRatio=p.life/p.max;
+      var a = Math.sin(Math.min(lifeRatio,1)*Math.PI);
+      var gd=sctx.createRadialGradient(p.x,p.y,0,p.x,p.y,p.r*1.15);
+      gd.addColorStop(0,"rgba(0,0,0,"+(a*0.9)+")");
+      gd.addColorStop(1,"rgba(0,0,0,0)");
+      sctx.fillStyle=gd;
+      sctx.beginPath(); sctx.arc(p.x,p.y,p.r*1.15,0,Math.PI*2); sctx.fill();
+    }
+    sctx.restore();
+    sctx.globalCompositeOperation="source-over";
+  }
+
+  var raf=0, nextPause=600;
+
+  // ---- reduced motion: render one fully-bloomed scene, statically --------
+  function drawStatic(mem){
+    activeMem=mem;
+    paintScene(mem);
+    // a single, settled ink halo (no animation) so the "ink bloom" identity reads
+    ictx.clearRect(0,0,W,H);
+    var cx=W/2, cy=H*0.46;
+    ictx.globalCompositeOperation="lighter";
+    for(var i=0;i<60;i++){
+      var ang=Math.random()*Math.PI*2, rad=Math.random()*Math.min(W,H)*0.32;
+      var x=cx+Math.cos(ang)*rad, y=cy+Math.sin(ang)*rad;
+      var r=20+Math.random()*60;
+      var hue=mem.inkHue+(Math.random()*30-15);
+      var gd=ictx.createRadialGradient(x,y,0,x,y,r);
+      gd.addColorStop(0,"hsla("+hue+",70%,60%,0.18)");
+      gd.addColorStop(1,"hsla("+hue+",70%,40%,0)");
+      ictx.fillStyle=gd; ictx.beginPath(); ictx.arc(x,y,r,0,Math.PI*2); ictx.fill();
+    }
+    ictx.globalCompositeOperation="source-over";
+    ctxEl.textContent = mem.ctx;
+    surfaceRecall(mem);
+    setPips(MEMORIES.indexOf(mem));
+  }
+
+  // ---- kick off ----------------------------------------------------------
+  if(reduce){
+    drawStatic(MEMORIES[0]);
+  } else {
+    current=0; mode="idle"; modeStart=performance.now(); nextPause=400;
+    raf=requestAnimationFrame(frame);
+    // pause animation when the stage scrolls out of view (save cycles)
+    var stage=document.querySelector(".stage");
+    if("IntersectionObserver" in window){
+      var io=new IntersectionObserver(function(ents){
+        ents.forEach(function(e){
+          if(e.isIntersecting){ if(!raf) raf=requestAnimationFrame(frame); }
+          else { if(raf){ cancelAnimationFrame(raf); raf=0; lastFrame=0; } }
+        });
+      },{threshold:0.05});
+      io.observe(stage);
+    }
+  }
+})();
+</script>
+</body>
+</html>

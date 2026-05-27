@@ -1,0 +1,719 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Memex — the aurora remembers</title>
+<meta name="description" content="Memex turns your Claude Code & Codex session history into a navigable associative memory backed by Qdrant. A remembered coding night crystallizes out of the aurora on its own — surfaced by similarity, not search." />
+<style>
+  :root{
+    --ink:#e6ecff;
+    --dim:#93a0cf;
+    --faint:#5e6a9c;
+    --aur-green:#5bffc0;
+    --aur-teal:#39d6ff;
+    --aur-violet:#b98bff;
+    --aur-rose:#ff8fd0;
+    --warm:#ffcf86;        /* lamp / screen glow inside a scene */
+    --bg0:#02030a;
+    --bg1:#060916;
+    --panel: rgba(10,14,30,.5);
+    --hair: rgba(150,180,255,.16);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    background:
+      radial-gradient(1300px 820px at 50% 8%, #0b1330 0%, transparent 62%),
+      radial-gradient(1200px 800px at 14% 96%, #070b1d 0%, transparent 55%),
+      linear-gradient(180deg, var(--bg1), var(--bg0) 72%);
+    color:var(--ink);
+    font:16px/1.6 ui-sans-serif,-apple-system,"Segoe UI",Roboto,Inter,system-ui,sans-serif;
+    overflow-x:hidden;
+    -webkit-font-smoothing:antialiased;
+  }
+  a{color:#aebfff;text-decoration:none}
+  a:hover{text-decoration:underline}
+  code,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+
+  /* ---------- the aurora stage ---------- */
+  .stage{position:relative;width:100%;height:100svh;min-height:640px;overflow:hidden}
+  #aurora{position:absolute;inset:0;width:100%;height:100%;display:block}
+
+  /* vignette + ground haze so type stays legible over the luminous field */
+  .stage::after{
+    content:"";position:absolute;inset:0;pointer-events:none;
+    background:
+      radial-gradient(130% 90% at 50% 36%, transparent 40%, rgba(2,3,10,.6) 100%),
+      linear-gradient(180deg, rgba(2,3,10,.35) 0%, transparent 24%, transparent 56%, rgba(2,3,10,.9) 100%);
+  }
+
+  /* ---------- overlaid copy ---------- */
+  .hud{position:absolute;inset:0;display:flex;flex-direction:column;pointer-events:none;z-index:3}
+  .hud > *{pointer-events:auto}
+
+  .topbar{display:flex;align-items:center;justify-content:space-between;gap:16px;
+    padding:22px clamp(18px,5vw,56px)}
+  .brand{display:flex;align-items:center;gap:11px;font-weight:700;letter-spacing:.16em;
+    text-transform:uppercase;font-size:13px;color:var(--ink)}
+  .brand .dot{width:9px;height:9px;border-radius:50%;
+    background:radial-gradient(circle at 40% 35%, #d6fff0, var(--aur-green));
+    box-shadow:0 0 12px 2px rgba(91,255,192,.6)}
+  .topbar nav{display:flex;gap:clamp(10px,2.4vw,26px);font-size:13px;color:var(--dim);
+    letter-spacing:.02em}
+  .topbar nav a{color:var(--dim)}
+  .topbar nav a:hover{color:var(--ink)}
+
+  .hero{margin-top:auto;padding:0 clamp(18px,5vw,56px) clamp(26px,6vh,64px);max-width:760px}
+
+  /* the "current situation" that calls the memory up out of the gas */
+  .moment{display:inline-flex;align-items:center;gap:10px;margin-bottom:20px;
+    padding:8px 14px;border:1px solid var(--hair);border-radius:999px;
+    background:var(--panel);backdrop-filter:blur(6px);
+    font-size:12.5px;letter-spacing:.02em;color:var(--dim);max-width:100%}
+  .moment .pulse{width:7px;height:7px;border-radius:50%;background:var(--aur-teal);flex:0 0 auto;
+    box-shadow:0 0 0 0 rgba(57,214,255,.6);animation:pulse 2.8s ease-out infinite}
+  .moment b{color:var(--ink);font-weight:600}
+  .moment #situation{color:var(--ink);font-weight:600}
+  @keyframes pulse{
+    0%{box-shadow:0 0 0 0 rgba(57,214,255,.55)}
+    70%{box-shadow:0 0 0 9px rgba(57,214,255,0)}
+    100%{box-shadow:0 0 0 0 rgba(57,214,255,0)}
+  }
+
+  h1{margin:0;font-weight:680;font-size:clamp(33px,6vw,62px);line-height:1.04;
+    letter-spacing:-.018em;color:#fff;text-shadow:0 2px 44px rgba(4,6,18,.75)}
+  h1 .glow{color:var(--aur-green);text-shadow:0 0 30px rgba(91,255,192,.4)}
+  .lede{margin:18px 0 0;font-size:clamp(15px,2.1vw,18.5px);color:var(--dim);max-width:600px}
+  .lede b{color:var(--ink);font-weight:600}
+
+  .cta{display:flex;flex-wrap:wrap;gap:13px;margin-top:28px}
+  .btn{display:inline-flex;align-items:center;gap:9px;padding:12px 20px;border-radius:11px;
+    font-size:14.5px;font-weight:600;letter-spacing:.01em;border:1px solid transparent;
+    transition:transform .15s ease, box-shadow .25s ease, background .25s ease}
+  .btn:hover{text-decoration:none;transform:translateY(-1px)}
+  .btn-primary{background:linear-gradient(180deg,#c7fff0,#5bffc0);color:#053226;
+    box-shadow:0 8px 30px rgba(91,255,192,.26)}
+  .btn-primary:hover{box-shadow:0 12px 36px rgba(91,255,192,.4)}
+  .btn-ghost{border-color:var(--hair);color:var(--ink);background:var(--panel);
+    backdrop-filter:blur(6px)}
+  .btn-ghost:hover{border-color:rgba(150,180,255,.42)}
+
+  .legend{margin-top:22px;font-size:12.5px;color:var(--faint);letter-spacing:.01em;
+    display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+  .legend .scene-label{color:var(--aur-green);font-weight:600;letter-spacing:.03em}
+
+  /* small replay control, lower-right of the stage */
+  .replay{position:absolute;right:clamp(16px,4vw,40px);bottom:clamp(20px,5vh,40px);
+    display:inline-flex;align-items:center;gap:8px;padding:9px 14px;border-radius:999px;
+    border:1px solid var(--hair);background:var(--panel);backdrop-filter:blur(6px);
+    color:var(--dim);font-size:12.5px;cursor:pointer;z-index:4}
+  .replay:hover{color:var(--ink);border-color:rgba(150,180,255,.4)}
+  .replay svg{width:13px;height:13px;fill:currentColor}
+
+  /* ---------- the ground-truth section below the fold ---------- */
+  .below{position:relative;z-index:2;max-width:1080px;margin:0 auto;
+    padding:clamp(56px,10vh,110px) clamp(18px,5vw,40px) 40px}
+  .kicker{font-size:12px;letter-spacing:.22em;text-transform:uppercase;color:var(--faint);
+    margin:0 0 14px}
+  .below h2{font-size:clamp(24px,4vw,38px);line-height:1.12;margin:0;color:#fff;
+    letter-spacing:-.01em;font-weight:660;max-width:760px}
+  .below p.sub{color:var(--dim);max-width:680px;margin:16px 0 0;font-size:16px}
+
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(238px,1fr));gap:16px;
+    margin-top:42px}
+  .card{border:1px solid var(--hair);border-radius:16px;padding:22px 22px 24px;
+    background:linear-gradient(180deg, rgba(14,19,40,.6), rgba(8,11,24,.45));
+    transition:border-color .2s ease, transform .2s ease}
+  .card:hover{border-color:rgba(150,180,255,.4);transform:translateY(-2px)}
+  .card h3{margin:0 0 8px;font-size:16px;color:#fff;letter-spacing:.01em;
+    display:flex;align-items:center;gap:9px}
+  .card h3 .gp{width:8px;height:8px;border-radius:50%;background:var(--aur-teal);
+    box-shadow:0 0 8px 1px rgba(57,214,255,.7);flex:0 0 auto}
+  .card p{margin:0;font-size:14px;color:var(--dim);line-height:1.55}
+
+  .facts{margin-top:44px;border:1px solid var(--hair);border-radius:16px;overflow:hidden;
+    background:rgba(8,11,24,.5)}
+  .facts .row{display:grid;grid-template-columns:160px 1fr;gap:18px;padding:16px 22px;
+    border-top:1px solid rgba(150,180,255,.08);font-size:14.5px}
+  .facts .row:first-child{border-top:0}
+  .facts .row .lab{color:var(--faint);letter-spacing:.04em;font-size:12.5px;
+    text-transform:uppercase;padding-top:2px}
+  .facts .row .val{color:var(--ink)}
+  .facts .row .val .mono{color:var(--aur-teal);font-size:13.5px}
+
+  .addline{margin-top:34px;border:1px solid var(--hair);border-radius:14px;
+    background:#05081a;padding:16px 18px;font-size:13.5px;color:var(--dim);overflow-x:auto}
+  .addline .mono{color:var(--ink)}
+  .addline .c{color:var(--aur-green)}
+
+  footer{position:relative;z-index:2;border-top:1px solid var(--hair);margin-top:60px}
+  .foot{max-width:1080px;margin:0 auto;padding:28px clamp(18px,5vw,40px) 60px;
+    display:flex;flex-wrap:wrap;gap:18px;justify-content:space-between;align-items:center;
+    color:var(--faint);font-size:13px}
+  .foot a{color:var(--dim)}
+  .foot .links{display:flex;flex-wrap:wrap;gap:18px}
+
+  /* ---------- reduced motion: static, crystallized scene ---------- */
+  @media (prefers-reduced-motion: reduce){
+    .moment .pulse{animation:none}
+  }
+
+  @media (max-width:640px){
+    .topbar nav{display:none}
+    .facts .row{grid-template-columns:1fr;gap:4px}
+    .replay{display:none}
+  }
+</style>
+</head>
+<body>
+
+<section class="stage" aria-label="A slow aurora over a dark sky; a remembered coding night crystallizes out of the luminous gas, then dissolves as the next arrives">
+  <canvas id="aurora" aria-hidden="true"></canvas>
+
+  <div class="hud">
+    <header class="topbar">
+      <div class="brand"><span class="dot" aria-hidden="true"></span> Memex</div>
+      <nav aria-label="Primary">
+        <a href="https://github.com/Two-Weeks-Team/memex">Repo</a>
+        <a href="https://two-weeks-team.github.io/memex/">Live</a>
+        <a href="#how">How it works</a>
+        <a href="#agent">For agents</a>
+      </nav>
+    </header>
+
+    <div class="hero">
+      <span class="moment">
+        <span class="pulse" aria-hidden="true"></span>
+        Right now you're <span id="situation">debugging an auth-retry loop</span> &mdash; and the sky stirs&hellip;
+      </span>
+
+      <h1>You lived this once.<br>The aurora <span class="glow">remembers&nbsp;it.</span></h1>
+
+      <p class="lede">
+        You never wrote it down. But out of the slow, luminous gas a past night
+        <b>crystallizes into a scene you can see</b> &mdash; the desk, the lamp, the lit
+        screen &mdash; surfacing on its own, because the moment you're in called it up.
+        Then it dissolves, and the next one gathers.
+      </p>
+
+      <div class="cta">
+        <a class="btn btn-primary" href="https://github.com/Two-Weeks-Team/memex">Get Memex on GitHub</a>
+        <a class="btn btn-ghost" href="https://two-weeks-team.github.io/memex/">See it live</a>
+      </div>
+
+      <p class="legend">
+        <span class="scene-label" id="sceneName">gathering&hellip;</span>
+        <span aria-hidden="true">&middot;</span>
+        it arrives unbidden &mdash; an associative trail, not a search
+      </p>
+    </div>
+
+    <button class="replay" id="replay" type="button" aria-label="Let the aurora gather the next memory">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5V1L7 6l5 5V7a5 5 0 1 1-5 5H5a7 7 0 1 0 7-7z"/></svg>
+      Next memory
+    </button>
+  </div>
+</section>
+
+<main class="below">
+  <section id="how">
+    <p class="kicker">What just happened</p>
+    <h2>People don't document every memory &mdash; yet when the moment arrives,
+      the relevant thought surfaces on its own.</h2>
+    <p class="sub">
+      Memex is a non-chatbot, LLM-free-at-runtime tool that reads your existing
+      Claude&nbsp;Code and Codex session history and turns it into a navigable
+      associative memory backed by <b style="color:var(--ink)">Qdrant</b>. You move through your own past by
+      <i>similarity</i>, not keywords &mdash; and the relevant moment can rise to you proactively,
+      the way that scene gathered out of the aurora above.
+    </p>
+
+    <div class="grid">
+      <article class="card">
+        <h3><span class="gp" aria-hidden="true"></span>Time Machine</h3>
+        <p>Replay any past session as it happened &mdash; the whole scene, not a snippet.</p>
+      </article>
+      <article class="card">
+        <h3><span class="gp" aria-hidden="true"></span>Lens</h3>
+        <p>Named-vector weighted search to look through your history from one angle at a time.</p>
+      </article>
+      <article class="card">
+        <h3><span class="gp" aria-hidden="true"></span>Topology</h3>
+        <p>A distance-matrix &rarr; MST graph showing how your sessions actually connect.</p>
+      </article>
+      <article class="card">
+        <h3><span class="gp" aria-hidden="true"></span>Mix &amp; Discovery</h3>
+        <p>Positive / negative recommendation to pull related work toward you and push noise away.</p>
+      </article>
+      <article class="card">
+        <h3><span class="gp" aria-hidden="true"></span>Proactive Recall</h3>
+        <p>The piece that lit the sky above: a relevant past moment surfaces because the current one evoked it.</p>
+      </article>
+      <article class="card">
+        <h3><span class="gp" aria-hidden="true"></span>Companion &middot; Wrapped &middot; Loop&nbsp;Breaker</h3>
+        <p>An agent-memory layer over your corpus &mdash; recap what you've done, and catch yourself circling.</p>
+      </article>
+    </div>
+
+    <div class="facts" aria-label="What Memex is">
+      <div class="row"><div class="lab">Reads</div>
+        <div class="val"><span class="mono">~/.claude/projects/**/*.jsonl</span>, legacy transcripts, and <span class="mono">history.jsonl</span></div></div>
+      <div class="row"><div class="lab">Backed by</div>
+        <div class="val">Qdrant &mdash; navigate by vector similarity, no runtime LLM</div></div>
+      <div class="row"><div class="lab">Why</div>
+        <div class="val">Claude&nbsp;Code silently migrates and deletes old sessions. Memex keeps a corpus <b style="color:var(--ink)">you own.</b></div></div>
+      <div class="row"><div class="lab">Built for</div>
+        <div class="val">Qdrant Vector Space Day 2026 &mdash; <i>"Think Outside the Bot."</i></div></div>
+    </div>
+  </section>
+
+  <section id="agent">
+    <p class="kicker" style="margin-top:56px">For your agent</p>
+    <h2 style="font-size:clamp(20px,3vw,28px)">11 MCP tools over stdio + HTTP &mdash;
+      works in Claude&nbsp;Code, Codex, and Cursor.</h2>
+    <p class="sub">A server / Docker variant runs Qdrant, the web UI, and the MCP server in one image.
+      The tools let an agent recall, replay, and connect across your own history.</p>
+    <div class="addline mono">
+      <span class="c">$</span> claude mcp add memex -- memex-mcp
+    </div>
+    <p style="margin-top:18px;font-size:14px">
+      <a href="https://github.com/Two-Weeks-Team/memex#server--docker">Server / Docker variant</a>
+      &nbsp;&middot;&nbsp;
+      <a href="https://github.com/Two-Weeks-Team/memex">MCP integration &amp; the 11 tools</a>
+    </p>
+  </section>
+</main>
+
+<footer>
+  <div class="foot">
+    <div>Memex &mdash; a memory you own, surfaced by association.</div>
+    <div class="links">
+      <a href="https://github.com/Two-Weeks-Team/memex">GitHub</a>
+      <a href="https://two-weeks-team.github.io/memex/">Live landing</a>
+      <a href="https://github.com/Two-Weeks-Team/memex#server--docker">Docker</a>
+    </div>
+  </div>
+</footer>
+
+<script>
+(function(){
+  "use strict";
+
+  var canvas = document.getElementById('aurora');
+  var ctx = canvas.getContext('2d');
+  var sceneName = document.getElementById('sceneName');
+  var situationEl = document.getElementById('situation');
+  var replayBtn = document.getElementById('replay');
+
+  var DPR = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+  var W = 0, H = 0;            // CSS pixels
+  var reduce = window.matchMedia &&
+               window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  /* -------------------------------------------------------------------------
+     THE MEMORIES.
+     Each is a CURRENT SITUATION (what calls it up) + a NAMED SCENE that
+     crystallizes out of the aurora. The scene is a DEPICTED TABLEAU, drawn as
+     filled luminous shapes in normalized [0..1] space — a recognizable coding
+     night, not a quote. Each carries its own aurora palette so the curtain
+     itself shifts hue as a different memory gathers.
+  ------------------------------------------------------------------------- */
+  var MEMORIES = [
+    {
+      situation: 'debugging an auth-retry loop',
+      scene: 'the night you fixed it',
+      palette: ['#5bffc0','#39d6ff','#7f9bff'],   // green→teal→blue
+      build: function(s){ return desk(s, '#39d6ff'); }
+    },
+    {
+      situation: 'rewriting a migration at 2am',
+      scene: 'the late shipping push',
+      palette: ['#b98bff','#7f9bff','#39d6ff'],   // violet→blue→teal
+      build: function(s){ return desk(s, '#b98bff', /*coffee*/true); }
+    },
+    {
+      situation: 'sketching a schema with a teammate',
+      scene: 'the whiteboard you drew together',
+      palette: ['#ff8fd0','#b98bff','#5bffc0'],   // rose→violet→green
+      build: function(s){ return whiteboard(s); }
+    }
+  ];
+
+  /* ---- scene authoring helpers --------------------------------------------
+     A "scene" is a list of luminous primitives in normalized [0..1] coords
+     (box 1.6:1). Types:
+       fill  {type:'fill', pts:[[x,y]...], color, alpha, glow}
+       glow  {type:'glow', x,y, r, color, alpha}   radial light pool
+       line  {type:'line', pts:[[x,y]...], color, w, alpha}
+  --------------------------------------------------------------------------- */
+  function desk(scene, screenColor, coffee){
+    var prim = [];
+    // floor / desk surface — a wide luminous plinth the scene rests on
+    prim.push({type:'fill', color:'#3a4a86', alpha:.32,
+      pts:[[0.06,0.62],[0.94,0.62],[0.90,0.74],[0.10,0.74]]});
+    // monitor body
+    prim.push({type:'fill', color:'#cfe0ff', alpha:.5,
+      pts:[[0.50,0.20],[0.82,0.20],[0.82,0.50],[0.50,0.50]]});
+    // monitor screen (lit) — inset, the warm/cool source of the scene
+    prim.push({type:'fill', color:screenColor, alpha:.9, glow:true,
+      pts:[[0.525,0.225],[0.795,0.225],[0.795,0.475],[0.525,0.475]]});
+    prim.push({type:'glow', x:0.66, y:0.35, r:0.34, color:screenColor, alpha:.5});
+    // monitor stand + foot on desk
+    prim.push({type:'line', color:'#cfe0ff', alpha:.55, w:0.012, pts:[[0.66,0.50],[0.66,0.60]]});
+    prim.push({type:'line', color:'#cfe0ff', alpha:.55, w:0.012, pts:[[0.60,0.61],[0.72,0.61]]});
+    // the PERSON — seated, leaning toward the screen (head + shoulders + back)
+    prim.push({type:'fill', color:'#e9efff', alpha:.66, glow:true,  // head
+      pts:[[0.245,0.255],[0.305,0.255],[0.305,0.325],[0.245,0.325]]});
+    prim.push({type:'fill', color:'#9fb4ee', alpha:.5,               // torso
+      pts:[[0.205,0.335],[0.345,0.335],[0.375,0.61],[0.175,0.61]]});
+    // forearm reaching to keyboard
+    prim.push({type:'line', color:'#cfe0ff', alpha:.55, w:0.016, pts:[[0.34,0.42],[0.47,0.52]]});
+    // chair back behind
+    prim.push({type:'line', color:'#6f82c0', alpha:.45, w:0.014, pts:[[0.15,0.34],[0.16,0.62]]});
+    // desk lamp arcing in from the right, warm pool over the desk
+    prim.push({type:'line', color:'var--warm', alpha:.5, w:0.012, pts:[[0.90,0.62],[0.905,0.40],[0.80,0.27]]});
+    prim.push({type:'glow', x:0.80, y:0.27, r:0.26, color:'#ffcf86', alpha:.55});
+    // mug on the desk
+    prim.push({type:'fill', color:'#cfe0ff', alpha:.5, pts:[[0.43,0.52],[0.49,0.52],[0.49,0.60],[0.43,0.60]]});
+    if (coffee){
+      // steam from the mug (two thin curls)
+      prim.push({type:'line', color:'#e9efff', alpha:.4, w:0.006, pts:[[0.455,0.50],[0.47,0.44],[0.455,0.39]]});
+      prim.push({type:'line', color:'#e9efff', alpha:.35, w:0.006, pts:[[0.475,0.50],[0.46,0.45],[0.475,0.40]]});
+    }
+    return prim;
+  }
+
+  function whiteboard(scene){
+    var prim = [];
+    // floor plinth
+    prim.push({type:'fill', color:'#3a4a86', alpha:.3,
+      pts:[[0.06,0.66],[0.94,0.66],[0.90,0.76],[0.10,0.76]]});
+    // the whiteboard — large lit panel that two people stand at
+    prim.push({type:'fill', color:'#e9efff', alpha:.5, glow:true,
+      pts:[[0.30,0.16],[0.84,0.16],[0.84,0.56],[0.30,0.56]]});
+    prim.push({type:'glow', x:0.57, y:0.36, r:0.40, color:'#ff8fd0', alpha:.38});
+    // a schema sketched on it: boxes + connecting line (the drawn diagram)
+    prim.push({type:'line', color:'#39d6ff', alpha:.8, w:0.008, pts:[[0.37,0.26],[0.47,0.26],[0.47,0.34],[0.37,0.34],[0.37,0.26]]});
+    prim.push({type:'line', color:'#b98bff', alpha:.8, w:0.008, pts:[[0.60,0.30],[0.72,0.30],[0.72,0.38],[0.60,0.38],[0.60,0.30]]});
+    prim.push({type:'line', color:'#5bffc0', alpha:.8, w:0.008, pts:[[0.47,0.30],[0.60,0.34]]});
+    prim.push({type:'line', color:'#39d6ff', alpha:.7, w:0.007, pts:[[0.42,0.42],[0.66,0.42]]});
+    prim.push({type:'line', color:'#39d6ff', alpha:.7, w:0.007, pts:[[0.42,0.47],[0.58,0.47]]});
+    // PERSON A — at the board, arm raised drawing
+    prim.push({type:'fill', color:'#e9efff', alpha:.66, glow:true, pts:[[0.16,0.30],[0.215,0.30],[0.215,0.365],[0.16,0.365]]});
+    prim.push({type:'fill', color:'#9fb4ee', alpha:.5, pts:[[0.135,0.375],[0.24,0.375],[0.26,0.66],[0.115,0.66]]});
+    prim.push({type:'line', color:'#cfe0ff', alpha:.55, w:0.014, pts:[[0.22,0.42],[0.31,0.32]]});  // raised arm to board
+    // PERSON B — standing back, watching
+    prim.push({type:'fill', color:'#e9efff', alpha:.6, glow:true, pts:[[0.875,0.34],[0.925,0.34],[0.925,0.40],[0.875,0.40]]});
+    prim.push({type:'fill', color:'#9fb4ee', alpha:.45, pts:[[0.85,0.41],[0.95,0.41],[0.945,0.66],[0.855,0.66]]});
+    return prim;
+  }
+
+  // resolve each memory's primitives once, lazily
+  MEMORIES.forEach(function(m){ m.prim = m.build(m); });
+
+  // ---- placement of the scene box in device space ------------------------
+  var box = {ox:0, oy:0, s:1};   // s = scene box width in px
+  function layoutScene(){
+    var narrow = W < 820;
+    var byW = W * (narrow ? 0.92 : 0.6);
+    var byH = (H * (narrow ? 0.46 : 0.6)) * 1.6;   // box aspect 1.6:1
+    box.s = Math.min(byW, byH);
+    if (narrow){
+      box.ox = (W - box.s) * 0.5;
+      box.oy = H * 0.05;
+    } else {
+      // upper-right, clear of the lower-left headline
+      box.ox = W - box.s - W*0.05;
+      box.oy = H * 0.07;
+    }
+  }
+  function PX(x){ return box.ox + x * box.s; }
+  function PY(y){ return box.oy + y * (box.s/1.6); }
+
+  // ---- aurora curtains: stacked sine bands of luminous gas ----------------
+  var bands = [];
+  function buildBands(palette){
+    bands.length = 0;
+    var n = 5;
+    for (var i=0;i<n;i++){
+      bands.push({
+        baseY: 0.16 + i*0.085,        // vertical position (normalized)
+        amp:   0.05 + Math.random()*0.07,
+        freq:  1.1 + Math.random()*1.6,
+        phase: Math.random()*Math.PI*2,
+        speed: (0.10 + Math.random()*0.16) * (i%2?1:-1),
+        thick: 0.10 + Math.random()*0.10,
+        color: palette[i % palette.length],
+        drift: 0.0
+      });
+    }
+  }
+
+  // ---- stars behind the aurora -------------------------------------------
+  var stars = [];
+  function buildStars(){
+    stars.length = 0;
+    var n = Math.round((W*H)/9000); n = Math.max(70, Math.min(240, n));
+    for (var i=0;i<n;i++){
+      stars.push({x:Math.random(), y:Math.random()*0.85, r:0.4+Math.random()*1.1,
+                  tw:Math.random()*Math.PI*2, tws:0.4+Math.random()*1.3});
+    }
+  }
+
+  function hexA(hex, a){
+    var h = hex.replace('#','');
+    var r = parseInt(h.substring(0,2),16),
+        g = parseInt(h.substring(2,4),16),
+        b = parseInt(h.substring(4,6),16);
+    return 'rgba('+r+','+g+','+b+','+a+')';
+  }
+
+  // ---- timeline -----------------------------------------------------------
+  // Each memory cycle: aurora-only → crystallize scene → hold → dissolve → next
+  var GATHER = 2200;    // gas concentrates, scene fades up
+  var HOLD   = 4200;    // scene crystallized, holds, named
+  var DISSOLVE = 1800;  // scene fades back into the gas
+  var CALM   = 1400;    // aurora alone before the next gathers
+  var CYCLE  = GATHER + HOLD + DISSOLVE + CALM;
+
+  var idx = 0;          // current memory index
+  var T0 = 0;           // cycle start
+  var named = false;
+
+  function easeInOut(t){ return t<0.5 ? 2*t*t : 1-Math.pow(-2*t+2,2)/2; }
+  function clamp01(v){ return v<0?0:(v>1?1:v); }
+
+  function startCycle(now, i){
+    idx = ((i % MEMORIES.length) + MEMORIES.length) % MEMORIES.length;
+    T0 = now;
+    named = false;
+    var m = MEMORIES[idx];
+    situationEl.textContent = m.situation;
+    sceneName.textContent = 'gathering…';
+    buildBands(m.palette);
+  }
+
+  function resize(){
+    var b = canvas.parentElement.getBoundingClientRect();
+    W = Math.max(1, Math.round(b.width));
+    H = Math.max(1, Math.round(b.height));
+    canvas.style.width = W + 'px';
+    canvas.style.height = H + 'px';
+    canvas.width = Math.round(W*DPR);
+    canvas.height = Math.round(H*DPR);
+    ctx.setTransform(DPR,0,0,DPR,0,0);
+    buildStars();
+    layoutScene();
+  }
+
+  // ---- draw one aurora band as a smooth glowing ribbon --------------------
+  function drawBand(b, t, intensity){
+    var steps = 48;
+    var topPts = [], botPts = [];
+    for (var i=0;i<=steps;i++){
+      var u = i/steps;
+      var x = u*W;
+      var y = (b.baseY + b.amp*Math.sin(u*Math.PI*2*b.freq + b.phase + b.drift)) * H;
+      var th = b.thick * H * (0.7 + 0.3*Math.sin(u*Math.PI*3 + b.drift*1.7));
+      topPts.push([x, y - th*0.5]);
+      botPts.push([x, y + th*0.5]);
+    }
+    // vertical gradient: bright core fading to transparent at the curtain edges
+    var topY = b.baseY*H - b.thick*H, botY = b.baseY*H + b.thick*H;
+    var grad = ctx.createLinearGradient(0, topY, 0, botY);
+    grad.addColorStop(0, hexA(b.color, 0));
+    grad.addColorStop(0.5, hexA(b.color, 0.42*intensity));
+    grad.addColorStop(1, hexA(b.color, 0));
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.moveTo(topPts[0][0], topPts[0][1]);
+    for (var j=1;j<topPts.length;j++) ctx.lineTo(topPts[j][0], topPts[j][1]);
+    for (var k=botPts.length-1;k>=0;k--) ctx.lineTo(botPts[k][0], botPts[k][1]);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  // ---- draw the crystallized scene with a "materialize" amount [0..1] -----
+  function drawScene(prim, mat, palette){
+    // mat 0 → invisible (still gas); 1 → fully crystallized
+    var e = easeInOut(clamp01(mat));
+    if (e <= 0) return;
+    ctx.save();
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    for (var i=0;i<prim.length;i++){
+      var p = prim[i];
+      var color = p.color === 'var--warm' ? '#ffcf86' : p.color;
+      var a = (p.alpha||0.6) * e;
+      if (p.type === 'glow'){
+        var gx = PX(p.x), gy = PY(p.y), gr = p.r*box.s;
+        var rg = ctx.createRadialGradient(gx,gy,0, gx,gy, gr);
+        rg.addColorStop(0, hexA(p.color, p.alpha*e));
+        rg.addColorStop(0.5, hexA(p.color, p.alpha*0.4*e));
+        rg.addColorStop(1, hexA(p.color, 0));
+        ctx.fillStyle = rg;
+        ctx.beginPath(); ctx.arc(gx,gy, gr, 0, Math.PI*2); ctx.fill();
+      } else if (p.type === 'fill'){
+        if (p.glow){ ctx.shadowColor = hexA(color, 0.7*e); ctx.shadowBlur = 18*e; }
+        ctx.fillStyle = hexA(color, a);
+        ctx.beginPath();
+        ctx.moveTo(PX(p.pts[0][0]), PY(p.pts[0][1]));
+        for (var q=1;q<p.pts.length;q++) ctx.lineTo(PX(p.pts[q][0]), PY(p.pts[q][1]));
+        ctx.closePath(); ctx.fill();
+        ctx.shadowBlur = 0;
+      } else if (p.type === 'line'){
+        ctx.strokeStyle = hexA(color, Math.min(1,(p.alpha||0.6)*e));
+        ctx.lineWidth = Math.max(1, (p.w||0.01)*box.s);
+        ctx.shadowColor = hexA(color, 0.5*e); ctx.shadowBlur = 8*e;
+        ctx.beginPath();
+        ctx.moveTo(PX(p.pts[0][0]), PY(p.pts[0][1]));
+        for (var r=1;r<p.pts.length;r++) ctx.lineTo(PX(p.pts[r][0]), PY(p.pts[r][1]));
+        ctx.stroke();
+        ctx.shadowBlur = 0;
+      }
+    }
+    ctx.restore();
+  }
+
+  var driftT = 0;
+  var rafId = 0;
+
+  function frame(now){
+    if (!T0) startCycle(now, idx);
+    var el = now - T0;
+    driftT += 0.004;
+
+    ctx.clearRect(0,0,W,H);
+
+    // background stars (gentle twinkle, dimmed under the curtain)
+    for (var i=0;i<stars.length;i++){
+      var s = stars[i];
+      var tw = reduce ? 0.7 : (0.5 + 0.5*Math.sin(now*0.001*s.tws + s.tw));
+      ctx.fillStyle = 'rgba(220,230,255,'+(0.12 + 0.4*tw)+')';
+      ctx.beginPath(); ctx.arc(s.x*W, s.y*H, s.r, 0, Math.PI*2); ctx.fill();
+    }
+
+    var m = MEMORIES[idx];
+
+    // ---- materialization curve over the cycle ----
+    var mat = 0;
+    if (el < GATHER)                      mat = el / GATHER;                       // gather up
+    else if (el < GATHER+HOLD)            mat = 1;                                 // hold
+    else if (el < GATHER+HOLD+DISSOLVE)   mat = 1 - (el-GATHER-HOLD)/DISSOLVE;     // dissolve
+    else                                  mat = 0;                                 // calm gas
+
+    // aurora is most agitated/concentrated while a scene gathers & holds,
+    // calmer when alone — the gas "knows" something is surfacing.
+    var auroraIntensity = 0.55 + 0.45*easeInOut(clamp01(mat));
+
+    // ---- aurora curtains (additive glow) ----
+    ctx.globalCompositeOperation = 'screen';
+    for (var b=0;b<bands.length;b++){
+      var band = bands[b];
+      if (!reduce) band.drift += band.speed * 0.016;
+      // as the scene materializes, bands converge toward the scene box centre-Y
+      var pull = easeInOut(clamp01(mat)) * 0.18;
+      var targetY = (PY(0.38) / H);
+      var savedBase = band.baseY;
+      band.baseY = savedBase + (targetY - savedBase) * pull;
+      drawBand(band, driftT, auroraIntensity);
+      band.baseY = savedBase;
+    }
+    ctx.globalCompositeOperation = 'source-over';
+
+    // ---- the crystallized scene rises out of the gas ----
+    ctx.globalCompositeOperation = 'screen';
+    drawScene(m.prim, mat, m.palette);
+    ctx.globalCompositeOperation = 'source-over';
+
+    // name the scene once it is mostly crystallized
+    if (!named && mat >= 0.92 && el < GATHER+HOLD){
+      sceneName.textContent = m.scene;
+      named = true;
+    }
+    // reset label as it dissolves so the next "gathering…" reads true
+    if (named && mat < 0.4 && el > GATHER+HOLD){
+      sceneName.textContent = 'dissolving…';
+    }
+
+    // ---- advance to the next memory at end of cycle ----
+    if (el >= CYCLE){
+      startCycle(now, idx+1);
+    }
+
+    if (reduce) return;          // static frame only (handled in start())
+    rafId = requestAnimationFrame(frame);
+  }
+
+  // render a single fully-crystallized frame for reduced-motion / first paint
+  function frameStatic(){
+    var now = performance.now();
+    ctx.clearRect(0,0,W,H);
+    var m = MEMORIES[idx];
+    buildBands(m.palette);
+    // stars
+    for (var i=0;i<stars.length;i++){
+      var s = stars[i];
+      ctx.fillStyle = 'rgba(220,230,255,'+(0.12 + 0.3*Math.abs(Math.sin(s.tw)))+')';
+      ctx.beginPath(); ctx.arc(s.x*W, s.y*H, s.r, 0, Math.PI*2); ctx.fill();
+    }
+    // calm aurora
+    ctx.globalCompositeOperation = 'screen';
+    for (var b=0;b<bands.length;b++) drawBand(bands[b], 0, 0.7);
+    // fully crystallized scene
+    drawScene(m.prim, 1, m.palette);
+    ctx.globalCompositeOperation = 'source-over';
+    situationEl.textContent = m.situation;
+    sceneName.textContent = m.scene;
+  }
+
+  function start(){
+    cancelAnimationFrame(rafId);
+    reduce = window.matchMedia &&
+             window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    resize();
+    if (reduce){
+      frameStatic();                 // static, crystallized scene
+    } else {
+      T0 = 0; named = false;
+      rafId = requestAnimationFrame(frame);
+    }
+  }
+
+  // "Next memory" = let the aurora gather the next one now (situation-triggered,
+  // not search). Jumps the timeline forward to the next gather.
+  replayBtn.addEventListener('click', function(){
+    reduce = window.matchMedia &&
+             window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (reduce){
+      idx = (idx+1) % MEMORIES.length;
+      resize(); frameStatic();
+      return;
+    }
+    cancelAnimationFrame(rafId);
+    startCycle(performance.now(), idx+1);
+    rafId = requestAnimationFrame(frame);
+  });
+
+  var rT;
+  window.addEventListener('resize', function(){
+    clearTimeout(rT);
+    rT = setTimeout(function(){
+      resize();
+      if (reduce) frameStatic();
+    }, 160);
+  });
+
+  if (window.matchMedia){
+    try {
+      window.matchMedia('(prefers-reduced-motion: reduce)')
+        .addEventListener('change', function(e){ reduce = e.matches; start(); });
+    } catch(_){}
+  }
+
+  start();
+})();
+</script>
+</body>
+</html>

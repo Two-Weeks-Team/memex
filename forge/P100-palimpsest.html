@@ -1,0 +1,1065 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Memex — what was written under is still there</title>
+<meta name="description" content="Memex turns your Claude Code / Codex session history into a navigable spatial memory — move through it by similarity, not keywords. LLM-free at runtime, backed by Qdrant. Built for Qdrant Vector Space Day 2026." />
+<style>
+  :root {
+    /* Palimpsest palette — aged vellum, scribal iron-gall ink, ochre + sanguine */
+    --vellum:      oklch(86% 0.045 84);   /* warm parchment ground */
+    --vellum-deep: oklch(78% 0.052 78);   /* shadowed/foxed parchment */
+    --vellum-dark: oklch(40% 0.05 70);    /* deep shade in the page */
+    --ink:         oklch(28% 0.05 64);    /* iron-gall brown-black */
+    --ink-soft:    oklch(40% 0.05 66);
+    --ink-faint:   oklch(54% 0.04 70);
+    --ink-ghost:   oklch(66% 0.03 76);    /* erased, scraped-away layer */
+    --ochre:       oklch(60% 0.135 62);   /* illuminated ochre */
+    --sanguine:    oklch(52% 0.14 32);    /* red-chalk underdrawing */
+    --gild:        oklch(74% 0.13 88);    /* gold-leaf glint */
+    --rule:        oklch(58% 0.05 64 / 0.5);
+    --rule-soft:   oklch(58% 0.05 64 / 0.28);
+    --maxw: 1120px;
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+
+  body {
+    margin: 0;
+    font-family: "Iowan Old Style", "Palatino Linotype", Palatino, "Hoefler Text", Georgia, serif;
+    color: var(--ink);
+    background: var(--vellum-deep);
+    line-height: 1.62;
+    overflow-x: hidden;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  a { color: var(--sanguine); text-decoration: none; }
+  a:hover, a:focus-visible { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
+  :focus-visible { outline: 2px solid var(--sanguine); outline-offset: 3px; border-radius: 3px; }
+
+  .wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 26px; }
+  .ui-sans { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+
+  .skip {
+    position: absolute; left: -9999px; top: 0; z-index: 100;
+    background: var(--ink); color: var(--vellum); padding: 10px 16px; border-radius: 5px;
+    font-family: ui-sans-serif, system-ui, sans-serif; font-size: 14px;
+  }
+  .skip:focus { left: 16px; top: 16px; }
+
+  /* ===================== HERO — the parchment leaf ===================== */
+  .leaf {
+    position: relative;
+    min-height: 100svh;
+    display: grid;
+    overflow: hidden;
+    isolation: isolate;
+    background:
+      radial-gradient(150% 120% at 50% 0%, var(--vellum) 0%, var(--vellum-deep) 70%, var(--vellum-dark) 130%);
+  }
+
+  /* the scene resurfaces here — full-bleed canvas behind everything */
+  #page {
+    position: absolute; inset: 0; width: 100%; height: 100%; display: block; z-index: 0;
+  }
+
+  /* paper fibre + foxing grain laid over the painted layer */
+  .grain {
+    position: absolute; inset: -12%; z-index: 2; pointer-events: none;
+    opacity: 0.55;
+    background-image: var(--fibre-tex);
+    background-size: 240px 240px;
+    mix-blend-mode: multiply;
+  }
+  /* uneven aging: darker scorched edges, foxing blooms */
+  .foxing {
+    position: absolute; inset: 0; z-index: 3; pointer-events: none;
+    background:
+      radial-gradient(60% 40% at 18% 22%, oklch(54% 0.09 58 / 0.16), transparent 60%),
+      radial-gradient(40% 30% at 82% 70%, oklch(50% 0.10 46 / 0.14), transparent 62%),
+      radial-gradient(120% 100% at 50% 50%, transparent 50%, oklch(40% 0.06 60 / 0.34) 90%, oklch(32% 0.06 56 / 0.55) 100%);
+    mix-blend-mode: multiply;
+  }
+  /* faint horizontal ruling of the manuscript */
+  .ruling {
+    position: absolute; inset: 0; z-index: 1; pointer-events: none; opacity: 0.5;
+    background-image: repeating-linear-gradient(
+      180deg, transparent 0, transparent calc(2.1rem - 1px),
+      var(--rule-soft) calc(2.1rem - 1px), var(--rule-soft) 2.1rem);
+    -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 12%, #000 88%, transparent 100%);
+            mask-image: linear-gradient(90deg, transparent 0, #000 12%, #000 88%, transparent 100%);
+  }
+
+  /* ----- copy laid over the leaf ----- */
+  .hero-copy {
+    position: relative; z-index: 6; align-self: end;
+    padding: clamp(28px, 6vh, 72px) 0 clamp(34px, 8vh, 92px);
+    max-width: 760px;
+  }
+  .leaf > .wrap { grid-row: 1; }
+
+  /* the present note — what's written on top, faint, in scribe's hand */
+  .present-note {
+    font-style: italic;
+    font-size: clamp(13px, 1.5vw, 16px);
+    color: var(--ink-faint);
+    margin: 0 0 26px;
+    max-width: 560px;
+    padding: 6px 0 6px 16px;
+    border-left: 2px solid var(--rule);
+    background: linear-gradient(90deg, oklch(86% 0.05 84 / 0.45), transparent);
+    border-radius: 0 5px 5px 0;
+  }
+  .present-note b { font-style: normal; font-weight: 600; color: var(--ink-soft); }
+  .present-note .nib {
+    display: inline-block; width: 6px; height: 1.05em; vertical-align: -0.16em;
+    background: var(--ink-soft); margin-left: 1px;
+    animation: blink 1.05s step-end infinite;
+  }
+  @keyframes blink { 0%,55% { opacity: 1; } 56%,100% { opacity: 0; } }
+
+  h1 {
+    font-size: clamp(34px, 6.2vw, 74px);
+    line-height: 1.03; letter-spacing: -0.018em;
+    margin: 0 0 18px; font-weight: 600; text-wrap: balance;
+    text-shadow: 0 1px 0 oklch(90% 0.04 86 / 0.7);
+  }
+  h1 .erased {
+    color: var(--ink-ghost);
+    /* the over-text, scraped thin */
+  }
+  h1 .surfaced { color: var(--ink); }
+
+  .lede {
+    font-size: clamp(16px, 1.9vw, 20px);
+    color: var(--ink-soft); max-width: 580px; margin: 0 0 28px;
+  }
+
+  /* the marginalia gloss — names the resurfaced scene, written in the margin */
+  .gloss {
+    position: absolute; z-index: 6;
+    top: clamp(70px, 12vh, 120px);
+    right: clamp(22px, 4vw, 60px);
+    max-width: min(310px, 66vw);
+    text-align: right;
+    font-style: italic;
+    font-size: 14px; line-height: 1.5;
+    color: var(--ink-soft);
+    opacity: 0; transform: translateY(6px);
+    transition: opacity 1.3s ease, transform 1.3s ease;
+  }
+  .gloss.show { opacity: 1; transform: translateY(0); }
+  .gloss .folio {
+    display: block; font-style: normal;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase;
+    color: var(--sanguine); margin-bottom: 6px;
+  }
+  .gloss .said { color: var(--ink); }
+  .gloss .ref { display: block; font-style: normal; margin-top: 6px;
+    font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; color: var(--ink-faint); }
+
+  /* CTAs */
+  .cta-row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+  .btn {
+    font-family: ui-sans-serif, system-ui, sans-serif;
+    font-size: 15px; font-weight: 600; letter-spacing: 0.01em;
+    padding: 12px 20px; border-radius: 9px;
+    border: 1px solid transparent; cursor: pointer;
+    transition: transform .15s ease, background .2s ease, border-color .2s, color .2s;
+    display: inline-flex; align-items: center; gap: 8px;
+  }
+  .btn-primary { background: var(--ink); color: var(--vellum); }
+  .btn-primary:hover { background: var(--ink-soft); text-decoration: none; transform: translateY(-1px); }
+  .btn-ghost { background: oklch(84% 0.05 84 / 0.4); color: var(--ink); border: 1px solid var(--rule); }
+  .btn-ghost:hover { border-color: var(--ink); text-decoration: none; transform: translateY(-1px); }
+  .btn svg { width: 16px; height: 16px; }
+
+  /* honest + a11y status of the resurfacing */
+  .resurf-status {
+    margin-top: 20px;
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 11.5px; letter-spacing: 0.07em; text-transform: uppercase;
+    color: var(--ink-faint);
+    display: inline-flex; align-items: center; gap: 9px;
+  }
+  .resurf-status .blot {
+    width: 9px; height: 9px; border-radius: 50%; background: var(--sanguine);
+    box-shadow: 0 0 0 0 oklch(52% 0.14 32 / 0.5);
+    animation: seep 2.2s ease-in-out infinite;
+  }
+  @keyframes seep {
+    0%,100% { transform: scale(.7); opacity: .5; box-shadow: 0 0 0 0 oklch(52% 0.14 32 / 0.4); }
+    50%     { transform: scale(1); opacity: 1; box-shadow: 0 0 0 6px oklch(52% 0.14 32 / 0); }
+  }
+
+  .scroll-hint {
+    position: absolute; bottom: 18px; left: 50%; transform: translateX(-50%);
+    z-index: 6; font-family: ui-sans-serif, system-ui, sans-serif;
+    font-size: 11px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--ink-faint);
+    display: flex; flex-direction: column; align-items: center; gap: 7px;
+  }
+  .scroll-hint .arr { width: 1px; height: 26px; background: linear-gradient(var(--ink-faint), transparent); animation: drop 2s ease-in-out infinite; }
+  @keyframes drop { 0%,100% { opacity: .3; transform: translateY(0); } 50% { opacity: .8; transform: translateY(5px); } }
+
+  /* ===================== BELOW THE FOLD ===================== */
+  main { background: var(--vellum); }
+  section { position: relative; z-index: 1; }
+  .band { padding: clamp(62px, 11vh, 128px) 0; border-top: 1px solid var(--rule); }
+  .band-2 { background: linear-gradient(180deg, var(--vellum) 0%, var(--vellum-deep) 100%); }
+
+  .eyebrow {
+    font-family: ui-sans-serif, system-ui, sans-serif;
+    font-size: 12px; letter-spacing: 0.2em; text-transform: uppercase;
+    color: var(--sanguine); margin: 0 0 14px;
+  }
+  h2 {
+    font-size: clamp(26px, 3.6vw, 40px); line-height: 1.14; letter-spacing: -0.012em;
+    margin: 0 0 16px; font-weight: 600; max-width: 760px; text-wrap: balance;
+  }
+  .section-lede { font-size: clamp(16px, 1.7vw, 18px); color: var(--ink-soft); max-width: 650px; margin: 0 0 40px; }
+
+  /* the three resurfacing layers, explained */
+  .layers { display: grid; gap: 20px; grid-template-columns: repeat(3, 1fr); }
+  @media (max-width: 820px) { .layers { grid-template-columns: 1fr; } }
+  .layer-card {
+    border: 1px solid var(--rule); border-radius: 12px; padding: 22px 22px 24px;
+    background: linear-gradient(180deg, oklch(88% 0.04 84 / 0.6), oklch(82% 0.05 80 / 0.5));
+    position: relative; overflow: hidden;
+  }
+  .layer-card .num {
+    font-family: ui-monospace, Menlo, monospace; font-size: 12px;
+    color: var(--sanguine); letter-spacing: 0.1em; margin-bottom: 14px;
+  }
+  .swatch { width: 100%; aspect-ratio: 16/10; border-radius: 7px; margin-bottom: 16px;
+    position: relative; overflow: hidden; border: 1px solid var(--rule-soft); }
+  .swatch canvas { width: 100%; height: 100%; display: block; }
+  .layer-card h3 { font-size: 18px; margin: 0 0 8px; font-weight: 600; color: var(--ink); }
+  .layer-card p { margin: 0; font-size: 14.5px; color: var(--ink-soft); line-height: 1.56; }
+
+  /* facts */
+  .facts { display: grid; gap: 18px; grid-template-columns: repeat(2, 1fr); margin-top: 8px; }
+  @media (max-width: 760px) { .facts { grid-template-columns: 1fr; } }
+  .fact {
+    border: 1px solid var(--rule); border-radius: 12px; padding: 22px 24px;
+    background: oklch(87% 0.04 84 / 0.5);
+  }
+  .fact h3 { font-size: 17px; margin: 0 0 8px; color: var(--ink); font-weight: 600; display: flex; align-items: center; gap: 10px; }
+  .fact h3 svg { width: 18px; height: 18px; color: var(--sanguine); flex: none; }
+  .fact p { margin: 0; font-size: 14.5px; color: var(--ink-soft); }
+  .fact code {
+    font-family: ui-monospace, Menlo, monospace; font-size: 13px;
+    background: oklch(80% 0.05 80 / 0.7); padding: 2px 7px; border-radius: 4px; color: var(--ink);
+  }
+
+  .mcp-block {
+    margin-top: 28px; border: 1px solid var(--rule); border-radius: 12px; overflow: hidden;
+    background: oklch(33% 0.045 66);
+  }
+  .mcp-block .head {
+    display: flex; align-items: center; gap: 10px; padding: 12px 18px;
+    border-bottom: 1px solid oklch(46% 0.04 66 / 0.6);
+    font-family: ui-sans-serif, system-ui, sans-serif;
+    font-size: 13px; color: var(--vellum-deep); letter-spacing: 0.04em;
+  }
+  .mcp-block .head .seal { width: 11px; height: 11px; border-radius: 50%; background: var(--sanguine); }
+  .mcp-block pre {
+    margin: 0; padding: 18px; overflow-x: auto;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 13.5px; line-height: 1.7;
+    color: var(--vellum);
+  }
+  .mcp-block pre .c { color: var(--ink-ghost); }
+  .mcp-block pre .k { color: var(--gild); }
+
+  footer { border-top: 1px solid var(--rule); padding: 54px 0 64px; background: var(--vellum-deep); }
+  .foot-grid { display: flex; flex-wrap: wrap; gap: 28px 56px; align-items: flex-start; justify-content: space-between; }
+  .foot-brand { max-width: 380px; }
+  .foot-brand .mark { font-size: 22px; font-weight: 600; letter-spacing: -0.01em; color: var(--ink); margin-bottom: 8px; }
+  .foot-brand p { font-size: 14px; color: var(--ink-faint); margin: 0; }
+  .foot-links { display: flex; gap: 48px; flex-wrap: wrap; }
+  .foot-col h4 { font-family: ui-sans-serif, system-ui, sans-serif; font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-faint); margin: 0 0 12px; }
+  .foot-col a { display: block; font-size: 14.5px; color: var(--ink-soft); margin-bottom: 9px; font-family: ui-sans-serif, system-ui, sans-serif; }
+  .foot-col a:hover { color: var(--sanguine); }
+  .colophon { margin-top: 40px; font-size: 12.5px; color: var(--ink-faint); font-family: ui-sans-serif, system-ui, sans-serif; max-width: 760px; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .resurf-status .blot, .present-note .nib, .scroll-hint .arr { animation: none; }
+    .gloss { opacity: 1; transform: none; transition: none; }
+    .scroll-hint .arr { opacity: .5; }
+  }
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<!-- ===================== HERO ===================== -->
+<header class="leaf" role="banner">
+  <canvas id="page" aria-hidden="true"></canvas>
+  <div class="ruling" aria-hidden="true"></div>
+  <div class="grain" aria-hidden="true"></div>
+  <div class="foxing" aria-hidden="true"></div>
+
+  <!-- marginalia gloss — names the scene that bled back up -->
+  <figcaption class="gloss" id="gloss" aria-hidden="true">
+    <span class="folio" id="g-folio">recto · undated</span>
+    <span class="said" id="g-said"></span>
+    <span class="ref" id="g-ref"></span>
+  </figcaption>
+
+  <div class="wrap">
+    <div class="hero-copy">
+      <p class="present-note" id="note" aria-live="polite">
+        <span id="note-text">today's leaf: still chasing that <b>auth-retry loop</b>&hellip;</span><span class="nib" aria-hidden="true"></span>
+      </p>
+
+      <h1>
+        <span class="erased">You scraped the page clean.</span><br />
+        <span class="surfaced">The older layer bleeds back up.</span>
+      </h1>
+
+      <p class="lede">
+        Memex keeps your Claude Code &amp; Codex session history as a parchment you own.
+        You don't go digging — when today's situation rhymes with something you lived
+        before, the old moment seeps up through the page on its own.
+      </p>
+
+      <div class="cta-row">
+        <a class="btn btn-primary" href="https://github.com/Two-Weeks-Team/memex">
+          <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+          View the code
+        </a>
+        <a class="btn btn-ghost" href="https://two-weeks-team.github.io/memex/">See it live</a>
+      </div>
+
+      <p class="resurf-status" aria-hidden="true">
+        <span class="blot"></span><span id="status-text">an older layer is surfacing</span>
+      </p>
+    </div>
+  </div>
+
+  <div class="scroll-hint" aria-hidden="true"><span>how it surfaces</span><span class="arr"></span></div>
+</header>
+
+<main id="main">
+  <!-- ===================== WHAT JUST HAPPENED ===================== -->
+  <section class="band">
+    <div class="wrap">
+      <p class="eyebrow">What you just watched</p>
+      <h2>You didn't search the archive. The page remembered.</h2>
+      <p class="section-lede">
+        You never opened a query box. Today's note sat on top of the leaf, and when it
+        rhymed with an older entry, the erased layer bled back up &mdash; resolving into
+        an actual moment you lived: the file, the error, the fix. Memex draws it from
+        your own history; nothing is invented.
+      </p>
+
+      <div class="layers">
+        <div class="layer-card">
+          <div class="swatch"><canvas data-swatch="ground" aria-hidden="true"></canvas></div>
+          <div class="num">i / the ground</div>
+          <h3>Today's leaf</h3>
+          <p>The current moment is the page in front of you. Memex reads it as a vector &mdash; no keystrokes, no search box, no chatbot.</p>
+        </div>
+        <div class="layer-card">
+          <div class="swatch"><canvas data-swatch="bleed" aria-hidden="true"></canvas></div>
+          <div class="num">ii / the bleed</div>
+          <h3>The underlayer seeps up</h3>
+          <p>The nearest past moments rise by similarity &mdash; pulled from <strong>Qdrant</strong>, weighted by <em>Lens</em> named vectors. They surface on their own cadence.</p>
+        </div>
+        <div class="layer-card">
+          <div class="swatch"><canvas data-swatch="scene" aria-hidden="true"></canvas></div>
+          <div class="num">iii / the scene</div>
+          <h3>The moment resolves</h3>
+          <p>The bleed sets into a scene you recognize &mdash; "oh, right, I solved this in March." A glossed marginal note names when and where. Then you keep working.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== WHAT MEMEX IS ===================== -->
+  <section class="band band-2">
+    <div class="wrap">
+      <p class="eyebrow">The facts</p>
+      <h2>A memory you own &mdash; not a chatbot.</h2>
+      <p class="section-lede">
+        Claude Code silently migrates and deletes old sessions. Memex preserves that
+        corpus and lets you move through it by similarity. LLM-free at runtime.
+      </p>
+
+      <div class="facts">
+        <div class="fact">
+          <h3><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7V5a2 2 0 012-2h12a2 2 0 012 2v2M4 7v12a2 2 0 002 2h12a2 2 0 002-2V7M4 7h16M9 11h6"/></svg>Your own history, indexed</h3>
+          <p>Reads <code>~/.claude/projects/**/*.jsonl</code>, legacy transcripts, and <code>history.jsonl</code> &mdash; then turns it into navigable spatial memory backed by <strong>Qdrant</strong>.</p>
+        </div>
+        <div class="fact">
+          <h3><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/></svg>Surfaces, not searches</h3>
+          <p>Time Machine, <strong>Lens</strong> (named-vector weighting), <strong>Topology</strong> (MST graph), Mix/Discovery, proactive <strong>Recall</strong>, plus a Companion / Wrapped / Loop&nbsp;Breaker layer.</p>
+        </div>
+        <div class="fact">
+          <h3><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 17l6-6-6-6M12 19h8"/></svg>Lives in your agent</h3>
+          <p>11 MCP tools over stdio + HTTP &mdash; works in Claude Code, Codex, and Cursor. A server/Docker variant runs Qdrant + web + MCP in one image.</p>
+        </div>
+        <div class="fact">
+          <h3><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3 7h7l-5.5 4 2 7L12 17l-6.5 3 2-7L2 9h7z"/></svg>Built for Vector Space Day</h3>
+          <p>Made for <strong>Qdrant Vector Space Day 2026 &mdash; "Think Outside the Bot."</strong> Associative recall in the spirit of Vannevar Bush's 1945 Memex &mdash; the opposite of a query box.</p>
+        </div>
+      </div>
+
+      <div class="mcp-block">
+        <div class="head" role="presentation">
+          <span class="seal"></span>
+          <span style="margin-left:2px;">add Memex to your agent</span>
+        </div>
+        <pre><span class="c"># one line — older layers seep up to you while you work</span>
+<span class="k">claude mcp add</span> memex -- npx -y @two-weeks/memex-mcp
+<span class="c"># 11 tools over stdio + HTTP · Qdrant-backed · LLM-free at runtime</span></pre>
+      </div>
+    </div>
+  </section>
+</main>
+
+<!-- ===================== FOOTER ===================== -->
+<footer>
+  <div class="wrap">
+    <div class="foot-grid">
+      <div class="foot-brand">
+        <div class="mark">Memex</div>
+        <p>Your Claude Code &amp; Codex history, kept as a parchment you own. When today rhymes with the past, the older layer bleeds back up on its own.</p>
+      </div>
+      <div class="foot-links">
+        <div class="foot-col">
+          <h4>Project</h4>
+          <a href="https://github.com/Two-Weeks-Team/memex">Repository</a>
+          <a href="https://two-weeks-team.github.io/memex/">Live landing</a>
+          <a href="https://github.com/Two-Weeks-Team/memex#server--docker">Server / Docker variant</a>
+        </div>
+        <div class="foot-col">
+          <h4>Use it</h4>
+          <a href="https://github.com/Two-Weeks-Team/memex#mcp">MCP integration (11 tools)</a>
+          <a href="https://github.com/Two-Weeks-Team/memex#quickstart"><code>claude mcp add</code> quickstart</a>
+          <a href="https://qdrant.tech/">Backed by Qdrant</a>
+        </div>
+      </div>
+    </div>
+    <p class="colophon">
+      Built for Qdrant Vector Space Day 2026 &mdash; "Think Outside the Bot." Honest mockup:
+      the resurfacing scenes are hand-drawn renderings of the <em>kind</em> of moment Memex
+      surfaces from your own session history, not real screenshots.
+    </p>
+  </div>
+</footer>
+
+<script>
+(() => {
+  "use strict";
+
+  /* ---------------------------------------------------------------
+     Hand-authored paper-fibre texture (data-URI) for the .grain overlay.
+     Warm speckle that reads as vellum tooth under multiply blend.
+  --------------------------------------------------------------- */
+  (function makeFibre() {
+    const g = document.createElement("canvas");
+    g.width = g.height = 240;
+    const gc = g.getContext("2d");
+    const img = gc.createImageData(240, 240);
+    for (let i = 0; i < img.data.length; i += 4) {
+      // warm brownish speckle, mostly transparent
+      const n = Math.random();
+      const v = 120 + ((Math.random() * 90) | 0);
+      img.data[i]     = v;            // R
+      img.data[i + 1] = (v * 0.86) | 0; // G
+      img.data[i + 2] = (v * 0.62) | 0; // B
+      img.data[i + 3] = n > 0.86 ? 40 : (n > 0.6 ? 16 : 6); // sparse tooth
+    }
+    gc.putImageData(img, 0, 0);
+    // a few faint fibre strokes
+    gc.strokeStyle = "rgba(90,68,40,0.05)";
+    gc.lineWidth = 1;
+    for (let k = 0; k < 26; k++) {
+      gc.beginPath();
+      const x = Math.random() * 240, y = Math.random() * 240, a = Math.random() * Math.PI;
+      gc.moveTo(x, y);
+      gc.lineTo(x + Math.cos(a) * 34, y + Math.sin(a) * 34);
+      gc.stroke();
+    }
+    document.documentElement.style.setProperty("--fibre-tex", `url(${g.toDataURL("image/png")})`);
+  })();
+
+  const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  /* ---------------------------------------------------------------
+     Canvas helpers
+  --------------------------------------------------------------- */
+  function roundRect(ctx, x, y, w, h, r) {
+    r = Math.min(r, w / 2, h / 2);
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  // warm parchment ground, lightly mottled (drawn into the buffer first)
+  function ground(ctx, w, h) {
+    const g = ctx.createRadialGradient(w * 0.42, h * 0.32, h * 0.06, w * 0.5, h * 0.5, h * 1.15);
+    g.addColorStop(0, "hsl(44, 42%, 80%)");
+    g.addColorStop(0.6, "hsl(40, 40%, 71%)");
+    g.addColorStop(1, "hsl(34, 38%, 58%)");
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, w, h);
+    // soft sepia mottling
+    for (let i = 0; i < 16; i++) {
+      const cx = Math.random() * w, cy = Math.random() * h, rr = (0.06 + Math.random() * 0.12) * w;
+      const m = ctx.createRadialGradient(cx, cy, 0, cx, cy, rr);
+      m.addColorStop(0, `hsla(34, 40%, ${44 + Math.random() * 14}%, 0.05)`);
+      m.addColorStop(1, "hsla(34,40%,50%,0)");
+      ctx.fillStyle = m; ctx.beginPath(); ctx.arc(cx, cy, rr, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+
+  /* ---------------------------------------------------------------
+     The SCENES — hand-authored vector tableaux of remembered coding
+     moments, painted in iron-gall ink + ochre + sanguine, as if they
+     are the older layer of the manuscript resurfacing.
+     Each exposes draw(ctx, w, h).  The bleed mask reveals them.
+  --------------------------------------------------------------- */
+
+  // shared scribal palette
+  const INK = "hsl(28, 35%, 22%)";
+  const INK_SOFT = "hsl(30, 30%, 32%)";
+  const OCHRE = "hsl(38, 60%, 46%)";
+  const SANG = "hsl(12, 55%, 42%)";
+  const GILD = "hsl(44, 70%, 55%)";
+
+  // helper: a quill-drawn frame ruling around a region
+  function inkFrame(ctx, x, y, w, h) {
+    ctx.strokeStyle = INK; ctx.lineWidth = Math.max(1.5, w * 0.004);
+    roundRect(ctx, x, y, w, h, 4); ctx.stroke();
+    ctx.strokeStyle = SANG; ctx.lineWidth = Math.max(1, w * 0.002);
+    roundRect(ctx, x + 5, y + 5, w - 10, h - 10, 3); ctx.stroke();
+  }
+
+  // SCENE A — the late-night desk: a window onto night, a lit codex of code,
+  // one line illuminated in sanguine (the error you finally cornered).
+  function sceneNightDesk(ctx, w, h) {
+    // illuminated capital region: a window arch upper-left
+    const ax = w * 0.07, ay = h * 0.10, aw = w * 0.32, ah = h * 0.46;
+    ctx.fillStyle = "hsl(34, 30%, 50%)";
+    roundRect(ctx, ax, ay, aw, ah, 6); ctx.fill();
+    // arch sky in deep ink-blue wash
+    const sky = ctx.createLinearGradient(0, ay, 0, ay + ah);
+    sky.addColorStop(0, "hsl(220, 38%, 40%)");
+    sky.addColorStop(1, "hsl(226, 36%, 26%)");
+    ctx.fillStyle = sky; roundRect(ctx, ax + 7, ay + 7, aw - 14, ah - 14, 4); ctx.fill();
+    // a few gilt stars / city points
+    for (let i = 0; i < 22; i++) {
+      ctx.fillStyle = `hsla(44, 70%, ${60 + Math.random() * 20}%, ${0.5 + Math.random() * 0.5})`;
+      ctx.beginPath();
+      ctx.arc(ax + 12 + Math.random() * (aw - 24), ay + ah * 0.4 + Math.random() * (ah * 0.5), 1.4, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // window mullions (quill)
+    ctx.strokeStyle = INK; ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(ax + aw / 2, ay + 7); ctx.lineTo(ax + aw / 2, ay + ah - 7);
+    ctx.moveTo(ax + 7, ay + ah / 2); ctx.lineTo(ax + aw - 7, ay + ah / 2);
+    ctx.stroke();
+
+    // the codex / open screen, lower-right, the heart of the moment
+    const sx = w * 0.46, sy = h * 0.28, sw = w * 0.46, sh = h * 0.40;
+    // ochre glow behind it (lamp / screen light)
+    const glow = ctx.createRadialGradient(sx + sw / 2, sy + sh / 2, 6, sx + sw / 2, sy + sh / 2, sw * 0.85);
+    glow.addColorStop(0, "hsla(40, 70%, 55%, 0.4)");
+    glow.addColorStop(1, "hsla(40, 70%, 55%, 0)");
+    ctx.fillStyle = glow; ctx.fillRect(sx - sw * 0.25, sy - sh * 0.3, sw * 1.5, sh * 1.7);
+    inkFrame(ctx, sx, sy, sw, sh);
+    // lines of code, written as ink strokes; one line in sanguine = the bug
+    const pad = sw * 0.07, lh = sh * 0.108;
+    for (let i = 0; i < 7; i++) {
+      const ly = sy + pad + i * lh + lh * 0.4;
+      const isErr = i === 3;
+      ctx.strokeStyle = isErr ? SANG : INK_SOFT;
+      ctx.lineWidth = isErr ? 3.4 : 2;
+      const lw = (isErr ? 0.84 : 0.3 + ((i * 37) % 11) / 18) * (sw - pad * 2);
+      ctx.beginPath();
+      ctx.moveTo(sx + pad, ly);
+      ctx.lineTo(sx + pad + lw, ly);
+      ctx.stroke();
+      if (isErr) {
+        // a marginal sanguine pointer ↦ at the cornered line
+        ctx.fillStyle = SANG;
+        ctx.beginPath();
+        ctx.moveTo(sx + pad - 12, ly - 5); ctx.lineTo(sx + pad - 4, ly); ctx.lineTo(sx + pad - 12, ly + 5);
+        ctx.closePath(); ctx.fill();
+      }
+    }
+
+    // a quill + inkwell resting on the desk, foreground-left
+    const ix = w * 0.30, iy = h * 0.70;
+    ctx.fillStyle = INK; roundRect(ctx, ix, iy, w * 0.05, h * 0.10, 4); ctx.fill();   // inkwell
+    ctx.strokeStyle = OCHRE; ctx.lineWidth = 3;                                        // quill shaft
+    ctx.beginPath(); ctx.moveTo(ix + w * 0.04, iy + 4); ctx.lineTo(ix + w * 0.13, iy - h * 0.16); ctx.stroke();
+    ctx.strokeStyle = "hsl(40, 30%, 78%)"; ctx.lineWidth = 6;                          // feather
+    ctx.beginPath(); ctx.moveTo(ix + w * 0.115, iy - h * 0.10); ctx.lineTo(ix + w * 0.135, iy - h * 0.165); ctx.stroke();
+  }
+
+  // SCENE B — the green-bar relief: a roundel of dots, most filled ochre/green
+  // ink, one just turned from sanguine — a flaky suite that finally held.
+  function sceneTestsHeld(ctx, w, h) {
+    // a large ruled cartouche centered
+    const bx = w * 0.16, by = h * 0.15, bw = w * 0.68, bh = h * 0.60;
+    inkFrame(ctx, bx, by, bw, bh);
+
+    // illuminated heading stroke
+    ctx.fillStyle = OCHRE;
+    ctx.font = `600 ${Math.round(bh * 0.11)}px "Iowan Old Style", Palatino, Georgia, serif`;
+    ctx.textBaseline = "middle";
+    ctx.fillText("lix · all held", bx + bw * 0.07, by + bh * 0.13);
+    // gilt underline
+    ctx.strokeStyle = GILD; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(bx + bw * 0.07, by + bh * 0.21); ctx.lineTo(bx + bw * 0.42, by + bh * 0.21); ctx.stroke();
+
+    // grid of test marks, painted as small ink rings filled green/ochre
+    const cols = 11, rows = 4, gx = bx + bw * 0.08, gy = by + bh * 0.34;
+    const cw = (bw * 0.84) / cols, ch = (bh * 0.5) / rows;
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const cx = gx + c * cw + cw / 2;
+        const cy = gy + r * ch + ch / 2;
+        const justHeld = (r === 1 && c === 6);
+        const rad = Math.min(cw, ch) * 0.26;
+        ctx.beginPath(); ctx.arc(cx, cy, rad, 0, Math.PI * 2);
+        ctx.fillStyle = justHeld ? "hsl(12, 55%, 50%)" : "hsl(120, 36%, 40%)";
+        ctx.fill();
+        ctx.lineWidth = 1.6; ctx.strokeStyle = INK; ctx.stroke();
+        // checkmark stroke in the held ones
+        if (!justHeld) {
+          ctx.strokeStyle = "hsl(46, 60%, 82%)"; ctx.lineWidth = 1.8;
+          ctx.beginPath();
+          ctx.moveTo(cx - rad * 0.5, cy);
+          ctx.lineTo(cx - rad * 0.1, cy + rad * 0.45);
+          ctx.lineTo(cx + rad * 0.55, cy - rad * 0.45);
+          ctx.stroke();
+        }
+      }
+    }
+  }
+
+  // SCENE C — the diagram you sketched: a small node graph (MST-like),
+  // boxes joined by ink edges, one node ringed in gilt — the design that clicked.
+  function sceneDiagram(ctx, w, h) {
+    // nodes positioned like a little associative trail
+    const nodes = [
+      [0.26, 0.30], [0.50, 0.22], [0.72, 0.34],
+      [0.34, 0.58], [0.58, 0.62], [0.46, 0.42],
+    ].map(([nx, ny]) => [nx * w, ny * h]);
+    const edges = [[0,5],[1,5],[2,5],[5,3],[5,4],[3,4]];
+
+    // edges (quill ink)
+    ctx.strokeStyle = INK_SOFT; ctx.lineWidth = 2.2;
+    edges.forEach(([a, b]) => {
+      ctx.beginPath(); ctx.moveTo(nodes[a][0], nodes[a][1]); ctx.lineTo(nodes[b][0], nodes[b][1]); ctx.stroke();
+    });
+
+    // nodes as little boxed sketches
+    const bw = w * 0.13, bh = h * 0.12;
+    nodes.forEach(([nx, ny], i) => {
+      const isHub = (i === 5);
+      if (isHub) {
+        // gilt halo around the node that clicked
+        const halo = ctx.createRadialGradient(nx, ny, 4, nx, ny, bw);
+        halo.addColorStop(0, "hsla(44, 70%, 55%, 0.55)");
+        halo.addColorStop(1, "hsla(44, 70%, 55%, 0)");
+        ctx.fillStyle = halo; ctx.beginPath(); ctx.arc(nx, ny, bw, 0, Math.PI * 2); ctx.fill();
+      }
+      ctx.fillStyle = isHub ? "hsl(40, 45%, 66%)" : "hsl(38, 36%, 60%)";
+      roundRect(ctx, nx - bw / 2, ny - bh / 2, bw, bh, 4); ctx.fill();
+      ctx.lineWidth = isHub ? 3 : 2; ctx.strokeStyle = isHub ? GILD : INK;
+      roundRect(ctx, nx - bw / 2, ny - bh / 2, bw, bh, 4); ctx.stroke();
+      // two little text strokes inside each box
+      ctx.strokeStyle = INK_SOFT; ctx.lineWidth = 1.6;
+      for (let k = 0; k < 2; k++) {
+        const ly = ny - bh * 0.16 + k * bh * 0.3;
+        ctx.beginPath(); ctx.moveTo(nx - bw * 0.32, ly); ctx.lineTo(nx + bw * (0.1 + (i % 3) * 0.07), ly); ctx.stroke();
+      }
+    });
+
+    // a sanguine arrow flowing into the hub — the realization arriving
+    ctx.strokeStyle = SANG; ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(w * 0.16, h * 0.74);
+    ctx.quadraticCurveTo(w * 0.30, h * 0.66, nodes[5][0] - bw * 0.6, nodes[5][1] + bh * 0.7);
+    ctx.stroke();
+    ctx.fillStyle = SANG;
+    const hx = nodes[5][0] - bw * 0.6, hy = nodes[5][1] + bh * 0.7;
+    ctx.beginPath(); ctx.moveTo(hx, hy); ctx.lineTo(hx - 10, hy + 2); ctx.lineTo(hx - 4, hy + 11); ctx.closePath(); ctx.fill();
+  }
+
+  const scenes = [
+    { draw: sceneNightDesk,  folio: "f. 12 recto · tue 02:14",  said: "“…and then the auth-retry loop finally gave way.”", ref: "claude-code · ~/app/auth/retry.ts" },
+    { draw: sceneTestsHeld,  folio: "f. 31 verso · thu 11:47",  said: "“the flaky suite went green and, this time, held.”",   ref: "codex · run lix · all passed" },
+    { draw: sceneDiagram,    folio: "f. 7 recto · mon 16:30",   said: "“the topology snapped into one tree — that was it.”",  ref: "claude-code · design note · MST" },
+  ];
+
+  const notes = [
+    "today's leaf: still chasing that <b>auth-retry loop</b>&hellip;",
+    "today's leaf: a test went red on the <b>same flaky suite</b>&hellip;",
+    "today's leaf: sketching a <b>graph layout</b> that won't settle&hellip;",
+  ];
+
+  /* ---------------------------------------------------------------
+     The resurfacing renderer.
+     The visible page is built up in passes:
+       1. parchment ground (always present)
+       2. the FAINT present note layer (light over-strokes)
+       3. the OLD scene, painted to an offscreen buffer, then composited
+          through an organic, growing "bleed" mask — capillary ink wicking
+          up through the page. bleed∈[0,1] grows on its own.
+  --------------------------------------------------------------- */
+  const page = document.getElementById("page");
+  const pctx = page.getContext("2d");
+  const buf = document.createElement("canvas");   // the old scene, full clarity
+  const bctx = buf.getContext("2d");
+  const mask = document.createElement("canvas");  // the bleed mask
+  const mctx = mask.getContext("2d");
+
+  let W = 0, H = 0, DPR = 1;
+  // bleed seed points (where ink first wicks through) — regenerated per scene
+  let seeds = [];
+
+  function resize() {
+    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    W = page.clientWidth; H = page.clientHeight;
+    [page, buf, mask].forEach((cv) => { cv.width = Math.round(W * DPR); cv.height = Math.round(H * DPR); });
+    pctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    bctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    mctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  }
+
+  function makeSeeds() {
+    // a handful of irregular blotches across the leaf where ink wells up
+    seeds = [];
+    const n = 7;
+    for (let i = 0; i < n; i++) {
+      seeds.push({
+        x: (0.12 + Math.random() * 0.76),
+        y: (0.14 + Math.random() * 0.72),
+        // each seed grows at a slightly different rate → uneven, lifelike bleed
+        rate: 0.7 + Math.random() * 0.6,
+        wob: Math.random() * Math.PI * 2,
+      });
+    }
+  }
+
+  // paint the parchment ground + the faint present note onto the visible page
+  function paintGround() {
+    pctx.setTransform(1, 0, 0, 1, 0, 0);
+    pctx.clearRect(0, 0, page.width, page.height);
+    pctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    ground(pctx, W, H);
+
+    // faint present note: a few light grey-ink strokes near the lower band,
+    // the "today" writing that sits ON TOP (kept subtle, copy carries the text)
+    pctx.save();
+    pctx.globalAlpha = 0.16;
+    pctx.strokeStyle = "hsl(30, 18%, 38%)";
+    pctx.lineWidth = 2;
+    const ly0 = H * 0.30;
+    for (let i = 0; i < 3; i++) {
+      const ly = ly0 + i * H * 0.05;
+      pctx.beginPath();
+      pctx.moveTo(W * 0.10, ly);
+      pctx.lineTo(W * (0.30 + (i * 0.09)), ly);
+      pctx.stroke();
+    }
+    pctx.restore();
+  }
+
+  // render the chosen old scene to the buffer at full clarity
+  function renderScene(i) {
+    bctx.setTransform(1, 0, 0, 1, 0, 0);
+    bctx.clearRect(0, 0, buf.width, buf.height);
+    bctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    // the scene is painted onto its own warm wash so it reads as the under-leaf
+    bctx.fillStyle = "hsl(40, 34%, 70%)";
+    bctx.fillRect(0, 0, W, H);
+    scenes[i].draw(bctx, W, H);
+  }
+
+  // build the bleed mask for a given bleed amount (0..1):
+  // organic radial blotches that grow from seeds and merge.
+  function buildMask(bleed) {
+    mctx.setTransform(1, 0, 0, 1, 0, 0);
+    mctx.clearRect(0, 0, mask.width, mask.height);
+    mctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    const eased = bleed * bleed * (3 - 2 * bleed);
+    const maxR = Math.hypot(W, H) * 0.42;
+    seeds.forEach((s) => {
+      const cx = s.x * W, cy = s.y * H;
+      const r = Math.max(0.0001, eased * s.rate * maxR);
+      // wobble the edge a touch so the blotch isn't a clean circle
+      const wob = 1 + 0.12 * Math.sin(s.wob + bleed * 6);
+      const g = mctx.createRadialGradient(cx, cy, 0, cx, cy, r * wob);
+      g.addColorStop(0, "rgba(0,0,0,1)");
+      g.addColorStop(0.72, "rgba(0,0,0,0.92)");
+      g.addColorStop(1, "rgba(0,0,0,0)"); // feathered capillary edge
+      mctx.fillStyle = g;
+      mctx.beginPath(); mctx.arc(cx, cy, r * wob, 0, Math.PI * 2); mctx.fill();
+    });
+  }
+
+  // composite: clip the old-scene buffer to the bleed mask and stamp it onto
+  // the page, multiplied so the resurfacing ink darkens INTO the parchment.
+  function composite(bleed) {
+    paintGround();
+    if (bleed <= 0.001) return;
+    buildMask(bleed);
+
+    // masked scene = buffer ∩ mask, drawn to a scratch via the mask canvas
+    // (reuse mask canvas: switch to source-in to keep only scene inside blot)
+    mctx.globalCompositeOperation = "source-in";
+    mctx.setTransform(1, 0, 0, 1, 0, 0);
+    mctx.drawImage(buf, 0, 0);
+    mctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    mctx.globalCompositeOperation = "source-over";
+
+    // stamp onto page — multiply so it bleeds darkly through the fibres.
+    // contrast/opacity ramp with bleed so early stages are a faint stain.
+    pctx.save();
+    pctx.globalAlpha = 0.45 + 0.55 * (bleed * bleed * (3 - 2 * bleed));
+    pctx.globalCompositeOperation = "multiply";
+    pctx.setTransform(1, 0, 0, 1, 0, 0);
+    pctx.drawImage(mask, 0, 0);
+    pctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    pctx.restore();
+
+    // a wet sanguine halo while the ink is actively wicking (peaks mid-bleed)
+    const wet = Math.sin(Math.min(bleed, 1) * Math.PI);
+    if (wet > 0.02) {
+      pctx.save();
+      pctx.globalCompositeOperation = "multiply";
+      seeds.forEach((s) => {
+        const cx = s.x * W, cy = s.y * H;
+        const r = (0.12 + bleed * 0.18) * Math.hypot(W, H) * 0.4 * s.rate;
+        const g = pctx.createRadialGradient(cx, cy, r * 0.4, cx, cy, r);
+        g.addColorStop(0, "hsla(12, 55%, 42%, 0)");
+        g.addColorStop(1, `hsla(12, 55%, 40%, ${0.05 * wet})`);
+        pctx.fillStyle = g; pctx.beginPath(); pctx.arc(cx, cy, r, 0, Math.PI * 2); pctx.fill();
+      });
+      pctx.restore();
+    }
+  }
+
+  /* ---------------------------------------------------------------
+     Resurfacing lifecycle — the old layer bleeds up on its own, irregular
+     timing; holds; then sinks back; the next leaf's older layer surfaces.
+     No user action triggers any of it.
+  --------------------------------------------------------------- */
+  const glossEl = document.getElementById("gloss");
+  const gFolio = document.getElementById("g-folio");
+  const gSaid = document.getElementById("g-said");
+  const gRef = document.getElementById("g-ref");
+  const noteText = document.getElementById("note-text");
+  const statusText = document.getElementById("status-text");
+
+  let idx = 0;
+  let raf = 0;
+  let running = false;
+
+  function setCopy(i) {
+    noteText.innerHTML = notes[i % notes.length];
+    gFolio.textContent = scenes[i].folio;
+    gSaid.textContent = scenes[i].said;
+    gRef.textContent = scenes[i].ref;
+  }
+
+  function surfaceOnce(onDone) {
+    makeSeeds();
+    renderScene(idx);
+    glossEl.classList.remove("show");
+    statusText.textContent = "an older layer is surfacing";
+
+    const RISE = 3600;   // ms for the bleed to fully surface
+    const HOLD = 4200;   // ms to hold the resurfaced scene
+    const SINK = 1100;   // ms to sink back before the next leaf
+    let start = performance.now();
+    let glossed = false;
+    let phase = "rise";
+    let sinkStart = 0;
+
+    function frame(now) {
+      if (!running) return;
+      if (phase === "rise") {
+        const t = Math.min(1, (now - start) / RISE);
+        composite(t);
+        if (!glossed && t > 0.55) {
+          glossed = true;
+          glossEl.classList.add("show");
+          statusText.textContent = "surfaced · the leaf you needed";
+        }
+        if (t >= 1) { phase = "hold"; sinkStart = now; }
+        raf = requestAnimationFrame(frame);
+      } else if (phase === "hold") {
+        composite(1);
+        if (now - sinkStart >= HOLD) { phase = "sink"; start = now; glossEl.classList.remove("show"); }
+        raf = requestAnimationFrame(frame);
+      } else { // sink
+        const t = Math.min(1, (now - start) / SINK);
+        composite(1 - t);
+        if (t >= 1) { onDone && onDone(); }
+        else raf = requestAnimationFrame(frame);
+      }
+    }
+    raf = requestAnimationFrame(frame);
+  }
+
+  function loop() {
+    running = true;
+    setCopy(idx);
+    surfaceOnce(() => {
+      idx = (idx + 1) % scenes.length;
+      composite(0);
+      const pause = 750 + Math.random() * 1100; // irregular, lifelike gap
+      raf = 0;
+      setTimeout(() => { if (running) loop(); }, pause);
+    });
+  }
+
+  function stop() { running = false; if (raf) cancelAnimationFrame(raf); raf = 0; }
+
+  /* ---------------------------------------------------------------
+     boot
+  --------------------------------------------------------------- */
+  function boot() {
+    resize();
+    if (reduceMotion) {
+      // show the resurfaced scene fully + static gloss; no motion
+      setCopy(0);
+      makeSeeds();
+      // force seeds to cover the leaf so the static scene reads fully surfaced
+      seeds = [{ x: 0.5, y: 0.5, rate: 2.6, wob: 0 }];
+      renderScene(0);
+      composite(1);
+      glossEl.classList.add("show");
+      statusText.textContent = "surfaced · the leaf you needed";
+      return;
+    }
+    composite(0);
+    loop();
+  }
+
+  let rzTimer = 0;
+  window.addEventListener("resize", () => {
+    clearTimeout(rzTimer);
+    rzTimer = setTimeout(() => {
+      stop();
+      resize();
+      if (reduceMotion) {
+        setCopy(idx);
+        seeds = [{ x: 0.5, y: 0.5, rate: 2.6, wob: 0 }];
+        renderScene(idx); composite(1); glossEl.classList.add("show");
+      } else {
+        loop();
+      }
+    }, 180);
+  }, { passive: true });
+
+  // pause when the hero scrolls offscreen (perf + battery)
+  if ("IntersectionObserver" in window && !reduceMotion) {
+    const io = new IntersectionObserver((entries) => {
+      entries.forEach((e) => {
+        if (e.isIntersecting) { if (!running) loop(); }
+        else { stop(); }
+      });
+    }, { threshold: 0.04 });
+    io.observe(page);
+  }
+
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
+  else boot();
+
+  /* ---------------------------------------------------------------
+     The three explainer swatches — same bleed motif, tiny + looping,
+     each frozen near a stage (ground / bleed / scene) then gently breathing.
+  --------------------------------------------------------------- */
+  document.querySelectorAll("canvas[data-swatch]").forEach((cv) => {
+    const ctx = cv.getContext("2d");
+    const sbuf = document.createElement("canvas");
+    const sbc = sbuf.getContext("2d");
+    const smask = document.createElement("canvas");
+    const smc = smask.getContext("2d");
+    let sw = 0, sh = 0, sdpr = 1;
+    let sseeds = [];
+    const sceneFor = { ground: 0, bleed: 1, scene: 2 }[cv.dataset.swatch];
+    const target = { ground: 0.0, bleed: 0.5, scene: 1.0 }[cv.dataset.swatch];
+
+    function size() {
+      sdpr = Math.min(window.devicePixelRatio || 1, 2);
+      sw = cv.clientWidth; sh = cv.clientHeight;
+      [cv, sbuf, smask].forEach((c) => { c.width = Math.round(sw * sdpr); c.height = Math.round(sh * sdpr); });
+      ctx.setTransform(sdpr, 0, 0, sdpr, 0, 0);
+      sbc.setTransform(sdpr, 0, 0, sdpr, 0, 0);
+      smc.setTransform(sdpr, 0, 0, sdpr, 0, 0);
+      sseeds = [];
+      for (let i = 0; i < 4; i++) sseeds.push({ x: 0.18 + Math.random() * 0.64, y: 0.2 + Math.random() * 0.6, rate: 0.8 + Math.random() * 0.5 });
+      // render the scene buffer once
+      sbc.setTransform(1, 0, 0, 1, 0, 0); sbc.clearRect(0, 0, sbuf.width, sbuf.height); sbc.setTransform(sdpr, 0, 0, sdpr, 0, 0);
+      sbc.fillStyle = "hsl(40, 34%, 70%)"; sbc.fillRect(0, 0, sw, sh);
+      scenes[sceneFor].draw(sbc, sw, sh);
+    }
+    size();
+
+    function paintAt(bleed) {
+      // ground
+      ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, cv.width, cv.height); ctx.setTransform(sdpr, 0, 0, sdpr, 0, 0);
+      ground(ctx, sw, sh);
+      if (bleed <= 0.001) return;
+      // mask
+      smc.setTransform(1, 0, 0, 1, 0, 0); smc.clearRect(0, 0, smask.width, smask.height); smc.setTransform(sdpr, 0, 0, sdpr, 0, 0);
+      const eased = bleed * bleed * (3 - 2 * bleed);
+      const maxR = Math.hypot(sw, sh) * 0.5;
+      sseeds.forEach((s) => {
+        const cx = s.x * sw, cy = s.y * sh, r = Math.max(0.0001, eased * s.rate * maxR);
+        const g = smc.createRadialGradient(cx, cy, 0, cx, cy, r);
+        g.addColorStop(0, "rgba(0,0,0,1)"); g.addColorStop(0.72, "rgba(0,0,0,0.9)"); g.addColorStop(1, "rgba(0,0,0,0)");
+        smc.fillStyle = g; smc.beginPath(); smc.arc(cx, cy, r, 0, Math.PI * 2); smc.fill();
+      });
+      smc.globalCompositeOperation = "source-in";
+      smc.setTransform(1, 0, 0, 1, 0, 0); smc.drawImage(sbuf, 0, 0); smc.setTransform(sdpr, 0, 0, sdpr, 0, 0);
+      smc.globalCompositeOperation = "source-over";
+      ctx.save(); ctx.globalAlpha = 0.45 + 0.55 * eased; ctx.globalCompositeOperation = "multiply";
+      ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(smask, 0, 0); ctx.setTransform(sdpr, 0, 0, sdpr, 0, 0);
+      ctx.restore();
+    }
+
+    if (reduceMotion) { paintAt(target); return; } // ground=0 → bare leaf, bleed=0.5, scene=1
+
+    let phase = Math.random() * Math.PI * 2, rid = 0, run = false;
+    const tick = () => {
+      if (!run) return;
+      phase += 0.011;
+      const wobble = (Math.sin(phase) + 1) / 2;
+      const b = target === 0 ? 0 : Math.max(0.06, Math.min(1, target * (0.6 + wobble * 0.45)));
+      paintAt(b);
+      rid = requestAnimationFrame(tick);
+    };
+    if ("IntersectionObserver" in window) {
+      const io = new IntersectionObserver((es) => es.forEach((e) => {
+        if (e.isIntersecting) { if (!run) { run = true; rid = requestAnimationFrame(tick); } }
+        else { run = false; cancelAnimationFrame(rid); }
+      }), { threshold: 0.2 });
+      io.observe(cv);
+    } else { run = true; rid = requestAnimationFrame(tick); }
+
+    window.addEventListener("resize", () => { clearTimeout(cv._t); cv._t = setTimeout(() => { size(); paintAt(target); }, 200); }, { passive: true });
+  });
+})();
+</script>
+</body>
+</html>

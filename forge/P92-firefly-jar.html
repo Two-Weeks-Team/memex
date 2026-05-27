@@ -1,0 +1,780 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Memex — a firefly rises in the jar with what you forgot</title>
+<meta name="description" content="Memex turns your Claude Code & Codex session history into a navigable associative memory backed by Qdrant. When the moment calls, one dormant memory brightens and rises in the jar — its swelling light lifts a whole remembered coding scene into view, then dims back into the swarm. LLM-free at runtime." />
+<style>
+  :root{
+    --ink:#f3efe2;
+    --dim:#b3ad97;
+    --faint:#7d7960;
+    --bg0:#070806;
+    --bg1:#0c0e0a;
+    --night:#0a0c08;
+    --hair:rgba(214,224,150,.16);
+    --panel:rgba(12,14,9,.6);
+
+    /* firefly / dusk palette — warm amber-green glow against deep night */
+    --fly:#e9ff8a;        /* the brightening firefly */
+    --fly-warm:#ffd86b;   /* warm core */
+    --fly-soft:#a9d066;   /* dormant motes */
+    --glass-edge:rgba(180,210,150,.22);
+    --scene-warm:#ffe39a; /* the lit scene's warm interior light */
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  html,body{margin:0;height:100%}
+  body{
+    background:
+      radial-gradient(1100px 760px at 50% -8%, #14180e 0%, transparent 58%),
+      radial-gradient(1200px 900px at 80% 110%, #0a0c07 0%, transparent 55%),
+      linear-gradient(180deg, var(--bg1), var(--bg0) 70%);
+    color:var(--ink);
+    font:16px/1.62 ui-sans-serif,-apple-system,"Segoe UI",Roboto,Inter,system-ui,sans-serif;
+    overflow-x:hidden;
+    -webkit-font-smoothing:antialiased;
+  }
+  a{color:#dbe7a8;text-decoration:none}
+  a:hover{color:var(--ink);text-decoration:underline;text-underline-offset:3px}
+  code,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  :focus-visible{outline:2px solid var(--fly);outline-offset:3px;border-radius:8px}
+
+  /* ============ the dusk stage — intimate, not full-bleed ============ */
+  .stage{position:relative;width:100%;min-height:100svh;overflow:hidden;
+    display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);align-items:center;
+    gap:clamp(20px,4vw,56px);
+    padding:clamp(78px,12vh,120px) clamp(18px,5vw,56px) clamp(40px,7vh,72px)}
+  /* faint drifting dusk meadow behind everything */
+  .stage::before{
+    content:"";position:absolute;inset:0;z-index:0;pointer-events:none;
+    background:
+      radial-gradient(60% 40% at 22% 86%, rgba(60,72,40,.22), transparent 70%),
+      radial-gradient(50% 36% at 80% 92%, rgba(48,58,34,.18), transparent 70%);
+  }
+  /* top vignette so copy/topbar stay legible */
+  .stage::after{
+    content:"";position:absolute;inset:0;pointer-events:none;z-index:6;
+    background:
+      linear-gradient(180deg, rgba(7,8,6,.6) 0%, transparent 18%, transparent 72%, rgba(7,8,6,.55) 100%);
+  }
+
+  /* ---- the jar column ---- */
+  .jarwrap{position:relative;z-index:2;justify-self:center;
+    width:min(46vw, 460px);aspect-ratio:0.82/1;max-width:460px}
+  @media (max-width:880px){ .jarwrap{width:min(78vw,420px)} }
+  .jarcanvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+
+  /* glass jar overlay drawn in SVG so the canvas swarm sits *inside* it */
+  .jarglass{position:absolute;inset:0;width:100%;height:100%;z-index:3;pointer-events:none;overflow:visible}
+
+  /* tiny floating caption under the jar naming the surfaced scene */
+  .jarcaption{position:absolute;left:0;right:0;bottom:-2.6em;text-align:center;z-index:4;
+    font-size:12.5px;letter-spacing:.04em;color:var(--faint)}
+  .jarcaption .scene-label{color:var(--fly);font-weight:600;letter-spacing:.05em;
+    text-shadow:0 0 14px rgba(233,255,138,.45)}
+
+  /* ---- the copy column ---- */
+  .hero{position:relative;z-index:5;max-width:560px}
+  .brandtop{display:flex;align-items:center;gap:11px;font-weight:700;letter-spacing:.18em;
+    text-transform:uppercase;font-size:13px;color:var(--ink);margin-bottom:26px}
+  .brandtop .dot{width:9px;height:9px;border-radius:50%;background:var(--fly);
+    box-shadow:0 0 10px 2px rgba(233,255,138,.8),0 0 22px 5px rgba(233,255,138,.35);
+    animation:dotpulse 3.4s ease-in-out infinite}
+  @keyframes dotpulse{0%,100%{opacity:.7}50%{opacity:1}}
+
+  .moment{display:inline-flex;align-items:center;gap:10px;margin-bottom:20px;
+    padding:8px 14px;border:1px solid var(--hair);border-radius:999px;
+    background:var(--panel);backdrop-filter:blur(6px);
+    font-size:12.5px;letter-spacing:.02em;color:var(--dim)}
+  .moment .pulse{width:7px;height:7px;border-radius:50%;background:var(--fly-soft);flex:0 0 auto;
+    box-shadow:0 0 0 0 rgba(169,208,102,.6);animation:pulse 2.6s ease-out infinite}
+  .moment b{color:var(--ink);font-weight:600}
+  @keyframes pulse{
+    0%{box-shadow:0 0 0 0 rgba(169,208,102,.55)}
+    70%{box-shadow:0 0 0 9px rgba(169,208,102,0)}
+    100%{box-shadow:0 0 0 0 rgba(169,208,102,0)}
+  }
+
+  h1{margin:0;font-weight:680;font-size:clamp(31px,5vw,56px);line-height:1.05;
+    letter-spacing:-.018em;color:#fff;text-shadow:0 2px 40px rgba(7,8,6,.7)}
+  h1 .glow{color:var(--fly);
+    text-shadow:0 0 10px rgba(233,255,138,.55),0 0 30px rgba(233,255,138,.35),0 0 60px rgba(233,255,138,.2)}
+  .lede{margin:18px 0 0;font-size:clamp(15px,1.9vw,18px);color:var(--dim);max-width:520px}
+  .lede b{color:var(--ink);font-weight:600}
+
+  .cta{display:flex;flex-wrap:wrap;gap:13px;margin-top:28px}
+  .btn{display:inline-flex;align-items:center;gap:9px;padding:12px 20px;border-radius:11px;
+    font-size:14.5px;font-weight:600;letter-spacing:.01em;border:1px solid transparent;
+    transition:transform .15s ease, box-shadow .25s ease, background .25s ease, border-color .2s ease}
+  .btn:hover{text-decoration:none;transform:translateY(-1px)}
+  .btn-primary{background:linear-gradient(180deg,#f2ff9e,#d8ec6e);color:#1f2606;
+    box-shadow:0 8px 30px rgba(216,236,110,.3)}
+  .btn-primary:hover{box-shadow:0 12px 38px rgba(216,236,110,.46)}
+  .btn-ghost{border-color:var(--hair);color:var(--ink);background:var(--panel);backdrop-filter:blur(6px)}
+  .btn-ghost:hover{border-color:rgba(214,224,150,.42)}
+
+  .legend{margin-top:22px;font-size:12.5px;color:var(--faint);letter-spacing:.01em;
+    display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+
+  /* small replay control */
+  .replay{display:inline-flex;align-items:center;gap:8px;margin-top:24px;padding:9px 14px;border-radius:999px;
+    border:1px solid var(--hair);background:var(--panel);backdrop-filter:blur(6px);
+    color:var(--dim);font-size:12.5px;cursor:pointer}
+  .replay:hover{color:var(--ink);border-color:rgba(214,224,150,.42)}
+  .replay svg{width:13px;height:13px;fill:currentColor}
+
+  /* ============ below the fold — ground truth ============ */
+  .below{position:relative;z-index:2;max-width:1080px;margin:0 auto;
+    padding:clamp(40px,8vh,90px) clamp(18px,5vw,40px) 40px}
+  .kicker{font-size:12px;letter-spacing:.22em;text-transform:uppercase;color:var(--faint);margin:0 0 14px}
+  .below h2{font-size:clamp(24px,4vw,38px);line-height:1.12;margin:0;color:#fff;
+    letter-spacing:-.01em;font-weight:660;max-width:780px}
+  .below p.sub{color:var(--dim);max-width:680px;margin:16px 0 0;font-size:16px}
+
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(238px,1fr));gap:16px;margin-top:42px}
+  .card{border:1px solid var(--hair);border-radius:16px;padding:22px 22px 24px;
+    background:linear-gradient(180deg, rgba(16,19,11,.62), rgba(9,11,7,.45));
+    transition:border-color .2s ease, transform .2s ease}
+  .card:hover{border-color:rgba(214,224,150,.4);transform:translateY(-2px)}
+  .card h3{margin:0 0 8px;font-size:16px;color:#fff;letter-spacing:.01em;display:flex;align-items:center;gap:9px}
+  .card h3 .gp{width:8px;height:8px;border-radius:50%;background:var(--fly);
+    box-shadow:0 0 8px 1px rgba(233,255,138,.7);flex:0 0 auto}
+  .card p{margin:0;font-size:14px;color:var(--dim);line-height:1.55}
+
+  .facts{margin-top:44px;border:1px solid var(--hair);border-radius:16px;overflow:hidden;background:rgba(9,11,7,.5)}
+  .facts .row{display:grid;grid-template-columns:160px 1fr;gap:18px;padding:16px 22px;
+    border-top:1px solid rgba(214,224,150,.08);font-size:14.5px}
+  .facts .row:first-child{border-top:0}
+  .facts .row .lab{color:var(--faint);letter-spacing:.04em;font-size:12.5px;text-transform:uppercase;padding-top:2px}
+  .facts .row .val{color:var(--ink)}
+  .facts .row .val .mono{color:var(--fly);font-size:13.5px}
+
+  .addline{margin-top:34px;border:1px solid var(--hair);border-radius:14px;background:#070806;
+    padding:16px 18px;font-size:13.5px;color:var(--dim);overflow-x:auto}
+  .addline .mono{color:var(--ink)}
+  .addline .c{color:var(--fly)}
+
+  footer{position:relative;z-index:2;border-top:1px solid var(--hair);margin-top:60px}
+  .foot{max-width:1080px;margin:0 auto;padding:28px clamp(18px,5vw,40px) 60px;
+    display:flex;flex-wrap:wrap;gap:18px;justify-content:space-between;align-items:center;
+    color:var(--faint);font-size:13px}
+  .foot a{color:var(--dim)}
+  .foot .links{display:flex;flex-wrap:wrap;gap:18px}
+
+  @media (max-width:880px){
+    .stage{grid-template-columns:1fr;gap:clamp(40px,8vh,72px);text-align:left}
+    .hero{order:2;margin:0 auto}
+    .jarwrap{order:1}
+  }
+  @media (max-width:640px){
+    .facts .row{grid-template-columns:1fr;gap:4px}
+  }
+
+  /* reduced motion: the firefly stays risen + the scene stays lit, no drift */
+  @media (prefers-reduced-motion: reduce){
+    .brandtop .dot{animation:none}
+    .moment .pulse{animation:none}
+  }
+</style>
+</head>
+<body>
+
+<section class="stage" aria-label="A dark glass jar of drifting fireflies — each a dormant memory. On its own, one firefly brightens and rises to the lid, and its swelling light lifts a remembered late-night coding scene into view inside the jar, then it dims back into the swarm.">
+
+  <!-- ============ the copy ============ -->
+  <div class="hero">
+    <div class="brandtop"><span class="dot" aria-hidden="true"></span> Memex</div>
+
+    <span class="moment">
+      <span class="pulse" aria-hidden="true"></span>
+      Right now you're <b>chasing the same auth-retry bug again</b> &mdash; and the jar stirs&hellip;
+    </span>
+
+    <h1>You fixed this once.<br>A firefly <span class="glow">rises in the jar.</span></h1>
+
+    <p class="lede">
+      You never wrote it down. The jar holds dozens of dim, drifting sparks &mdash; each a
+      memory you forgot you had. But the moment calls one up: it <b>brightens, lifts to the
+      lid</b>, and its swelling light reveals a whole <b>late-night scene</b> &mdash; the desk,
+      the lit screen, the patch that worked &mdash; before it dims back into the swarm. It
+      surfaces on its own, because right now evoked it.
+    </p>
+
+    <div class="cta">
+      <a class="btn btn-primary" href="https://github.com/Two-Weeks-Team/memex">Get Memex on GitHub</a>
+      <a class="btn btn-ghost" href="https://two-weeks-team.github.io/memex/">See it live</a>
+    </div>
+
+    <p class="legend">
+      a memory surfaced by association, not a search
+      <span aria-hidden="true">&middot;</span>
+      <a href="#how">how it works</a>
+    </p>
+
+    <button class="replay" id="replay" type="button" aria-label="Let another firefly rise in the jar">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5V1L7 6l5 5V7a5 5 0 1 1-5 5H5a7 7 0 1 0 7-7z"/></svg>
+      Recall again
+    </button>
+  </div>
+
+  <!-- ============ the jar ============ -->
+  <div class="jarwrap">
+    <!-- the firefly swarm + the lit scene are drawn on this canvas -->
+    <canvas id="jar" class="jarcanvas" aria-hidden="true"></canvas>
+
+    <!-- glass jar drawn on top so motes read as contained within it -->
+    <svg class="jarglass" viewBox="0 0 400 488" aria-hidden="true" preserveAspectRatio="xMidYMid meet">
+      <defs>
+        <linearGradient id="glassSheen" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0"   stop-color="rgba(220,235,180,.16)"/>
+          <stop offset=".35" stop-color="rgba(220,235,180,.03)"/>
+          <stop offset=".62" stop-color="rgba(220,235,180,0)"/>
+          <stop offset="1"   stop-color="rgba(180,205,150,.10)"/>
+        </linearGradient>
+      </defs>
+      <!-- lid / cap -->
+      <rect x="116" y="20" width="168" height="30" rx="9"
+            fill="rgba(28,32,20,.9)" stroke="rgba(200,214,150,.32)" stroke-width="1.5"/>
+      <rect x="128" y="48" width="144" height="16" rx="5"
+            fill="rgba(20,24,15,.9)" stroke="rgba(200,214,150,.22)" stroke-width="1"/>
+      <!-- tiny holes punched in the lid, so air (and the rising light) can reach it -->
+      <g fill="rgba(233,255,138,.28)">
+        <circle cx="158" cy="35" r="2.4"/><circle cx="180" cy="35" r="2.4"/>
+        <circle cx="202" cy="35" r="2.4"/><circle cx="224" cy="35" r="2.4"/>
+        <circle cx="246" cy="35" r="2.4"/>
+      </g>
+      <!-- jar body: rounded mason-jar silhouette -->
+      <path d="M132 64
+               L132 78
+               C100 96 86 132 86 196
+               L86 392
+               C86 446 124 470 200 470
+               C276 470 314 446 314 392
+               L314 196
+               C314 132 300 96 268 78
+               L268 64 Z"
+            fill="rgba(14,18,10,.34)"
+            stroke="rgba(200,214,150,.34)" stroke-width="2"/>
+      <!-- glass sheen highlight -->
+      <path d="M132 64
+               L132 78
+               C100 96 86 132 86 196
+               L86 392
+               C86 446 124 470 200 470
+               C276 470 314 446 314 392
+               L314 196
+               C314 132 300 96 268 78
+               L268 64 Z"
+            fill="url(#glassSheen)" stroke="none"/>
+      <!-- a vertical specular streak on the left of the glass -->
+      <path d="M108 130 C100 200 100 320 110 410"
+            fill="none" stroke="rgba(240,248,210,.14)" stroke-width="6" stroke-linecap="round"/>
+    </svg>
+
+    <div class="jarcaption">
+      <span class="scene-label" id="sceneName">a spark is brightening&hellip;</span>
+    </div>
+  </div>
+</section>
+
+<main class="below">
+  <section id="how">
+    <p class="kicker">What just happened</p>
+    <h2>People don't document every memory &mdash; yet when the moment arrives,
+      the relevant thought surfaces on its own.</h2>
+    <p class="sub">
+      Memex is a non-chatbot, LLM-free-at-runtime tool that reads your existing
+      Claude&nbsp;Code and Codex session history and turns it into a navigable
+      associative memory backed by <b style="color:var(--ink)">Qdrant</b>. You move through your own past by
+      <i>similarity</i>, not keywords &mdash; and the relevant moment can rise to you proactively,
+      the way one firefly brightens out of a jar of dim, drifting sparks.
+    </p>
+
+    <div class="grid">
+      <article class="card">
+        <h3><span class="gp" aria-hidden="true"></span>Time Machine</h3>
+        <p>Replay any past session as it happened &mdash; the whole scene, not a snippet.</p>
+      </article>
+      <article class="card">
+        <h3><span class="gp" aria-hidden="true"></span>Lens</h3>
+        <p>Named-vector weighted search to look through your history from one angle at a time.</p>
+      </article>
+      <article class="card">
+        <h3><span class="gp" aria-hidden="true"></span>Topology</h3>
+        <p>A distance-matrix &rarr; MST graph: how your sessions actually connect to one another.</p>
+      </article>
+      <article class="card">
+        <h3><span class="gp" aria-hidden="true"></span>Mix &amp; Discovery</h3>
+        <p>Positive / negative recommendation to pull related work toward you and push noise away.</p>
+      </article>
+      <article class="card">
+        <h3><span class="gp" aria-hidden="true"></span>Proactive Recall</h3>
+        <p>The piece that raised the firefly above: a relevant past moment surfaces because the current one evoked it.</p>
+      </article>
+      <article class="card">
+        <h3><span class="gp" aria-hidden="true"></span>Companion · Wrapped · Loop&nbsp;Breaker</h3>
+        <p>An agent-memory layer over your corpus &mdash; recap what you've done, and catch yourself circling.</p>
+      </article>
+    </div>
+
+    <div class="facts" aria-label="What Memex is">
+      <div class="row"><div class="lab">Reads</div>
+        <div class="val"><span class="mono">~/.claude/projects/**/*.jsonl</span>, legacy transcripts, and <span class="mono">history.jsonl</span></div></div>
+      <div class="row"><div class="lab">Backed by</div>
+        <div class="val">Qdrant &mdash; navigate by vector similarity, no runtime LLM</div></div>
+      <div class="row"><div class="lab">Why</div>
+        <div class="val">Claude&nbsp;Code silently migrates and deletes old sessions. Memex keeps a corpus <b style="color:var(--ink)">you own.</b></div></div>
+      <div class="row"><div class="lab">Built for</div>
+        <div class="val">Qdrant Vector Space Day 2026 &mdash; <i>"Think Outside the Bot."</i></div></div>
+    </div>
+  </section>
+
+  <section id="agent">
+    <p class="kicker" style="margin-top:56px">For your agent</p>
+    <h2 style="font-size:clamp(20px,3vw,28px)">11 MCP tools over stdio + HTTP &mdash;
+      works in Claude&nbsp;Code, Codex, and Cursor.</h2>
+    <p class="sub">A server / Docker variant runs Qdrant, the web UI, and the MCP server in one image.
+      The tools let an agent recall, replay, and connect across your own history.</p>
+    <div class="addline mono">
+      <span class="c">$</span> claude mcp add memex -- memex-mcp
+    </div>
+    <p style="margin-top:18px;font-size:14px">
+      <a href="https://github.com/Two-Weeks-Team/memex#server--docker">Server / Docker variant</a>
+      &nbsp;&middot;&nbsp;
+      <a href="https://github.com/Two-Weeks-Team/memex">MCP integration &amp; the 11 tools</a>
+    </p>
+  </section>
+</main>
+
+<footer>
+  <div class="foot">
+    <div>Memex &mdash; a memory you own, surfaced by association.</div>
+    <div class="links">
+      <a href="https://github.com/Two-Weeks-Team/memex">GitHub</a>
+      <a href="https://two-weeks-team.github.io/memex/">Live landing</a>
+      <a href="https://github.com/Two-Weeks-Team/memex#server--docker">Docker</a>
+    </div>
+  </div>
+</footer>
+
+<script>
+(function(){
+  "use strict";
+
+  var canvas    = document.getElementById('jar');
+  var ctx       = canvas.getContext('2d');
+  var sceneName = document.getElementById('sceneName');
+  var replayBtn = document.getElementById('replay');
+
+  function prefersReduced(){
+    return window.matchMedia &&
+           window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  }
+
+  // ---- jar geometry, in canvas-local coordinates that match the SVG viewBox ----
+  // SVG viewBox is 0 0 400 488; we map that to the canvas pixel space at draw time.
+  var VB_W = 400, VB_H = 488;
+  // inner bounds where motes are allowed to drift (a little inside the glass)
+  var INNER = { x: 96, y: 86, w: 208, h: 372 };  // x..x+w, y..y+h
+  // the lid line the chosen firefly rises toward
+  var LID_Y = 78;
+
+  // ---- the swarm of dormant memories ----
+  // Each spark carries the label of a (made-up but plausible) past coding moment.
+  var SCENES = [
+    "the night you solved it",
+    "the migration that finally ran clean",
+    "the 2am race-condition fix",
+    "the regex you got right on the 9th try",
+    "the auth retry you patched last spring",
+    "the off-by-one in the paginator",
+    "the deploy that almost broke prod",
+    "the test you wrote before the bug existed"
+  ];
+
+  var W = 0, H = 0, DPR = 1, S = 1; // S = scale from viewBox units → canvas px
+  var motes = [];
+  var NUM = 26;
+  var t = 0;
+
+  // animation phase machine
+  // 'drift' → all motes wander dim; 'rise' → chosen mote brightens & climbs;
+  // 'lit'  → scene glows at top, held; 'dim' → fades back; loop.
+  var phase = 'drift';
+  var phaseT = 0;
+  var chosen = null;
+  var sceneAlpha = 0;     // 0..1 brightness of the revealed scene
+  var currentScene = SCENES[0];
+  var reduced = false;
+  var rafId = null;
+
+  function rand(a,b){ return a + Math.random()*(b-a); }
+
+  function makeMote(i){
+    return {
+      x: rand(INNER.x+14, INNER.x+INNER.w-14),
+      y: rand(INNER.y+40, INNER.y+INNER.h-20),
+      vx: rand(-0.18,0.18),
+      vy: rand(-0.16,0.16),
+      r:  rand(1.4, 2.8),
+      // each mote has its own slow blink rhythm
+      phase: rand(0, Math.PI*2),
+      speed: rand(0.6, 1.4),
+      base: rand(0.18, 0.42),     // dormant brightness
+      sceneIdx: i % SCENES.length
+    };
+  }
+
+  function build(){
+    motes = [];
+    for (var i=0;i<NUM;i++) motes.push(makeMote(i));
+  }
+
+  function resize(){
+    var box = canvas.getBoundingClientRect();
+    DPR = Math.min(window.devicePixelRatio||1, 2);
+    W = Math.max(1, Math.round(box.width));
+    H = Math.max(1, Math.round(box.height));
+    canvas.width  = Math.round(W*DPR);
+    canvas.height = Math.round(H*DPR);
+    // fit the viewBox into the canvas (preserveAspectRatio: meet, centered)
+    S = Math.min(W/VB_W, H/VB_H);
+  }
+
+  // map viewBox coords → device px, accounting for centering of the meet-fit
+  var offX = 0, offY = 0;
+  function recompOffsets(){
+    var drawW = VB_W*S, drawH = VB_H*S;
+    offX = (W - drawW)/2;
+    offY = (H - drawH)/2;
+  }
+  function VX(x){ return (offX + x*S)*DPR; }
+  function VY(y){ return (offY + y*S)*DPR; }
+  function VR(r){ return r*S*DPR; }
+
+  // draw a single glowing mote at viewBox coords
+  function glowDot(x, y, r, intensity, hueWarm){
+    var cx = VX(x), cy = VY(y), rad = VR(r);
+    var g = ctx.createRadialGradient(cx, cy, 0, cx, cy, rad*7);
+    // warm-green firefly light; warmer core when brighter
+    var core = hueWarm ? "255,225,120" : "210,240,140";
+    g.addColorStop(0,    "rgba("+core+","+(0.95*intensity)+")");
+    g.addColorStop(0.18, "rgba(190,235,120,"+(0.6*intensity)+")");
+    g.addColorStop(1,    "rgba(150,200,90,0)");
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(cx, cy, rad*7, 0, Math.PI*2);
+    ctx.fill();
+    // bright pin core
+    ctx.fillStyle = "rgba(245,255,210,"+(0.9*intensity)+")";
+    ctx.beginPath();
+    ctx.arc(cx, cy, Math.max(0.8, rad*0.6), 0, Math.PI*2);
+    ctx.fill();
+  }
+
+  // ---- the SCENE the rising firefly illuminates ----
+  // A hand-drawn line tableau (NOT abstract dots, NOT a chatbot): a person at a
+  // desk, a lit monitor with a check-mark, a desk lamp, a mug. It is drawn in
+  // warm light inside the upper glow of the jar, and faded in by sceneAlpha.
+  // Coords are in viewBox space, framed in the jar's upper bulb.
+  function drawScene(alpha){
+    if (alpha <= 0.01) return;
+    recompOffsets();
+
+    // the warm halo the firefly casts at the lid, lifting the scene into view
+    var hx = VX(200), hy = VY(150), hr = VR(150);
+    var halo = ctx.createRadialGradient(hx, hy, 0, hx, hy, hr);
+    halo.addColorStop(0,   "rgba(255,227,154,"+(0.34*alpha)+")");
+    halo.addColorStop(0.5, "rgba(233,255,138,"+(0.12*alpha)+")");
+    halo.addColorStop(1,   "rgba(150,200,90,0)");
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    ctx.fillStyle = halo;
+    ctx.beginPath();
+    ctx.arc(hx, hy, hr, 0, Math.PI*2);
+    ctx.fill();
+    ctx.restore();
+
+    // line scene — warm amber strokes
+    ctx.save();
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.strokeStyle = "rgba(255,225,150,"+(0.92*alpha)+")";
+    ctx.shadowColor = "rgba(255,210,120,"+(0.6*alpha)+")";
+    ctx.shadowBlur  = 8*S*DPR;
+    ctx.lineWidth   = Math.max(1, 2.0*S*DPR);
+
+    function moveTo(x,y){ ctx.moveTo(VX(x),VY(y)); }
+    function lineTo(x,y){ ctx.lineTo(VX(x),VY(y)); }
+
+    // ground / desk line the scene sits on (within upper bulb, ~y=210)
+    ctx.beginPath();
+    moveTo(118, 212); lineTo(282, 212);
+    ctx.stroke();
+
+    // monitor (right of person) — rounded rect + a check mark
+    ctx.beginPath();
+    var mx=210, my=150, mw=58, mh=44, rr=5;
+    moveTo(mx+rr,my);
+    lineTo(mx+mw-rr,my); ctx.quadraticCurveTo(VX(mx+mw),VY(my),VX(mx+mw),VY(my+rr));
+    lineTo(mx+mw,my+mh-rr); ctx.quadraticCurveTo(VX(mx+mw),VY(my+mh),VX(mx+mw-rr),VY(my+mh));
+    lineTo(mx+rr,my+mh); ctx.quadraticCurveTo(VX(mx),VY(my+mh),VX(mx),VY(my+mh-rr));
+    lineTo(mx,my+rr); ctx.quadraticCurveTo(VX(mx),VY(my),VX(mx+rr),VY(my));
+    ctx.stroke();
+    // code lines on screen
+    ctx.beginPath();
+    moveTo(mx+8, my+12); lineTo(mx+38, my+12);
+    moveTo(mx+8, my+22); lineTo(mx+46, my+22);
+    ctx.stroke();
+    // green check — the patch that worked
+    ctx.save();
+    ctx.strokeStyle = "rgba(180,255,150,"+(0.95*alpha)+")";
+    ctx.beginPath();
+    moveTo(mx+30, my+30); lineTo(mx+38, my+38); lineTo(mx+52, my+18);
+    ctx.stroke();
+    ctx.restore();
+    // monitor stand
+    ctx.beginPath();
+    moveTo(mx+mw/2, my+mh); lineTo(mx+mw/2, my+mh+10);
+    moveTo(mx+mw/2-12, my+mh+10); lineTo(mx+mw/2+12, my+mh+10);
+    ctx.stroke();
+
+    // person seated at left, facing monitor
+    ctx.beginPath();
+    // head
+    var hxx=140, hyy=150, hrr=12;
+    ctx.moveTo(VX(hxx+hrr),VY(hyy));
+    ctx.arc(VX(hxx),VY(hyy),VR(hrr),0,Math.PI*2);
+    // back + torso
+    moveTo(hxx, hyy+hrr); lineTo(hxx, hyy+34);
+    // arm reaching toward keyboard
+    moveTo(hxx, hyy+22);
+    ctx.quadraticCurveTo(VX(hxx+28),VY(hyy+34),VX(hxx+48),VY(hyy+50));
+    ctx.stroke();
+    // chair back
+    ctx.beginPath();
+    moveTo(hxx-14, hyy+10);
+    ctx.quadraticCurveTo(VX(hxx-22),VY(hyy+10),VX(hxx-20),VY(hyy+62));
+    ctx.stroke();
+
+    // keyboard on the desk
+    ctx.beginPath();
+    moveTo(hxx+44, 200); lineTo(hxx+92, 200);
+    ctx.stroke();
+
+    // mug with a little curl of steam
+    ctx.beginPath();
+    var gx=176, gy=190;
+    moveTo(gx, gy); lineTo(gx, gy+16);
+    ctx.quadraticCurveTo(VX(gx),VY(gy+20),VX(gx+4),VY(gy+20));
+    lineTo(gx+12, gy+20);
+    ctx.quadraticCurveTo(VX(gx+16),VY(gy+20),VX(gx+16),VY(gy+16));
+    lineTo(gx+16, gy);
+    // handle
+    moveTo(gx+16, gy+4);
+    ctx.quadraticCurveTo(VX(gx+24),VY(gy+5),VX(gx+22),VY(gy+11));
+    ctx.stroke();
+    // steam
+    ctx.save();
+    ctx.lineWidth = Math.max(0.8, 1.2*S*DPR);
+    ctx.beginPath();
+    moveTo(gx+7, gy-4);
+    ctx.quadraticCurveTo(VX(gx+2),VY(gy-12),VX(gx+8),VY(gy-20));
+    ctx.stroke();
+    ctx.restore();
+
+    // desk lamp arcing over the monitor
+    ctx.beginPath();
+    moveTo(278, 212);
+    ctx.quadraticCurveTo(VX(280),VY(150),VX(252),VY(138));
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(VX(247),VY(135),VR(5),0,Math.PI*2);
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+  // ---- choose & reset for a new rise ----
+  function startRise(){
+    // pick a mote not currently chosen, from a lower part of the swarm so the climb reads
+    var pool = motes.slice().sort(function(a,b){ return b.y - a.y; });
+    chosen = pool[Math.floor(rand(0, Math.min(6, pool.length)))];
+    currentScene = SCENES[chosen.sceneIdx];
+    chosen.targetX = rand(INNER.x+INNER.w*0.35, INNER.x+INNER.w*0.65);
+    phase = 'rise';
+    phaseT = 0;
+    sceneName.textContent = currentScene;
+  }
+
+  function setSteadyLit(){
+    // reduced-motion: a firefly is already risen, the scene held, no drift
+    reduced = true;
+    build();
+    // place one mote at the lid as the risen firefly
+    chosen = motes[0];
+    chosen.x = INNER.x + INNER.w/2;
+    chosen.y = LID_Y + 14;
+    currentScene = SCENES[0];
+    sceneAlpha = 1;
+    phase = 'lit';
+    sceneName.textContent = currentScene + " — held";
+    drawStatic();
+  }
+
+  function drawStatic(){
+    resize(); recompOffsets();
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    // dim swarm
+    for (var i=0;i<motes.length;i++){
+      var m = motes[i];
+      if (m === chosen) continue;
+      glowDot(m.x, m.y, m.r, m.base, false);
+    }
+    // the risen, fully bright firefly
+    glowDot(chosen.x, chosen.y, chosen.r+1.2, 1, true);
+    // the scene it lifts into view
+    drawScene(sceneAlpha);
+  }
+
+  // ---- per-frame ----
+  function frame(){
+    t += 1/60;
+    phaseT += 1/60;
+    resize(); recompOffsets();
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+
+    // drive the phase machine
+    if (phase === 'drift'){
+      sceneAlpha = Math.max(0, sceneAlpha - 0.02);
+      if (phaseT > 1.6){ startRise(); }
+    } else if (phase === 'rise'){
+      // chosen brightens and climbs to the lid
+      if (chosen){
+        chosen.x += (chosen.targetX - chosen.x) * 0.04;
+        chosen.y += ((LID_Y + 16) - chosen.y) * 0.045;
+        if (Math.abs(chosen.y - (LID_Y+16)) < 4){
+          phase = 'lit'; phaseT = 0;
+        }
+      }
+      // the lifting light grows as it nears the top
+      var climb = chosen ? (1 - (chosen.y - (LID_Y+16)) / (INNER.h)) : 0;
+      sceneAlpha = Math.min(0.6, Math.max(0, climb*0.6));
+    } else if (phase === 'lit'){
+      // scene swells fully into view and holds
+      sceneAlpha = Math.min(1, sceneAlpha + 0.03);
+      if (phaseT > 2.8){ phase = 'dim'; phaseT = 0; }
+    } else if (phase === 'dim'){
+      // the firefly sinks back into the swarm, the scene fades
+      sceneAlpha = Math.max(0, sceneAlpha - 0.025);
+      if (chosen){
+        chosen.y += (rand(INNER.y+INNER.h*0.5, INNER.y+INNER.h*0.85) - chosen.y) * 0.02;
+      }
+      if (sceneAlpha <= 0.02){
+        chosen = null;
+        phase = 'drift'; phaseT = 0;
+        sceneName.textContent = 'a spark is brightening…';
+      }
+    }
+
+    // update + draw the dormant swarm
+    for (var i=0;i<motes.length;i++){
+      var m = motes[i];
+      if (m === chosen) continue;
+      // gentle lifelike drift, bounded inside the jar bulb
+      m.x += m.vx; m.y += m.vy;
+      m.vx += rand(-0.012,0.012); m.vy += rand(-0.012,0.012);
+      m.vx *= 0.96; m.vy *= 0.96;
+      if (m.x < INNER.x+10){ m.x = INNER.x+10; m.vx = Math.abs(m.vx); }
+      if (m.x > INNER.x+INNER.w-10){ m.x = INNER.x+INNER.w-10; m.vx = -Math.abs(m.vx); }
+      if (m.y < INNER.y+34){ m.y = INNER.y+34; m.vy = Math.abs(m.vy); }
+      if (m.y > INNER.y+INNER.h-12){ m.y = INNER.y+INNER.h-12; m.vy = -Math.abs(m.vy); }
+      // dormant blink
+      var blink = m.base + Math.sin(t*m.speed + m.phase)*0.12;
+      glowDot(m.x, m.y, m.r, Math.max(0.08, blink), false);
+    }
+
+    // the chosen firefly (brightening / risen)
+    if (chosen){
+      var bri = (phase === 'rise') ? Math.min(1, 0.5 + phaseT*0.5)
+              : (phase === 'lit')  ? 1
+              : Math.max(0.3, sceneAlpha);
+      glowDot(chosen.x, chosen.y, chosen.r + 1.2*Math.min(1,sceneAlpha+0.4), bri, true);
+    }
+
+    // the scene lifted by the rising light
+    drawScene(sceneAlpha);
+
+    rafId = requestAnimationFrame(frame);
+  }
+
+  // ---- replay: drop the current firefly, raise a new one ----
+  function replay(){
+    if (reduced){
+      // cycle the held scene to a different memory, still static
+      var idx = (SCENES.indexOf(currentScene)+1) % SCENES.length;
+      currentScene = SCENES[idx];
+      sceneName.textContent = currentScene + " — held";
+      drawStatic();
+      return;
+    }
+    sceneAlpha = Math.max(0, sceneAlpha);
+    chosen = null;
+    phase = 'drift';
+    phaseT = 1.4; // shorten the wait so the click feels responsive but still autonomous
+    sceneName.textContent = 'a spark is brightening…';
+  }
+  replayBtn.addEventListener('click', replay);
+
+  // ---- boot ----
+  function init(){
+    resize();
+    build();
+    if (prefersReduced()){
+      setSteadyLit();
+    } else {
+      if (rafId) cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(frame);
+    }
+  }
+
+  window.addEventListener('resize', function(){
+    resize();
+    if (reduced) drawStatic();
+  });
+
+  // honor live changes to motion preference
+  if (window.matchMedia){
+    try{
+      window.matchMedia('(prefers-reduced-motion: reduce)')
+        .addEventListener('change', function(){
+          if (rafId) cancelAnimationFrame(rafId);
+          rafId = null;
+          reduced = false;
+          init();
+        });
+    }catch(_){}
+  }
+
+  // pause the loop when the jar scrolls out of view (battery + perf)
+  if ('IntersectionObserver' in window){
+    var io = new IntersectionObserver(function(entries){
+      entries.forEach(function(e){
+        if (reduced) return;
+        if (e.isIntersecting){
+          if (!rafId) rafId = requestAnimationFrame(frame);
+        } else {
+          if (rafId){ cancelAnimationFrame(rafId); rafId = null; }
+        }
+      });
+    }, {threshold:0.05});
+    io.observe(canvas);
+  }
+
+  init();
+})();
+</script>
+</body>
+</html>

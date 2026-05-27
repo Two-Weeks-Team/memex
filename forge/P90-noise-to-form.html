@@ -1,0 +1,1018 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Memex — the moment resolves out of the noise</title>
+<style>
+  /* ============================================================
+     P90 · Noise-to-form
+     A full-bleed field of TV static that resolves, unbidden, into
+     a cinematic SCENE of a remembered coding moment. Hand-authored
+     canvas grain + CSS-painted tableau. No build, no CDN.
+     ============================================================ */
+
+  :root {
+    --ink: #e9ecf2;
+    --ink-dim: #9aa3b2;
+    --ink-faint: #5d6577;
+    --edge: rgba(255,255,255,.10);
+    --edge-soft: rgba(255,255,255,.055);
+    --warm: #ffb066;      /* desk-lamp glow */
+    --amber: #ffcaa0;
+    --err: #ff5d6c;       /* the error on screen */
+    --fix: #7ee7a8;       /* the fix landing */
+    --screen: #6fb7ff;    /* monitor light */
+    --bg: #07080c;
+    --panel: rgba(13,15,22,.72);
+    --maxw: 1180px;
+    --serif: ui-serif, "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+    --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Fira Code", Menlo, Consolas, monospace;
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--sans);
+    -webkit-font-smoothing: antialiased;
+    line-height: 1.6;
+    overflow-x: hidden;
+  }
+  a { color: inherit; }
+
+  .wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 24px; }
+
+  /* skip link */
+  .skip {
+    position: absolute; left: -999px; top: 8px; z-index: 100;
+    background: var(--ink); color: #000; padding: 10px 16px;
+    border-radius: 8px; font-weight: 700; text-decoration: none;
+  }
+  .skip:focus { left: 12px; }
+
+  /* ===================== STAGE (full-bleed) ===================== */
+  .stage {
+    position: relative;
+    width: 100%;
+    min-height: 100svh;
+    overflow: hidden;
+    background: radial-gradient(120% 90% at 50% 18%, #0c0e16 0%, #06070b 60%, #040509 100%);
+  }
+
+  /* the static canvas — sits over the scene and burns away */
+  #noise {
+    position: absolute; inset: 0;
+    width: 100%; height: 100%;
+    display: block;
+    z-index: 5;
+    pointer-events: none;
+    mix-blend-mode: screen;
+    opacity: 1;
+  }
+  /* a darkening veil so the scene reads as "hidden in the noise" before resolve */
+  .veil {
+    position: absolute; inset: 0; z-index: 4;
+    background: #05060a;
+    pointer-events: none;
+  }
+
+  /* ---------- THE SCENE: a 2am desk, hand-painted in CSS ---------- */
+  .scene {
+    position: absolute; inset: 0; z-index: 2;
+    filter: saturate(0) brightness(.55);            /* dormant: grey, low */
+    transform: scale(1.06);
+    transition: filter 1.5s ease, transform 6s ease;
+  }
+  .scene.lit {
+    filter: saturate(1.05) brightness(1);
+    transform: scale(1.0);
+  }
+
+  /* the room: a dark wall + warm pool of lamp light from upper-right */
+  .scene .room {
+    position: absolute; inset: 0;
+    background:
+      radial-gradient(60% 55% at 72% 26%, rgba(255,176,102,.30), rgba(255,176,102,0) 60%),
+      radial-gradient(90% 80% at 50% 120%, rgba(20,26,42,.9), rgba(8,10,16,0) 70%),
+      linear-gradient(180deg, #0a0c14 0%, #0c0f18 45%, #070910 100%);
+  }
+  /* window blinds, faint, far left — night outside */
+  .scene .window {
+    position: absolute; left: 4%; top: 14%; width: 20%; height: 52%;
+    background:
+      repeating-linear-gradient(180deg, rgba(120,150,210,.10) 0 3px, rgba(0,0,0,0) 3px 16px),
+      linear-gradient(180deg, rgba(40,58,96,.45), rgba(10,14,24,.2));
+    border: 1px solid rgba(120,150,210,.14);
+    border-radius: 3px;
+    box-shadow: inset 0 0 40px rgba(60,90,150,.18);
+  }
+  /* desk surface */
+  .scene .desk {
+    position: absolute; left: -2%; right: -2%; bottom: 0; height: 34%;
+    background: linear-gradient(180deg, #1a1410 0%, #120d0a 55%, #0a0706 100%);
+    box-shadow: inset 0 14px 30px rgba(255,176,102,.10), inset 0 1px 0 rgba(255,200,150,.16);
+    transform: perspective(800px) rotateX(34deg);
+    transform-origin: bottom center;
+  }
+  /* the monitor — the heart of the scene */
+  .scene .monitor {
+    position: absolute; left: 50%; top: 30%;
+    transform: translate(-50%, 0);
+    width: 46%; max-width: 560px; aspect-ratio: 16 / 10;
+    border-radius: 10px;
+    background: #05070d;
+    border: 2px solid #20242f;
+    box-shadow:
+      0 0 0 6px #0c0e15,
+      0 30px 80px rgba(0,0,0,.7),
+      0 0 120px rgba(111,183,255,.22);
+    overflow: hidden;
+  }
+  /* code on the monitor — abstracted lines, NOT a real terminal/console UI */
+  .scene .code {
+    position: absolute; inset: 12px;
+    display: flex; flex-direction: column; gap: 8px;
+    opacity: .95;
+  }
+  .scene .ln { height: 7px; border-radius: 3px; background: rgba(140,160,200,.22); }
+  .scene .ln.w1 { width: 38%; } .scene .ln.w2 { width: 64%; }
+  .scene .ln.w3 { width: 52%; } .scene .ln.w4 { width: 30%; }
+  .scene .ln.w5 { width: 70%; } .scene .ln.w6 { width: 46%; }
+  .scene .ln.err {
+    background: rgba(255,93,108,.85);
+    box-shadow: 0 0 18px rgba(255,93,108,.55);
+  }
+  .scene .ln.fix {
+    background: rgba(126,231,168,.9);
+    box-shadow: 0 0 18px rgba(126,231,168,.6);
+    width: 58%;
+  }
+  /* the screen glow spilling onto desk + face-side */
+  .scene .glow {
+    position: absolute; left: 50%; top: 30%; transform: translate(-50%,-6%);
+    width: 70%; height: 60%;
+    background: radial-gradient(closest-side, rgba(111,183,255,.30), rgba(111,183,255,0) 75%);
+    filter: blur(8px);
+    pointer-events: none;
+  }
+  /* the desk lamp arm + warm bulb, upper right */
+  .scene .lamp {
+    position: absolute; right: 13%; top: 7%; width: 3px; height: 24%;
+    background: linear-gradient(180deg, #3a2c1e, #241a12);
+    transform: rotate(18deg);
+    transform-origin: bottom;
+  }
+  .scene .bulb {
+    position: absolute; right: 11.5%; top: 6%;
+    width: 30px; height: 30px; border-radius: 50%;
+    background: radial-gradient(circle at 40% 35%, #fff0d6, var(--warm) 55%, #7a4a1f 100%);
+    box-shadow: 0 0 50px 18px rgba(255,176,102,.4);
+  }
+  /* a coffee mug, low-left of desk, with a thin steam wisp */
+  .scene .mug {
+    position: absolute; left: 30%; bottom: 9%;
+    width: 42px; height: 34px;
+    background: linear-gradient(180deg, #2b3340, #161b24);
+    border-radius: 4px 4px 7px 7px;
+    box-shadow: inset 0 2px 0 rgba(255,255,255,.08), 0 6px 14px rgba(0,0,0,.5);
+  }
+  .scene .mug::after {
+    content: ""; position: absolute; right: -11px; top: 7px;
+    width: 13px; height: 16px; border: 3px solid #2b3340; border-left: none;
+    border-radius: 0 8px 8px 0;
+  }
+  .scene .steam {
+    position: absolute; left: 33%; bottom: 17%;
+    width: 2px; height: 34px;
+    background: linear-gradient(180deg, rgba(255,255,255,0), rgba(255,255,255,.28));
+    filter: blur(2px); border-radius: 2px;
+    opacity: 0;
+  }
+  .scene.lit .steam { opacity: .6; animation: rise 4.5s ease-in-out infinite; }
+  @keyframes rise {
+    0%   { transform: translateY(6px) scaleX(1);   opacity: 0; }
+    35%  { opacity: .6; }
+    100% { transform: translateY(-22px) scaleX(1.8); opacity: 0; }
+  }
+  /* a wall clock reading ~2:08 */
+  .scene .clock {
+    position: absolute; left: 7%; top: 6%;
+    width: 52px; height: 52px; border-radius: 50%;
+    border: 2px solid rgba(180,190,210,.3);
+    background: rgba(14,18,26,.6);
+  }
+  .scene .clock i {
+    position: absolute; left: 50%; top: 50%; background: rgba(210,220,240,.7);
+    transform-origin: bottom center;
+  }
+  .scene .clock .h { width: 2px; height: 14px; transform: translate(-50%,-100%) rotate(64deg); }
+  .scene .clock .m { width: 2px; height: 20px; transform: translate(-50%,-100%) rotate(48deg); }
+
+  /* vignette to frame the tableau cinematically */
+  .scene .vig {
+    position: absolute; inset: 0;
+    background: radial-gradient(75% 75% at 50% 42%, rgba(0,0,0,0) 52%, rgba(0,0,0,.72) 100%);
+    pointer-events: none;
+  }
+
+  /* ---------- HERO COPY (over the scene) ---------- */
+  .hero {
+    position: relative; z-index: 8;
+    min-height: 100svh;
+    display: flex; flex-direction: column;
+    justify-content: space-between;
+    pointer-events: none; /* clicks pass except on interactive children */
+  }
+  .hero > * { pointer-events: auto; }
+
+  .topbar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 22px 0 10px;
+  }
+  .brand { display: flex; align-items: center; gap: 11px; font-weight: 700; letter-spacing: .2px; }
+  .brand .dot {
+    width: 11px; height: 11px; border-radius: 50%;
+    background: var(--warm);
+    box-shadow: 0 0 16px var(--warm), 0 0 4px #fff;
+  }
+  .nav { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .nav a {
+    text-decoration: none; color: var(--ink-dim);
+    font-size: 13.5px; padding: 7px 12px; border-radius: 999px;
+    border: 1px solid transparent; transition: .18s;
+  }
+  .nav a:hover, .nav a:focus-visible { color: var(--ink); border-color: var(--edge); background: rgba(255,255,255,.04); outline: none; }
+  .nav a.primary {
+    border-color: var(--edge); background: rgba(255,255,255,.05);
+    color: var(--ink); font-weight: 600;
+  }
+
+  .hero-mid { flex: 1; display: flex; align-items: center; }
+  .hero-copy { max-width: 660px; }
+
+  .eyebrow {
+    display: inline-flex; align-items: center; gap: 9px;
+    font-family: var(--mono); font-size: 12px; letter-spacing: .16em;
+    text-transform: uppercase; color: var(--amber);
+    background: rgba(255,176,102,.08); border: 1px solid rgba(255,176,102,.22);
+    padding: 6px 13px; border-radius: 999px; margin-bottom: 22px;
+  }
+  .eyebrow .pulse {
+    width: 7px; height: 7px; border-radius: 50%; background: var(--warm);
+    box-shadow: 0 0 10px var(--warm);
+  }
+  h1 {
+    font-family: var(--serif);
+    font-size: clamp(2.3rem, 6vw, 4.3rem);
+    line-height: 1.04; margin: 0 0 20px;
+    font-weight: 600; letter-spacing: -.01em;
+    text-shadow: 0 2px 40px rgba(0,0,0,.8);
+  }
+  h1 .em { color: var(--amber); font-style: italic; }
+  .lede {
+    font-size: clamp(1.02rem, 1.7vw, 1.22rem);
+    color: var(--ink-dim); max-width: 560px; margin: 0 0 30px;
+    text-shadow: 0 1px 20px rgba(0,0,0,.7);
+  }
+  .lede b { color: var(--ink); font-weight: 600; }
+
+  .cta-row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+  .btn {
+    text-decoration: none; font-weight: 600; font-size: 15px;
+    padding: 13px 22px; border-radius: 11px; transition: .18s;
+    display: inline-flex; align-items: center; gap: 9px;
+  }
+  .btn.solid { background: var(--ink); color: #0a0a0a; }
+  .btn.solid:hover, .btn.solid:focus-visible { transform: translateY(-2px); box-shadow: 0 12px 30px rgba(233,236,242,.18); outline: none; }
+  .btn.ghost { border: 1px solid var(--edge); color: var(--ink); background: rgba(255,255,255,.03); }
+  .btn.ghost:hover, .btn.ghost:focus-visible { background: rgba(255,255,255,.08); border-color: rgba(255,255,255,.25); outline: none; }
+
+  /* the live caption: what situation the page is "in" right now */
+  .hero-foot {
+    padding: 0 0 30px;
+    display: flex; align-items: flex-end; justify-content: space-between;
+    gap: 24px; flex-wrap: wrap;
+  }
+  .context-card {
+    background: var(--panel);
+    border: 1px solid var(--edge);
+    border-radius: 14px;
+    padding: 14px 18px;
+    max-width: 520px;
+    backdrop-filter: blur(10px);
+  }
+  .context-card .k {
+    font-family: var(--mono); font-size: 11px; letter-spacing: .14em;
+    text-transform: uppercase; color: var(--ink-faint); margin-bottom: 7px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .context-card .k .live {
+    width: 7px; height: 7px; border-radius: 50%; background: var(--fix);
+    box-shadow: 0 0 9px var(--fix); animation: blink 2.4s ease-in-out infinite;
+  }
+  @keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
+  .context-card .now {
+    font-size: 15.5px; color: var(--ink); min-height: 1.6em;
+  }
+  .context-card .now .cursor {
+    display: inline-block; width: 8px; height: 1.05em; vertical-align: -2px;
+    background: var(--amber); margin-left: 2px; animation: caret 1s step-end infinite;
+  }
+  @keyframes caret { 50% { opacity: 0; } }
+  .context-card .resolved {
+    margin-top: 10px; font-size: 13.5px; color: var(--ink-dim);
+    border-top: 1px dashed var(--edge); padding-top: 10px;
+    opacity: 0; transform: translateY(4px); transition: .5s;
+  }
+  .context-card .resolved.show { opacity: 1; transform: none; }
+  .context-card .resolved b { color: var(--amber); font-weight: 600; }
+
+  .scroll-hint {
+    font-family: var(--mono); font-size: 11.5px; letter-spacing: .12em;
+    color: var(--ink-faint); text-transform: uppercase;
+    display: flex; align-items: center; gap: 9px;
+  }
+  .scroll-hint .arr { animation: bob 1.8s ease-in-out infinite; }
+  @keyframes bob { 0%,100% { transform: translateY(0); } 50% { transform: translateY(4px); } }
+
+  /* ===================== BELOW THE FOLD ===================== */
+  section.band { padding: 92px 0; position: relative; }
+  .band-line { border-top: 1px solid var(--edge-soft); }
+
+  .kicker {
+    font-family: var(--mono); font-size: 12px; letter-spacing: .18em;
+    text-transform: uppercase; color: var(--amber); margin: 0 0 14px;
+  }
+  h2 {
+    font-family: var(--serif); font-weight: 600;
+    font-size: clamp(1.7rem, 3.4vw, 2.5rem); line-height: 1.12;
+    margin: 0 0 18px; letter-spacing: -.01em;
+  }
+  .band p.intro { color: var(--ink-dim); max-width: 640px; font-size: 1.06rem; }
+
+  /* how-it-resolves: noise → form, three frames */
+  .frames {
+    display: grid; grid-template-columns: repeat(3, 1fr);
+    gap: 18px; margin-top: 40px;
+  }
+  .frame {
+    border: 1px solid var(--edge); border-radius: 16px; overflow: hidden;
+    background: #0a0c12;
+  }
+  .frame .pic {
+    aspect-ratio: 4 / 3; position: relative; overflow: hidden;
+    background: #05060a;
+  }
+  .frame .pic canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .frame .body { padding: 18px 20px 22px; }
+  .frame h3 { margin: 0 0 7px; font-size: 1.08rem; font-family: var(--sans); font-weight: 700; }
+  .frame p { margin: 0; color: var(--ink-dim); font-size: .96rem; }
+  .frame .step {
+    font-family: var(--mono); font-size: 11px; letter-spacing: .14em;
+    color: var(--ink-faint); text-transform: uppercase; margin-bottom: 9px;
+  }
+
+  /* what-it-is: honest facts */
+  .facts { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; margin-top: 40px; }
+  .fact {
+    border: 1px solid var(--edge); border-radius: 14px; padding: 24px;
+    background: linear-gradient(180deg, rgba(255,255,255,.025), rgba(255,255,255,0));
+  }
+  .fact h3 { margin: 0 0 8px; font-size: 1.05rem; font-weight: 700; }
+  .fact h3 .tag { font-family: var(--mono); font-size: 11px; color: var(--amber); margin-right: 9px; }
+  .fact p { margin: 0; color: var(--ink-dim); font-size: .96rem; }
+  .fact code { font-family: var(--mono); font-size: .85em; color: var(--amber); background: rgba(255,176,102,.08); padding: 1px 6px; border-radius: 5px; }
+
+  /* surfaces list */
+  .surfaces { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 28px; }
+  .surfaces .chip {
+    font-family: var(--mono); font-size: 13px; color: var(--ink);
+    border: 1px solid var(--edge); border-radius: 999px; padding: 8px 15px;
+    background: rgba(255,255,255,.03);
+  }
+  .surfaces .chip b { color: var(--amber); font-weight: 600; }
+
+  /* agent / mcp band */
+  .mcp-grid { display: grid; grid-template-columns: 1.1fr .9fr; gap: 40px; align-items: start; margin-top: 36px; }
+  .codeblock {
+    background: #05060b; border: 1px solid var(--edge); border-radius: 14px;
+    padding: 20px 22px; font-family: var(--mono); font-size: 13.5px;
+    line-height: 1.85; overflow-x: auto; color: var(--ink-dim);
+  }
+  .codeblock .c { color: var(--ink-faint); }
+  .codeblock .p { color: var(--screen); }
+  .codeblock .v { color: var(--amber); }
+  .codeblock .ok { color: var(--fix); }
+  .tools { list-style: none; margin: 0; padding: 0; columns: 2; column-gap: 24px; }
+  .tools li {
+    font-family: var(--mono); font-size: 13px; color: var(--ink-dim);
+    padding: 5px 0; break-inside: avoid;
+  }
+  .tools li::before { content: "› "; color: var(--amber); }
+
+  footer {
+    border-top: 1px solid var(--edge-soft); padding: 48px 0 64px;
+    color: var(--ink-faint); font-size: 14px;
+  }
+  footer .frow { display: flex; flex-wrap: wrap; gap: 22px; justify-content: space-between; align-items: center; }
+  footer a { color: var(--ink-dim); text-decoration: none; }
+  footer a:hover, footer a:focus-visible { color: var(--ink); outline: none; text-decoration: underline; }
+  footer .built { font-family: var(--mono); font-size: 12px; letter-spacing: .1em; }
+
+  /* ===================== RESPONSIVE ===================== */
+  @media (max-width: 860px) {
+    .frames { grid-template-columns: 1fr; }
+    .facts { grid-template-columns: 1fr; }
+    .mcp-grid { grid-template-columns: 1fr; gap: 26px; }
+    .tools { columns: 1; }
+    .scene .monitor { width: 64%; }
+    .hero-foot { flex-direction: column; align-items: flex-start; }
+  }
+
+  /* ===================== REDUCED MOTION ===================== */
+  /* Show the RESOLVED scene statically; no static churn, no animation. */
+  @media (prefers-reduced-motion: reduce) {
+    #noise { display: none !important; }
+    .veil { display: none !important; }
+    .scene { filter: saturate(1.05) brightness(1) !important; transform: none !important; transition: none !important; }
+    .scene .steam { animation: none !important; }
+    .context-card .now .cursor { animation: none; }
+    .context-card .resolved { opacity: 1 !important; transform: none !important; }
+    .eyebrow .pulse, .context-card .k .live, .scroll-hint .arr { animation: none !important; }
+  }
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<!-- ============ THE STAGE: noise resolving into a scene ============ -->
+<div class="stage" id="stage" aria-label="A field of television static that resolves into a remembered late-night coding scene: a glowing desk, an error on screen, and the fix landing.">
+  <!-- hand-painted CSS scene that the static burns away to reveal -->
+  <div class="scene" id="scene" aria-hidden="true">
+    <div class="room"></div>
+    <div class="window"></div>
+    <div class="clock"><i class="h"></i><i class="m"></i></div>
+    <div class="bulb"></div>
+    <div class="lamp"></div>
+    <div class="desk"></div>
+    <div class="glow"></div>
+    <div class="monitor">
+      <div class="code">
+        <div class="ln w5"></div>
+        <div class="ln w2"></div>
+        <div class="ln err w3"></div>
+        <div class="ln w1"></div>
+        <div class="ln w6"></div>
+        <div class="ln fix"></div>
+        <div class="ln w4"></div>
+      </div>
+    </div>
+    <div class="mug"></div>
+    <div class="steam"></div>
+    <div class="vig"></div>
+  </div>
+
+  <div class="veil" id="veil"></div>
+  <canvas id="noise"></canvas>
+
+  <!-- hero copy floats above -->
+  <div class="hero">
+    <header class="topbar wrap">
+      <div class="brand"><span class="dot"></span> Memex</div>
+      <nav class="nav" aria-label="Primary">
+        <a href="#resolves">How it surfaces</a>
+        <a href="#what">What it is</a>
+        <a href="#agents">For agents</a>
+        <a class="primary" href="https://github.com/Two-Weeks-Team/memex">GitHub</a>
+      </nav>
+    </header>
+
+    <div class="hero-mid wrap">
+      <div class="hero-copy">
+        <span class="eyebrow"><span class="pulse"></span> involuntary recall</span>
+        <h1>You weren't looking for it.<br>The moment <span class="em">resolves anyway.</span></h1>
+        <p class="lede">
+          You don't document every memory. Yet mid-task, the relevant one
+          surfaces on its own — like a scene swimming up out of static.
+          Memex turns your <b>Claude Code &amp; Codex history</b> into a space
+          you move through by <b>similarity, not keywords</b>.
+        </p>
+        <div class="cta-row">
+          <a class="btn solid" href="https://two-weeks-team.github.io/memex/">See it live →</a>
+          <a class="btn ghost" href="https://github.com/Two-Weeks-Team/memex">Read the code</a>
+        </div>
+      </div>
+    </div>
+
+    <div class="hero-foot wrap">
+      <div class="context-card" aria-live="polite">
+        <div class="k"><span class="live"></span> right now, you're…</div>
+        <div class="now" id="ctxNow"><span class="cursor"></span></div>
+        <div class="resolved" id="ctxResolved"></div>
+      </div>
+      <div class="scroll-hint"><span class="arr">↓</span> what just happened</div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ BELOW THE FOLD ============ -->
+<main id="main">
+
+  <!-- HOW IT RESOLVES -->
+  <section class="band" id="resolves">
+    <div class="wrap">
+      <p class="kicker">Noise → form</p>
+      <h2>A memory you didn't summon, arriving the way recall really feels.</h2>
+      <p class="intro">
+        Recall isn't a search. You're in the middle of something and the past
+        just <em>clicks</em> into place. Memex listens to the situation you're in —
+        the file, the error, the shape of the problem — and the closest past
+        moment resolves out of the grain. You're the recipient, not the seeker.
+      </p>
+
+      <div class="frames">
+        <div class="frame">
+          <div class="pic"><canvas data-stage="0" aria-hidden="true"></canvas></div>
+          <div class="body">
+            <p class="step">01 · noise</p>
+            <h3>Pure static</h3>
+            <p>Every session you ever ran is in there — undifferentiated, just out of reach. You're not browsing it.</p>
+          </div>
+        </div>
+        <div class="frame">
+          <div class="pic"><canvas data-stage="1" aria-hidden="true"></canvas></div>
+          <div class="body">
+            <p class="step">02 · a context lands</p>
+            <h3>The situation tugs</h3>
+            <p>You hit the same auth-retry edge case again. The grain starts to bias toward one region of memory — unbidden.</p>
+          </div>
+        </div>
+        <div class="frame">
+          <div class="pic"><canvas data-stage="2" aria-hidden="true"></canvas></div>
+          <div class="body">
+            <p class="step">03 · form</p>
+            <h3>The scene is just <em>there</em></h3>
+            <p>2 a.m., three weeks ago — the night you fixed it. The whole moment, before your eyes. No query typed.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- WHAT IT IS (honest facts) -->
+  <section class="band band-line" id="what">
+    <div class="wrap">
+      <p class="kicker">What Memex actually is</p>
+      <h2>A memory you own — not a chatbot, no LLM at runtime.</h2>
+      <p class="intro">
+        Claude Code silently migrates and deletes old sessions. Memex preserves
+        that corpus locally and makes it navigable by <em>association</em>, the way
+        Vannevar Bush imagined the original Memex in 1945.
+      </p>
+
+      <div class="facts">
+        <div class="fact">
+          <h3><span class="tag">[01]</span>Reads your real history</h3>
+          <p>Indexes <code>~/.claude/projects/**/*.jsonl</code> plus legacy transcripts and <code>history.jsonl</code> — the sessions you actually ran.</p>
+        </div>
+        <div class="fact">
+          <h3><span class="tag">[02]</span>Backed by Qdrant</h3>
+          <p>A local vector space turns history into spatial memory. Five distinct Qdrant primitives are the product — not a sidecar.</p>
+        </div>
+        <div class="fact">
+          <h3><span class="tag">[03]</span>No chatbot, LLM-free at runtime</h3>
+          <p>Nothing phones an LLM to recall. You move through the corpus by similarity — keywords optional.</p>
+        </div>
+        <div class="fact">
+          <h3><span class="tag">[04]</span>Runs as desktop app or server</h3>
+          <p>A <a href="https://github.com/Two-Weeks-Team/memex/blob/main/deploy/web/README.md">server / Docker variant</a> runs Qdrant + web UI/API + MCP in one image.</p>
+        </div>
+      </div>
+
+      <div class="surfaces" aria-label="Memex surfaces">
+        <span class="chip"><b>Time Machine</b> · replay</span>
+        <span class="chip"><b>Lens</b> · weighted vector search</span>
+        <span class="chip"><b>Topology</b> · MST graph</span>
+        <span class="chip"><b>Mix</b> · pos/neg discovery</span>
+        <span class="chip"><b>Recall</b> · proactive surfacing</span>
+        <span class="chip"><b>Companion · Wrapped · Loop Breaker</b></span>
+      </div>
+    </div>
+  </section>
+
+  <!-- FOR AGENTS / MCP -->
+  <section class="band band-line" id="agents">
+    <div class="wrap">
+      <p class="kicker">For your agent, too</p>
+      <h2>The same surfacing, wired into Claude Code over MCP.</h2>
+      <p class="intro">
+        Point your agent at Memex once. Then it recalls through the same Qdrant-backed
+        memory you do — 11 MCP tools over stdio + HTTP, in Claude Code, Codex, or Cursor.
+      </p>
+
+      <div class="mcp-grid">
+        <div class="codeblock" aria-label="Wiring Memex into Claude Code via MCP">
+<span class="c"># one-time wiring — point Claude Code at the memex binary</span>
+<span class="p">claude</span> mcp add memex <span class="v">/path/to/memex</span> mcp
+
+<span class="c"># or let memex print/run the line for you</span>
+<span class="p">memex</span> install-mcp <span class="v">--run</span>
+
+<span class="p">claude</span> mcp list
+<span class="c">#  memex: /…/memex mcp - </span><span class="ok">✓ Connected</span>
+        </div>
+        <div>
+          <p style="margin:0 0 14px;color:var(--ink-dim);font-size:.96rem;">
+            11 tools, each a typed handle on a Qdrant primitive the desktop app already uses:
+          </p>
+          <ul class="tools">
+            <li>recall_context</li>
+            <li>lens_search</li>
+            <li>time_machine</li>
+            <li>topology_graph</li>
+            <li>mix_discovery</li>
+            <li>list_sessions</li>
+            <li>get_session</li>
+            <li>index_corpus</li>
+            <li>collection_stats</li>
+            <li>companion_note</li>
+            <li>wrapped_summary</li>
+          </ul>
+          <p style="margin:18px 0 0;">
+            <a class="btn ghost" href="https://github.com/Two-Weeks-Team/memex">View the MCP server →</a>
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <div class="wrap frow">
+      <div>
+        <div style="font-weight:700;color:var(--ink);margin-bottom:6px;">Memex</div>
+        <div class="built">Built for Qdrant Vector Space Day 2026 — “Think Outside the Bot.”</div>
+      </div>
+      <nav aria-label="Footer">
+        <a href="https://github.com/Two-Weeks-Team/memex">Repository</a> &nbsp;·&nbsp;
+        <a href="https://two-weeks-team.github.io/memex/">Live landing</a> &nbsp;·&nbsp;
+        <a href="https://github.com/Two-Weeks-Team/memex/blob/main/deploy/web/README.md">Server / Docker</a>
+      </nav>
+    </div>
+  </footer>
+</main>
+
+<script>
+(function () {
+  "use strict";
+
+  var reduce = window.matchMedia &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  /* ----------------------------------------------------------------
+     1) THE HERO STATIC — a real noise field that resolves, unbidden,
+        into the scene on an irregular, lifelike cadence. The scene
+        underneath lights up; the static "burns away" to reveal it,
+        then slowly creeps back so the next recall can arrive.
+     ---------------------------------------------------------------- */
+  var canvas = document.getElementById("noise");
+  var scene  = document.getElementById("scene");
+  var veil   = document.getElementById("veil");
+  var ctxNow = document.getElementById("ctxNow");
+  var ctxRes = document.getElementById("ctxResolved");
+
+  // resolveLevel: 0 = full static (scene hidden) … 1 = fully clear (scene revealed)
+  var resolveLevel = 0;
+
+  // --- the situations + the memories they unbid (honest, scene-like) ---
+  var moments = [
+    {
+      ctx: "debugging an auth-retry that loops forever…",
+      mem: "the 2 a.m. three weeks ago when you fixed exactly this — backoff was resetting on every 401."
+    },
+    {
+      ctx: "staring at a Qdrant filter that returns nothing…",
+      mem: "the session where the payload key was <b>namespaced</b>, not flat — you'd already solved it once."
+    },
+    {
+      ctx: "rewriting the same migration for the third time…",
+      mem: "last Tuesday's run where you settled on the idempotent up/down — it's still in your history."
+    },
+    {
+      ctx: "wiring an MCP tool and hitting a stdio handshake error…",
+      mem: "the evening you traced it to a stray log line on stdout — the fix was one redirect."
+    }
+  ];
+  var momentIndex = -1;
+
+  function sizeCanvas() {
+    var r = canvas.getBoundingClientRect();
+    var dpr = Math.min(window.devicePixelRatio || 1, 2);
+    canvas.width  = Math.max(1, Math.floor(r.width  * dpr));
+    canvas.height = Math.max(1, Math.floor(r.height * dpr));
+  }
+
+  var nctx = canvas.getContext("2d");
+  // pre-rendered noise tiles cycled for cheap, lively grain
+  var tiles = [];
+  var TILE = 160;
+  function buildTiles() {
+    tiles = [];
+    for (var t = 0; t < 4; t++) {
+      var img = nctx.createImageData(TILE, TILE);
+      var d = img.data;
+      for (var i = 0; i < d.length; i += 4) {
+        var v = (Math.random() * 255) | 0;
+        d[i] = d[i+1] = d[i+2] = v;
+        d[i+3] = 255;
+      }
+      // stamp into an offscreen canvas for fast drawImage
+      var off = document.createElement("canvas");
+      off.width = off.height = TILE;
+      off.getContext("2d").putImageData(img, 0, 0);
+      tiles.push(off);
+    }
+  }
+
+  function paintStatic() {
+    var w = canvas.width, h = canvas.height;
+    nctx.clearRect(0, 0, w, h);
+    // density of static = inverse of resolve
+    var alpha = Math.max(0, Math.min(1, 1 - resolveLevel));
+    if (alpha <= 0.01) return;
+    nctx.globalAlpha = alpha;
+    var tile = tiles[(Math.random() * tiles.length) | 0];
+    // jitter the offset so the field shimmers
+    var ox = (Math.random() * TILE) | 0;
+    var oy = (Math.random() * TILE) | 0;
+    for (var y = -oy; y < h; y += TILE) {
+      for (var x = -ox; x < w; x += TILE) {
+        nctx.drawImage(tile, x, y);
+      }
+    }
+    nctx.globalAlpha = 1;
+  }
+
+  // veil + scene lighting follow the resolve level
+  function applyResolve() {
+    veil.style.opacity = String(Math.max(0, 1 - resolveLevel * 1.25));
+    if (resolveLevel > 0.55) scene.classList.add("lit");
+    else scene.classList.remove("lit");
+  }
+
+  /* ---- the cadence engine: lifelike, irregular surfacing ---- */
+  var phase = "idle";   // idle → tugging → resolving → held → fading
+  var phaseUntil = 0;
+  var lastTs = 0;
+
+  function pickMoment() {
+    var n;
+    do { n = (Math.random() * moments.length) | 0; } while (n === momentIndex && moments.length > 1);
+    momentIndex = n;
+    return moments[n];
+  }
+
+  // typewriter for the context line
+  var typeTarget = "", typeShown = "", typeAt = 0;
+  function setContext(text) {
+    typeTarget = text; typeShown = ""; typeAt = 0;
+    ctxNow.innerHTML = '<span class="cursor"></span>';
+    ctxRes.classList.remove("show");
+    ctxRes.innerHTML = "";
+  }
+  function tickType(dt) {
+    if (typeShown.length < typeTarget.length) {
+      typeAt += dt;
+      if (typeAt > 28) {
+        typeAt = 0;
+        typeShown = typeTarget.slice(0, typeShown.length + 1);
+        ctxNow.innerHTML = escapeHtml(typeShown) + '<span class="cursor"></span>';
+      }
+    }
+  }
+  function escapeHtml(s) {
+    return s.replace(/[&<>]/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c];
+    });
+  }
+
+  function startCycle() {
+    var m = pickMoment();
+    setContext(m.ctx);
+    // resolve back to noise, then re-arrive
+    resolveLevel = 0;
+    phase = "tugging";
+    // tug 1.4–2.6s (the situation builds)
+    phaseUntil = performance.now() + 1400 + Math.random() * 1200;
+    pendingMem = m.mem;
+  }
+  var pendingMem = "";
+
+  function loop(ts) {
+    if (reduce) return; // static engine off entirely under reduced motion
+    var dt = lastTs ? (ts - lastTs) : 16;
+    lastTs = ts;
+
+    tickType(dt);
+
+    var now = performance.now();
+    switch (phase) {
+      case "tugging":
+        // subtle pre-bias: a hint of clearing, then snap
+        resolveLevel = Math.min(0.18, resolveLevel + dt * 0.00006);
+        if (now >= phaseUntil) {
+          phase = "resolving";
+          phaseUntil = now + 900; // ~0.9s snap into form
+        }
+        break;
+      case "resolving":
+        resolveLevel = Math.min(1, resolveLevel + dt * 0.0016);
+        if (resolveLevel >= 1) {
+          resolveLevel = 1;
+          phase = "held";
+          phaseUntil = now + 3600 + Math.random() * 2600; // hold the scene 3.6–6.2s
+          // reveal the recalled memory text
+          ctxRes.innerHTML = "↳ recalled, unbidden: <b>" + pendingMem + "</b>";
+          ctxRes.classList.add("show");
+        }
+        break;
+      case "held":
+        if (now >= phaseUntil) { phase = "fading"; }
+        break;
+      case "fading":
+        resolveLevel = Math.max(0, resolveLevel - dt * 0.0011);
+        if (resolveLevel <= 0) {
+          phase = "gap";
+          phaseUntil = now + 700 + Math.random() * 1400; // quiet beat before the next arises
+        }
+        break;
+      case "gap":
+        if (now >= phaseUntil) startCycle();
+        break;
+    }
+
+    applyResolve();
+    paintStatic();
+    requestAnimationFrame(loop);
+  }
+
+  function initHero() {
+    sizeCanvas();
+    buildTiles();
+    if (reduce) {
+      // resolved scene shown statically; fill context with first moment, no churn
+      var m = moments[0];
+      ctxNow.textContent = m.ctx;
+      ctxRes.innerHTML = "↳ recalled, unbidden: <b>" + m.mem + "</b>";
+      ctxRes.classList.add("show");
+      scene.classList.add("lit");
+      veil.style.opacity = "0";
+      return;
+    }
+    startCycle();
+    requestAnimationFrame(loop);
+  }
+
+  var resizeT;
+  window.addEventListener("resize", function () {
+    clearTimeout(resizeT);
+    resizeT = setTimeout(function () { sizeCanvas(); buildTiles(); }, 150);
+  });
+
+  /* ----------------------------------------------------------------
+     2) THE THREE FRAMES (noise → tug → form), each a tiny looping
+        canvas so the section shows the resolution gradient itself.
+        Frames only animate when scrolled into view, and never under
+        reduced motion (they render their target state statically).
+     ---------------------------------------------------------------- */
+  var frameCanvases = Array.prototype.slice.call(
+    document.querySelectorAll(".frame canvas[data-stage]")
+  );
+
+  function makeNoiseTile(size) {
+    var c = document.createElement("canvas");
+    c.width = c.height = size;
+    var x = c.getContext("2d");
+    var img = x.createImageData(size, size);
+    var d = img.data;
+    for (var i = 0; i < d.length; i += 4) {
+      var v = (Math.random() * 255) | 0;
+      d[i] = d[i+1] = d[i+2] = v; d[i+3] = 255;
+    }
+    x.putImageData(img, 0, 0);
+    return c;
+  }
+
+  // a minimal painted "scene" for the frames (desk glow + monitor + err/fix)
+  function paintMiniScene(x, w, h) {
+    // backdrop
+    var g = x.createLinearGradient(0, 0, 0, h);
+    g.addColorStop(0, "#0a0c14"); g.addColorStop(1, "#06070c");
+    x.fillStyle = g; x.fillRect(0, 0, w, h);
+    // warm lamp pool
+    var lg = x.createRadialGradient(w*0.72, h*0.28, 4, w*0.72, h*0.28, w*0.5);
+    lg.addColorStop(0, "rgba(255,176,102,.45)"); lg.addColorStop(1, "rgba(255,176,102,0)");
+    x.fillStyle = lg; x.fillRect(0, 0, w, h);
+    // monitor
+    var mw = w*0.5, mh = mw*0.62, mx = (w-mw)/2, my = h*0.30;
+    x.fillStyle = "#05070d"; x.strokeStyle = "#222733"; x.lineWidth = 2;
+    x.fillRect(mx, my, mw, mh); x.strokeRect(mx, my, mw, mh);
+    // monitor glow
+    var sg = x.createRadialGradient(mx+mw/2, my+mh/2, 4, mx+mw/2, my+mh/2, mw*0.8);
+    sg.addColorStop(0, "rgba(111,183,255,.30)"); sg.addColorStop(1, "rgba(111,183,255,0)");
+    x.fillStyle = sg; x.fillRect(0, 0, w, h);
+    // code lines
+    var ly = my + mh*0.16, lh = Math.max(2, mh*0.06), gap = mh*0.13;
+    var widths = [0.6, 0.4, 0.5, 0.3, 0.55];
+    for (var i = 0; i < widths.length; i++) {
+      if (i === 2) x.fillStyle = "rgba(255,93,108,.9)";
+      else if (i === 4) x.fillStyle = "rgba(126,231,168,.9)";
+      else x.fillStyle = "rgba(150,170,210,.35)";
+      x.fillRect(mx + mw*0.12, ly + i*gap, mw*0.76*widths[i], lh);
+    }
+    // desk
+    x.fillStyle = "#130d09"; x.fillRect(0, h*0.82, w, h*0.18);
+    // vignette
+    var vg = x.createRadialGradient(w/2, h*0.42, h*0.2, w/2, h*0.42, h*0.8);
+    vg.addColorStop(0, "rgba(0,0,0,0)"); vg.addColorStop(1, "rgba(0,0,0,.7)");
+    x.fillStyle = vg; x.fillRect(0, 0, w, h);
+  }
+
+  var frameTiles = null;
+  function frameInit() {
+    frameTiles = [makeNoiseTile(96), makeNoiseTile(96), makeNoiseTile(96)];
+    frameCanvases.forEach(function (cv) {
+      var r = cv.getBoundingClientRect();
+      var dpr = Math.min(window.devicePixelRatio || 1, 2);
+      cv.width = Math.max(1, (r.width * dpr) | 0);
+      cv.height = Math.max(1, (r.height * dpr) | 0);
+      cv._x = cv.getContext("2d");
+      cv._stage = +cv.getAttribute("data-stage"); // 0 noise, 1 tug, 2 form
+    });
+  }
+
+  // target static alpha per stage: 0 → ~1, 1 → ~0.55, 2 → ~0.04
+  function stageAlpha(stage) { return stage === 0 ? 0.95 : stage === 1 ? 0.5 : 0.05; }
+
+  function paintFrame(cv) {
+    var x = cv._x, w = cv.width, h = cv.height;
+    paintMiniScene(x, w, h);
+    var a = stageAlpha(cv._stage);
+    if (a > 0.02) {
+      x.globalAlpha = a;
+      x.globalCompositeOperation = "screen";
+      var tile = frameTiles[(Math.random() * frameTiles.length) | 0];
+      var ox = (Math.random()*96)|0, oy = (Math.random()*96)|0;
+      for (var yy = -oy; yy < h; yy += 96)
+        for (var xx = -ox; xx < w; xx += 96)
+          x.drawImage(tile, xx, yy);
+      x.globalAlpha = 1;
+      x.globalCompositeOperation = "source-over";
+    }
+  }
+
+  var framesRunning = false;
+  function frameLoop() {
+    if (!framesRunning) return;
+    frameCanvases.forEach(paintFrame);
+    requestAnimationFrame(frameLoop);
+  }
+
+  function initFrames() {
+    if (!frameCanvases.length) return;
+    frameInit();
+    if (reduce) {
+      // paint each frame once at its target state, no churn
+      frameCanvases.forEach(paintFrame);
+      return;
+    }
+    if ("IntersectionObserver" in window) {
+      var io = new IntersectionObserver(function (entries) {
+        var anyVisible = entries.some(function (e) { return e.isIntersecting; });
+        if (anyVisible && !framesRunning) { framesRunning = true; frameLoop(); }
+        else if (!anyVisible) { framesRunning = false; }
+      }, { threshold: 0.15 });
+      io.observe(document.getElementById("resolves"));
+    } else {
+      framesRunning = true; frameLoop();
+    }
+  }
+
+  window.addEventListener("resize", function () {
+    clearTimeout(resizeT);
+    resizeT = setTimeout(function () { if (frameTiles) frameInit(); }, 180);
+  });
+
+  // boot
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", function () { initHero(); initFrames(); });
+  } else {
+    initHero(); initFrames();
+  }
+})();
+</script>
+</body>
+</html>

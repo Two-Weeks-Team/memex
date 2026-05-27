@@ -1,0 +1,706 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Memex — the frost remembers</title>
+<meta name="description" content="Memex turns your Claude Code & Codex session history into a navigable associative memory backed by Qdrant. The relevant moment surfaces on its own — like ice crystals branching across cold glass until a remembered scene forms in the frost." />
+<style>
+  :root{
+    --ink:#dbe7f5;
+    --dim:#8ba1bd;
+    --faint:#5d7088;
+    --frost:#eaf6ff;       /* bright crystal white-blue */
+    --ice:#a9d8ff;         /* crystal line */
+    --ice-deep:#6fb4ee;
+    --warm:#ffcf86;        /* the lamp / screen glow inside the remembered scene */
+    --warm-2:#ff9a5a;
+    --cyan:#9fe7ff;
+    --accent:#a9d2ff;
+    --bg0:#03060d;
+    --bg1:#070d18;
+    --panel: rgba(9,16,28,.58);
+    --hair: rgba(150,196,255,.18);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    background:
+      radial-gradient(1300px 820px at 70% 16%, #0c1830 0%, transparent 60%),
+      radial-gradient(1500px 980px at 16% 92%, #06101f 0%, transparent 55%),
+      linear-gradient(180deg, var(--bg1), var(--bg0) 72%);
+    color:var(--ink);
+    font:16px/1.6 ui-sans-serif,-apple-system,"Segoe UI",Roboto,Inter,system-ui,sans-serif;
+    overflow-x:hidden;
+    -webkit-font-smoothing:antialiased;
+  }
+  a{color:var(--accent);text-decoration:none}
+  a:hover{text-decoration:underline}
+  code,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+
+  /* ---------- the cold-glass stage ---------- */
+  .stage{position:relative;width:100%;height:100svh;min-height:640px;overflow:hidden}
+  #glass{position:absolute;inset:0;width:100%;height:100%;display:block}
+
+  /* subtle cold sheen over the glass + vignette for legibility */
+  .stage::before{
+    content:"";position:absolute;inset:0;pointer-events:none;z-index:1;
+    background:
+      linear-gradient(115deg, rgba(120,170,230,.06) 0%, transparent 30%, transparent 70%, rgba(120,170,230,.05) 100%);
+  }
+  .stage::after{
+    content:"";position:absolute;inset:0;pointer-events:none;z-index:2;
+    background:
+      radial-gradient(125% 85% at 50% 40%, transparent 36%, rgba(3,6,13,.64) 100%),
+      linear-gradient(180deg, rgba(3,6,13,.44) 0%, transparent 24%, transparent 62%, rgba(3,6,13,.88) 100%);
+  }
+
+  /* ---------- overlaid copy ---------- */
+  .hud{position:absolute;inset:0;display:flex;flex-direction:column;pointer-events:none;z-index:3}
+  .hud > *{pointer-events:auto}
+
+  .topbar{display:flex;align-items:center;justify-content:space-between;gap:16px;
+    padding:22px clamp(18px,5vw,56px)}
+  .brand{display:flex;align-items:center;gap:11px;font-weight:700;letter-spacing:.16em;
+    text-transform:uppercase;font-size:13px;color:var(--ink)}
+  .brand .flake{width:13px;height:13px;flex:0 0 auto;color:var(--ice);
+    filter:drop-shadow(0 0 6px rgba(169,216,255,.7))}
+  .topbar nav{display:flex;gap:clamp(10px,2.4vw,26px);font-size:13px;color:var(--dim);
+    letter-spacing:.02em}
+  .topbar nav a{color:var(--dim)}
+  .topbar nav a:hover{color:var(--ink)}
+
+  .hero{margin-top:auto;padding:0 clamp(18px,5vw,56px) clamp(26px,6vh,64px);max-width:768px}
+
+  /* the "current situation" prompt that calls the memory up */
+  .moment{display:inline-flex;align-items:center;gap:10px;margin-bottom:20px;
+    padding:8px 14px;border:1px solid var(--hair);border-radius:999px;
+    background:var(--panel);backdrop-filter:blur(6px);
+    font-size:12.5px;letter-spacing:.02em;color:var(--dim)}
+  .moment .pulse{width:7px;height:7px;border-radius:50%;background:var(--cyan);
+    box-shadow:0 0 0 0 rgba(159,231,255,.6);animation:pulse 2.8s ease-out infinite}
+  .moment b{color:var(--ink);font-weight:600}
+  @keyframes pulse{
+    0%{box-shadow:0 0 0 0 rgba(159,231,255,.55)}
+    70%{box-shadow:0 0 0 9px rgba(159,231,255,0)}
+    100%{box-shadow:0 0 0 0 rgba(159,231,255,0)}
+  }
+
+  h1{margin:0;font-weight:680;font-size:clamp(33px,6vw,62px);line-height:1.04;
+    letter-spacing:-.018em;color:#fff;text-shadow:0 2px 44px rgba(6,12,28,.72)}
+  h1 .glow{color:var(--frost);text-shadow:0 0 30px rgba(169,216,255,.5)}
+  .lede{margin:18px 0 0;font-size:clamp(15px,2.1vw,18.5px);color:var(--dim);max-width:608px}
+  .lede b{color:var(--ink);font-weight:600}
+
+  .cta{display:flex;flex-wrap:wrap;gap:13px;margin-top:28px}
+  .btn{display:inline-flex;align-items:center;gap:9px;padding:12px 20px;border-radius:11px;
+    font-size:14.5px;font-weight:600;letter-spacing:.01em;border:1px solid transparent;
+    transition:transform .15s ease, box-shadow .25s ease, background .25s ease}
+  .btn:hover{text-decoration:none;transform:translateY(-1px)}
+  .btn-primary{background:linear-gradient(180deg,#dff0ff,#a9d8ff);color:#082138;
+    box-shadow:0 8px 30px rgba(169,216,255,.26)}
+  .btn-primary:hover{box-shadow:0 12px 36px rgba(169,216,255,.4)}
+  .btn-ghost{border-color:var(--hair);color:var(--ink);background:var(--panel);
+    backdrop-filter:blur(6px)}
+  .btn-ghost:hover{border-color:rgba(150,196,255,.42)}
+
+  .legend{margin-top:22px;font-size:12.5px;color:var(--faint);letter-spacing:.01em;
+    display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+  .legend .scene-label{color:var(--frost);font-weight:600;letter-spacing:.04em}
+
+  /* small replay control, lower-right of the stage */
+  .replay{position:absolute;right:clamp(16px,4vw,40px);bottom:clamp(20px,5vh,40px);
+    display:inline-flex;align-items:center;gap:8px;padding:9px 14px;border-radius:999px;
+    border:1px solid var(--hair);background:var(--panel);backdrop-filter:blur(6px);
+    color:var(--dim);font-size:12.5px;cursor:pointer;z-index:4}
+  .replay:hover{color:var(--ink);border-color:rgba(150,196,255,.4)}
+  .replay svg{width:13px;height:13px;fill:currentColor}
+
+  /* ---------- the ground-truth section below the fold ---------- */
+  .below{position:relative;z-index:2;max-width:1080px;margin:0 auto;
+    padding:clamp(56px,10vh,110px) clamp(18px,5vw,40px) 40px}
+  .kicker{font-size:12px;letter-spacing:.22em;text-transform:uppercase;color:var(--faint);
+    margin:0 0 14px}
+  .below h2{font-size:clamp(24px,4vw,38px);line-height:1.12;margin:0;color:#fff;
+    letter-spacing:-.01em;font-weight:660;max-width:760px}
+  .below p.sub{color:var(--dim);max-width:680px;margin:16px 0 0;font-size:16px}
+
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(238px,1fr));gap:16px;
+    margin-top:42px}
+  .card{border:1px solid var(--hair);border-radius:16px;padding:22px 22px 24px;
+    background:linear-gradient(180deg, rgba(13,22,40,.62), rgba(7,12,24,.46));
+    transition:border-color .2s ease, transform .2s ease}
+  .card:hover{border-color:rgba(150,196,255,.4);transform:translateY(-2px)}
+  .card h3{margin:0 0 8px;font-size:16px;color:#fff;letter-spacing:.01em;
+    display:flex;align-items:center;gap:9px}
+  .card h3 .gp{width:8px;height:8px;border-radius:50%;background:var(--ice);
+    box-shadow:0 0 8px 1px rgba(169,216,255,.7);flex:0 0 auto}
+  .card p{margin:0;font-size:14px;color:var(--dim);line-height:1.55}
+
+  .facts{margin-top:44px;border:1px solid var(--hair);border-radius:16px;overflow:hidden;
+    background:rgba(7,12,24,.52)}
+  .facts .row{display:grid;grid-template-columns:160px 1fr;gap:18px;padding:16px 22px;
+    border-top:1px solid rgba(150,196,255,.08);font-size:14.5px}
+  .facts .row:first-child{border-top:0}
+  .facts .row .lab{color:var(--faint);letter-spacing:.04em;font-size:12.5px;
+    text-transform:uppercase;padding-top:2px}
+  .facts .row .val{color:var(--ink)}
+  .facts .row .val .mono{color:var(--cyan);font-size:13.5px}
+
+  .addline{margin-top:34px;border:1px solid var(--hair);border-radius:14px;
+    background:#05090f;padding:16px 18px;font-size:13.5px;color:var(--dim);overflow-x:auto}
+  .addline .mono{color:var(--ink)}
+  .addline .c{color:var(--ice)}
+
+  footer{position:relative;z-index:2;border-top:1px solid var(--hair);margin-top:60px}
+  .foot{max-width:1080px;margin:0 auto;padding:28px clamp(18px,5vw,40px) 60px;
+    display:flex;flex-wrap:wrap;gap:18px;justify-content:space-between;align-items:center;
+    color:var(--faint);font-size:13px}
+  .foot a{color:var(--dim)}
+  .foot .links{display:flex;flex-wrap:wrap;gap:18px}
+
+  /* ---------- reduced motion: static, fully-formed frost scene ---------- */
+  @media (prefers-reduced-motion: reduce){
+    .moment .pulse{animation:none}
+  }
+
+  @media (max-width:640px){
+    .topbar nav{display:none}
+    .facts .row{grid-template-columns:1fr;gap:4px}
+    .replay{display:none}
+  }
+</style>
+</head>
+<body>
+
+<section class="stage" aria-label="Ice crystals branching across cold glass until a remembered coding moment forms in the frost">
+  <canvas id="glass" aria-hidden="true"></canvas>
+
+  <div class="hud">
+    <header class="topbar">
+      <div class="brand">
+        <svg class="flake" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
+          <path d="M12 2v20M2 12h20M4.9 4.9l14.2 14.2M19.1 4.9L4.9 19.1"/>
+          <path d="M12 6l-2.2-2.2M12 6l2.2-2.2M12 18l-2.2 2.2M12 18l2.2 2.2"/>
+        </svg>
+        Memex
+      </div>
+      <nav aria-label="Primary">
+        <a href="https://github.com/Two-Weeks-Team/memex">Repo</a>
+        <a href="https://two-weeks-team.github.io/memex/">Live</a>
+        <a href="#how">How it works</a>
+        <a href="#agent">For agents</a>
+      </nav>
+    </header>
+
+    <div class="hero">
+      <span class="moment">
+        <span class="pulse" aria-hidden="true"></span>
+        Right now you're <b>chasing a flaky test that fails only at night</b> &mdash; and the cold glass begins to fern&hellip;
+      </span>
+
+      <h1>You sat through this once.<br>The <span class="glow">frost&nbsp;remembers&nbsp;it.</span></h1>
+
+      <p class="lede">
+        You never wrote it down. But ice creeps across the dark window along its own associative
+        veins, branching toward each other&mdash;and where they meet, the
+        <b>scene of that late night</b> forms in the frost: the rain on the pane, the laptop's glow,
+        the mug going cold while the fix finally held. It surfaces on its own, because right now called it up.
+      </p>
+
+      <div class="cta">
+        <a class="btn btn-primary" href="https://github.com/Two-Weeks-Team/memex">Get Memex on GitHub</a>
+        <a class="btn btn-ghost" href="https://two-weeks-team.github.io/memex/">See it live</a>
+      </div>
+
+      <p class="legend">
+        <span class="scene-label" id="sceneName">crystallizing&hellip;</span>
+        <span aria-hidden="true">&middot;</span>
+        an associative trail, not a search
+      </p>
+    </div>
+
+    <button class="replay" id="replay" type="button" aria-label="Let the frost form again">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5V1L7 6l5 5V7a5 5 0 1 1-5 5H5a7 7 0 1 0 7-7z"/></svg>
+      Recall again
+    </button>
+  </div>
+</section>
+
+<main class="below">
+  <section id="how">
+    <p class="kicker">What just happened</p>
+    <h2>People don't document every memory &mdash; yet when the moment arrives,
+      the relevant thought surfaces on its own.</h2>
+    <p class="sub">
+      Memex is a non-chatbot, LLM-free-at-runtime tool that reads your existing
+      Claude&nbsp;Code and Codex session history and turns it into a navigable
+      associative memory backed by <b style="color:var(--ink)">Qdrant</b>. You move through your own past by
+      <i>similarity</i>, not keywords &mdash; and the relevant moment can rise to you proactively.
+    </p>
+
+    <div class="grid">
+      <article class="card">
+        <h3><span class="gp" aria-hidden="true"></span>Time Machine</h3>
+        <p>Replay any past session as it happened &mdash; the whole scene, not a snippet.</p>
+      </article>
+      <article class="card">
+        <h3><span class="gp" aria-hidden="true"></span>Lens</h3>
+        <p>Named-vector weighted search to look through your history from one angle at a time.</p>
+      </article>
+      <article class="card">
+        <h3><span class="gp" aria-hidden="true"></span>Topology</h3>
+        <p>A distance-matrix &rarr; MST graph &mdash; the branching veins of how your sessions actually connect.</p>
+      </article>
+      <article class="card">
+        <h3><span class="gp" aria-hidden="true"></span>Mix &amp; Discovery</h3>
+        <p>Positive / negative recommendation to pull related work toward you and push noise away.</p>
+      </article>
+      <article class="card">
+        <h3><span class="gp" aria-hidden="true"></span>Proactive Recall</h3>
+        <p>The piece that fronted the glass above: a relevant past moment surfaces because the current one evoked it.</p>
+      </article>
+      <article class="card">
+        <h3><span class="gp" aria-hidden="true"></span>Companion · Wrapped · Loop&nbsp;Breaker</h3>
+        <p>An agent-memory layer over your corpus &mdash; recap what you've done, and catch yourself circling.</p>
+      </article>
+    </div>
+
+    <div class="facts" aria-label="What Memex is">
+      <div class="row"><div class="lab">Reads</div>
+        <div class="val"><span class="mono">~/.claude/projects/**/*.jsonl</span>, legacy transcripts, and <span class="mono">history.jsonl</span></div></div>
+      <div class="row"><div class="lab">Backed by</div>
+        <div class="val">Qdrant &mdash; navigate by vector similarity, no runtime LLM</div></div>
+      <div class="row"><div class="lab">Why</div>
+        <div class="val">Claude&nbsp;Code silently migrates and deletes old sessions. Memex keeps a corpus <b style="color:var(--ink)">you own.</b></div></div>
+      <div class="row"><div class="lab">Built for</div>
+        <div class="val">Qdrant Vector Space Day 2026 &mdash; <i>"Think Outside the Bot."</i></div></div>
+    </div>
+  </section>
+
+  <section id="agent">
+    <p class="kicker" style="margin-top:56px">For your agent</p>
+    <h2 style="font-size:clamp(20px,3vw,28px)">11 MCP tools over stdio + HTTP &mdash;
+      works in Claude&nbsp;Code, Codex, and Cursor.</h2>
+    <p class="sub">A server / Docker variant runs Qdrant, the web UI, and the MCP server in one image.
+      The tools let an agent recall, replay, and connect across your own history.</p>
+    <div class="addline mono">
+      <span class="c">$</span> claude mcp add memex -- memex-mcp
+    </div>
+    <p style="margin-top:18px;font-size:14px">
+      <a href="https://github.com/Two-Weeks-Team/memex#server--docker">Server / Docker variant</a>
+      &nbsp;&middot;&nbsp;
+      <a href="https://github.com/Two-Weeks-Team/memex">MCP integration &amp; the 11 tools</a>
+    </p>
+  </section>
+</main>
+
+<footer>
+  <div class="foot">
+    <div>Memex &mdash; a memory you own, surfaced by association.</div>
+    <div class="links">
+      <a href="https://github.com/Two-Weeks-Team/memex">GitHub</a>
+      <a href="https://two-weeks-team.github.io/memex/">Live landing</a>
+      <a href="https://github.com/Two-Weeks-Team/memex#server--docker">Docker</a>
+    </div>
+  </div>
+</footer>
+
+<script>
+(function(){
+  "use strict";
+
+  var canvas = document.getElementById('glass');
+  var ctx = canvas.getContext('2d');
+  var sceneName = document.getElementById('sceneName');
+  var replayBtn = document.getElementById('replay');
+
+  var DPR = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+  var W = 0, H = 0;            // CSS pixels
+  var reduce = window.matchMedia &&
+               window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  /* ===========================================================================
+     THE SCENE the frost forms into.
+     A remembered late-night coding moment, depicted as a tableau seen THROUGH a
+     cold window: a WINDOW FRAME, RAIN-STREAKED PANE, a LAPTOP open on a sill with
+     a glowing screen, a MUG (going cold), and a desk LAMP. Authored in a
+     normalized [0..1] box and drawn AS FROST — every contour is the spine of a
+     dendritic ice crystal that ferns out along it. Connected, the crystal spines
+     read as a recognizable scene, not abstract noise.
+
+     spines[]: { a:[x,y], b:[x,y], glow?:true }  — the associative axes the ice
+     creeps along. glow spines belong to warm light sources (screen / lamp).
+     warm[]:   { x,y,r } radial warm-light pools (screen bloom, lamp pool).
+     cool:     a faint cool back-glow for the rain-streaked pane.
+  ============================================================================ */
+  var SCENE = {
+    // figure aspect ~ 1.5 : 1 (w:h)
+    spines: [
+      /* ---- WINDOW FRAME (the cold glass we look through) ---- */
+      {a:[0.06,0.10], b:[0.94,0.10]},   // top rail
+      {a:[0.06,0.10], b:[0.06,0.92]},   // left jamb
+      {a:[0.94,0.10], b:[0.94,0.92]},   // right jamb
+      {a:[0.06,0.92], b:[0.94,0.92]},   // sill (bottom)
+      {a:[0.50,0.10], b:[0.50,0.92]},   // center mullion (vertical)
+      {a:[0.06,0.51], b:[0.94,0.51]},   // center transom (horizontal)
+
+      /* ---- LAPTOP on the sill (lower-left pane), lid open & glowing ---- */
+      {a:[0.155,0.840], b:[0.385,0.840]}, // base front edge (keyboard deck front)
+      {a:[0.385,0.840], b:[0.420,0.770]}, // base right side (perspective)
+      {a:[0.420,0.770], b:[0.205,0.770]}, // base back edge (hinge line)
+      {a:[0.205,0.770], b:[0.155,0.840]}, // base left side
+      // the open lid / screen — a quadrilateral leaning back, this is the glow
+      {a:[0.205,0.770], b:[0.255,0.560], glow:true}, // screen left edge up
+      {a:[0.255,0.560], b:[0.465,0.560], glow:true}, // screen top edge
+      {a:[0.465,0.560], b:[0.420,0.770], glow:true}, // screen right edge down
+      {a:[0.420,0.770], b:[0.205,0.770], glow:true}, // screen bottom (hinge), glowing seam
+      // a couple of code "lines" suggested inside the screen
+      {a:[0.275,0.620], b:[0.430,0.620], glow:true},
+      {a:[0.275,0.665], b:[0.395,0.665], glow:true},
+      {a:[0.275,0.710], b:[0.415,0.710], glow:true},
+
+      /* ---- MUG on the sill (right of laptop), a little curl of steam ---- */
+      {a:[0.560,0.870], b:[0.560,0.760]}, // mug left wall
+      {a:[0.660,0.870], b:[0.660,0.760]}, // mug right wall
+      {a:[0.560,0.760], b:[0.660,0.760]}, // mug rim
+      {a:[0.560,0.870], b:[0.660,0.870]}, // mug base
+      {a:[0.660,0.800], b:[0.715,0.815]}, // handle out
+      {a:[0.715,0.815], b:[0.660,0.835]}, // handle back
+
+      /* ---- DESK LAMP (right pane), arm bent over toward the sill ---- */
+      {a:[0.840,0.880], b:[0.840,0.660]},          // lamp post up
+      {a:[0.840,0.660], b:[0.730,0.560], glow:true}, // lamp arm to head
+      {a:[0.730,0.560], b:[0.690,0.610], glow:true}, // lamp shade left
+      {a:[0.690,0.610], b:[0.785,0.625], glow:true}, // lamp shade mouth
+      {a:[0.785,0.625], b:[0.730,0.560], glow:true}, // lamp shade right
+
+      /* ---- RAIN streaks running down the upper panes (associative veins) ---- */
+      {a:[0.180,0.150], b:[0.205,0.470]},
+      {a:[0.330,0.130], b:[0.300,0.480]},
+      {a:[0.660,0.140], b:[0.690,0.470]},
+      {a:[0.820,0.155], b:[0.795,0.470]}
+    ],
+    // warm light pools (screen bloom + lamp pool) — in normalized coords + radius
+    warm: [
+      {x:0.345, y:0.660, r:0.20},   // laptop screen bloom
+      {x:0.738, y:0.595, r:0.15}    // lamp head pool
+    ],
+    // faint cool back-glow for the night pane
+    cool: {x:0.50, y:0.34, r:0.55}
+  };
+
+  // place the scene into device space
+  var T = {ox:0, oy:0, s:1};   // s = box width in px; height = s/1.5
+  function layout(){
+    var narrow = W < 820;
+    var byW = W * (narrow ? 0.94 : 0.62);
+    var byH = (H * (narrow ? 0.52 : 0.66)) * 1.5;
+    T.s = Math.min(byW, byH);
+    var h = T.s / 1.5;
+    if (narrow){
+      T.ox = (W - T.s) * 0.5;
+      T.oy = H*0.07;
+    } else {
+      T.ox = W - T.s - W*0.045;   // upper-right, clear of the lower-left headline
+      T.oy = H*0.075;
+    }
+    // resolve absolute spine endpoints + per-spine length for growth timing
+    for (var i=0;i<SCENE.spines.length;i++){
+      var sp = SCENE.spines[i];
+      sp.ax = T.ox + sp.a[0]*T.s;  sp.ay = T.oy + sp.a[1]*h;
+      sp.bx = T.ox + sp.b[0]*T.s;  sp.by = T.oy + sp.b[1]*h;
+      sp.len = Math.hypot(sp.bx-sp.ax, sp.by-sp.ay);
+      sp.ang = Math.atan2(sp.by-sp.ay, sp.bx-sp.ax);
+      // a deterministic-ish phase so frost detail is stable across frames
+      if (sp._seed === undefined) sp._seed = (i*9301 + 49297) % 233280 / 233280;
+    }
+  }
+
+  // ---- frost growth ordering: spines grow in a few "waves" so the ice
+  //      appears to creep outward from seeds and meet in the middle. -----------
+  // wave 0: window frame   wave 1: rain veins + furniture outlines
+  // wave 2: glowing screen/lamp + inner detail  (the scene "lights")
+  function waveOf(i){
+    var sp = SCENE.spines[i];
+    if (i < 6) return 0;                // frame
+    if (sp.glow) return 2;              // glowing edges arrive last (lighting)
+    return 1;                           // furniture + rain
+  }
+
+  // ---- timeline (ms) -----------------------------------------------------
+  var T0 = 0;
+  var GROW   = 3400;   // crystals creep + branch across the glass
+  var LIGHT  = 1100;   // warm light blooms through the formed frost
+  var TOTAL  = GROW + LIGHT;
+  var sceneNamed = false;
+
+  function resize(){
+    var box = canvas.parentElement.getBoundingClientRect();
+    W = Math.max(1, Math.round(box.width));
+    H = Math.max(1, Math.round(box.height));
+    canvas.style.width = W + 'px';
+    canvas.style.height = H + 'px';
+    canvas.width  = Math.round(W*DPR);
+    canvas.height = Math.round(H*DPR);
+    ctx.setTransform(DPR,0,0,DPR,0,0);
+    layout();
+  }
+
+  function easeOutCubic(t){ return 1 - Math.pow(1-t, 3); }
+  function clamp01(v){ return v<0?0:(v>1?1:v); }
+
+  // small deterministic pseudo-random from a seed (stable per-spine detail)
+  function rnd(seed){
+    var x = Math.sin(seed*127.1 + 311.7) * 43758.5453;
+    return x - Math.floor(x);
+  }
+
+  /* Draw one dendritic ice crystal along a spine, grown to fraction g∈[0..1].
+     The spine is the main vein; tiny fern barbs branch off it at intervals,
+     longer toward the base, shorter toward the growing tip — like real frost. */
+  function drawCrystal(sp, g, kind){
+    if (g <= 0) return;
+    var ax=sp.ax, ay=sp.ay;
+    var dx=sp.bx-sp.ax, dy=sp.by-sp.ay;
+    var tipx = ax + dx*g, tipy = ay + dy*g;
+
+    // perpendicular unit (for barbs)
+    var nx = -Math.sin(sp.ang), ny = Math.cos(sp.ang);
+
+    var lineCol, barbCol, glowCol, tipCol;
+    if (kind === 'glow'){
+      lineCol = 'rgba(214,238,255,';   // the warm-lit edges read brighter/whiter
+      barbCol = 'rgba(180,222,255,';
+      glowCol = 'rgba(255,207,134,';
+      tipCol  = 'rgba(255,231,180,';
+    } else {
+      lineCol = 'rgba(180,222,255,';
+      barbCol = 'rgba(140,196,250,';
+      glowCol = 'rgba(110,180,238,';
+      tipCol  = 'rgba(220,242,255,';
+    }
+
+    // main vein with a faint icy glow
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = glowCol + (kind==='glow'?0.18:0.12) + ')';
+    ctx.lineWidth = 3.2;
+    ctx.beginPath(); ctx.moveTo(ax,ay); ctx.lineTo(tipx,tipy); ctx.stroke();
+
+    ctx.strokeStyle = lineCol + (0.42 + (kind==='glow'?0.2:0)) + ')';
+    ctx.lineWidth = 1.25;
+    ctx.beginPath(); ctx.moveTo(ax,ay); ctx.lineTo(tipx,tipy); ctx.stroke();
+
+    // fern barbs along the grown portion
+    var grownLen = sp.len * g;
+    var step = 9;                         // px between barb pairs
+    var count = Math.floor(grownLen/step);
+    ctx.lineWidth = 0.9;
+    for (var k=1; k<=count; k++){
+      var f = (k*step)/sp.len;            // fraction along full spine
+      if (f > g) break;
+      var px = ax + dx*f, py = ay + dy*f;
+      // barbs shrink toward the tip; randomized but stable per (spine,k)
+      var rr = rnd(sp._seed*97.3 + k*5.7);
+      var taper = 1 - (f/Math.max(g,0.0001))*0.65;  // shorter near the tip
+      var blen = (4 + rr*7) * taper;
+      // alternate the lead side, angle barbs ~45° forward like frost ferns
+      var side = (k % 2 === 0) ? 1 : -1;
+      var fwd = 0.55;                     // forward lean
+      var bx = px + (nx*side + Math.cos(sp.ang)*fwd*0.0)*blen;
+      var by = py + (ny*side)*blen;
+      // lean the barb tip slightly toward the growth tip for the fern look
+      bx += Math.cos(sp.ang)*blen*0.35;
+      by += Math.sin(sp.ang)*blen*0.35;
+
+      var ba = 0.30 + rr*0.25;
+      ctx.strokeStyle = barbCol + ba + ')';
+      ctx.beginPath(); ctx.moveTo(px,py); ctx.lineTo(bx,by); ctx.stroke();
+
+      // a second, shorter sub-barb for denser fern
+      if (rr > 0.5){
+        var b2 = blen*0.5;
+        var mx = px + nx*side*b2*0.5, my = py + ny*side*b2*0.5;
+        var ex = mx + (nx*side)*b2 + Math.cos(sp.ang)*b2*0.4;
+        var ey = my + (ny*side)*b2 + Math.sin(sp.ang)*b2*0.4;
+        ctx.strokeStyle = barbCol + (ba*0.7) + ')';
+        ctx.beginPath(); ctx.moveTo(mx,my); ctx.lineTo(ex,ey); ctx.stroke();
+      }
+    }
+
+    // bright crawling crystal tip (the growing edge), only while growing
+    if (g < 1){
+      var tg = ctx.createRadialGradient(tipx,tipy,0, tipx,tipy, 7);
+      tg.addColorStop(0, tipCol + '0.95)');
+      tg.addColorStop(0.5, tipCol + '0.35)');
+      tg.addColorStop(1, tipCol + '0)');
+      ctx.fillStyle = tg;
+      ctx.beginPath(); ctx.arc(tipx,tipy, 7, 0, Math.PI*2); ctx.fill();
+    }
+  }
+
+  // warm light pool bloom (radial), intensity i∈[0..1]
+  function drawWarmPool(p, i){
+    if (i<=0) return;
+    var h = T.s/1.5;
+    var cx = T.ox + p.x*T.s, cy = T.oy + p.y*h;
+    var rad = p.r * T.s;
+    var g = ctx.createRadialGradient(cx,cy,0, cx,cy, rad);
+    g.addColorStop(0,   'rgba(255,214,150,'+(0.34*i)+')');
+    g.addColorStop(0.4, 'rgba(255,180,110,'+(0.14*i)+')');
+    g.addColorStop(1,   'rgba(255,154,90,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(cx,cy, rad, 0, Math.PI*2); ctx.fill();
+  }
+
+  function drawCoolGlow(i){
+    var c = SCENE.cool, h = T.s/1.5;
+    var cx = T.ox + c.x*T.s, cy = T.oy + c.y*h;
+    var rad = c.r * T.s;
+    var g = ctx.createRadialGradient(cx,cy,0, cx,cy, rad);
+    g.addColorStop(0,   'rgba(90,150,220,'+(0.10*i)+')');
+    g.addColorStop(0.6, 'rgba(70,120,190,'+(0.05*i)+')');
+    g.addColorStop(1,   'rgba(70,120,190,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(cx,cy, rad, 0, Math.PI*2); ctx.fill();
+  }
+
+  // micro frost dust on the glass (ambient cold texture, always faintly present)
+  var dust = [];
+  function buildDust(){
+    dust.length = 0;
+    var n = Math.round((W*H)/9000);
+    n = Math.max(60, Math.min(260, n));
+    for (var i=0;i<n;i++){
+      dust.push({ x:Math.random(), y:Math.random(),
+                  r:0.4+Math.random()*1.0, ph:Math.random()*Math.PI*2,
+                  sp:0.4+Math.random()*1.2 });
+    }
+  }
+
+  function drawDust(now){
+    for (var i=0;i<dust.length;i++){
+      var d = dust[i];
+      var tw = reduce ? 0.7 : (0.45 + 0.45*Math.sin(now*0.001*d.sp + d.ph));
+      ctx.fillStyle = 'rgba(190,222,255,'+(0.05 + 0.10*tw)+')';
+      ctx.beginPath();
+      ctx.arc(d.x*W, d.y*H, d.r, 0, Math.PI*2);
+      ctx.fill();
+    }
+  }
+
+  var rafId = 0;
+
+  function frame(now){
+    if (!T0) T0 = now;
+    var el = now - T0;
+
+    ctx.clearRect(0,0,W,H);
+
+    // faint cool back-glow for the night pane (rises early, holds)
+    drawCoolGlow(reduce ? 1 : clamp01(el/(GROW*0.5)));
+
+    // ambient frost dust
+    drawDust(now);
+
+    // ---- the three growth waves of crystals ----
+    var gp = reduce ? 1 : clamp01(el / GROW);
+    // each wave occupies a window of overall growth; later waves start later
+    // wave 0: 0.00–0.55, wave 1: 0.20–0.85, wave 2: 0.55–1.00
+    var waveWin = [ [0.00,0.55], [0.20,0.85], [0.55,1.00] ];
+
+    for (var i=0;i<SCENE.spines.length;i++){
+      var sp = SCENE.spines[i];
+      var w = waveOf(i);
+      var win = waveWin[w];
+      // stagger spines within a wave by their seed so they don't all move in lockstep
+      var jitter = (rnd(sp._seed*13.0) * 0.22);
+      var lo = win[0] + jitter*(win[1]-win[0]);
+      var local = reduce ? 1 : easeOutCubic(clamp01( (gp - lo) / Math.max(0.0001,(win[1]-lo)) ));
+      drawCrystal(sp, local, sp.glow ? 'glow' : 'cool');
+    }
+
+    // ---- the scene "lights": warm glow blooms through the formed frost ----
+    var lightEl = el - GROW*0.86;
+    var light = reduce ? 1 : clamp01(lightEl / LIGHT);
+    if (light > 0){
+      var prev = ctx.globalCompositeOperation;
+      ctx.globalCompositeOperation = 'lighter';
+      for (var p=0;p<SCENE.warm.length;p++) drawWarmPool(SCENE.warm[p], light);
+      ctx.globalCompositeOperation = prev;
+
+      if (!sceneNamed && light > 0.35){
+        sceneName.textContent = 'the night the test finally passed';
+        sceneNamed = true;
+      }
+    }
+
+    if (reduce){
+      // fully-formed static frost scene: also paint the warm light once
+      var pr = ctx.globalCompositeOperation;
+      ctx.globalCompositeOperation = 'lighter';
+      for (var q=0;q<SCENE.warm.length;q++) drawWarmPool(SCENE.warm[q], 1);
+      ctx.globalCompositeOperation = pr;
+      if (!sceneNamed){ sceneName.textContent = 'the night the test finally passed'; sceneNamed = true; }
+      return; // single static frame, no rAF loop
+    }
+
+    // keep a gentle living shimmer on the dust forever; the frost holds once formed
+    rafId = requestAnimationFrame(frame);
+  }
+
+  function frameStatic(){
+    var fakeNow = performance.now();
+    T0 = fakeNow - (TOTAL + 60);
+    frame(fakeNow);
+  }
+
+  function start(){
+    cancelAnimationFrame(rafId);
+    resize();
+    buildDust();
+    T0 = 0; sceneNamed = false;
+    sceneName.textContent = reduce ? 'the night the test finally passed' : 'crystallizing…';
+    if (reduce){
+      frameStatic();
+    } else {
+      rafId = requestAnimationFrame(frame);
+    }
+  }
+
+  replayBtn.addEventListener('click', function(){
+    reduce = window.matchMedia &&
+             window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (reduce){ start(); return; }
+    cancelAnimationFrame(rafId);
+    resize();
+    buildDust();
+    T0 = performance.now();
+    sceneNamed = false;
+    sceneName.textContent = 'crystallizing…';
+    rafId = requestAnimationFrame(frame);
+  });
+
+  var rT;
+  window.addEventListener('resize', function(){
+    clearTimeout(rT);
+    rT = setTimeout(function(){
+      resize();
+      buildDust();
+      if (reduce) frameStatic();
+    }, 160);
+  });
+
+  // honor live changes to the motion preference
+  if (window.matchMedia){
+    try {
+      window.matchMedia('(prefers-reduced-motion: reduce)')
+        .addEventListener('change', function(e){ reduce = e.matches; start(); });
+    } catch(_){}
+  }
+
+  start();
+})();
+</script>
+</body>
+</html>

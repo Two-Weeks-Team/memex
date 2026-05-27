@@ -1,0 +1,587 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Memex — the fix you wrote six months ago comes back mid-incident</title>
+<meta name="description" content="Memex turns your Claude Code / Codex session history into an associative memory. When an incident unfolds, the relevant past surfaces on its own — you didn't go looking for it." />
+<style>
+  /* ----- OKLCH palette: a dim NOC at 3am ----- */
+  :root {
+    --bg:        oklch(16% 0.02 250);
+    --bg-panel:  oklch(21% 0.025 250);
+    --bg-raised: oklch(26% 0.03 250);
+    --line:      oklch(34% 0.03 250);
+    --ink:       oklch(94% 0.01 250);
+    --ink-dim:   oklch(72% 0.02 250);
+    --ink-faint: oklch(55% 0.02 250);
+    --ok:        oklch(78% 0.15 155);
+    --warn:      oklch(83% 0.15 85);
+    --crit:      oklch(70% 0.19 25);
+    --recall:    oklch(80% 0.13 285);
+    --recall-dim:oklch(55% 0.10 285);
+    --accent:    oklch(82% 0.12 215);
+    --focus:     oklch(88% 0.16 215);
+    --radius: 10px;
+    --mono: ui-monospace, "SF Mono", "Cascadia Code", "JetBrains Mono", Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--sans);
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 4px; }
+
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 0 20px; }
+
+  /* skip link */
+  .skip { position: absolute; left: -999px; top: 0; background: var(--bg-raised); color: var(--ink); padding: 10px 14px; border-radius: 8px; z-index: 50; }
+  .skip:focus { left: 12px; top: 12px; }
+
+  /* ----- top status bar (the standing duty board) ----- */
+  header.bar {
+    position: sticky; top: 0; z-index: 30;
+    background: oklch(18% 0.02 250 / 0.92);
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line);
+  }
+  .bar .row {
+    display: flex; align-items: center; gap: 16px;
+    padding: 10px 20px; max-width: 1180px; margin: 0 auto;
+    flex-wrap: wrap;
+  }
+  .brand { display: flex; align-items: center; gap: 9px; font-weight: 650; letter-spacing: .2px; }
+  .brand .dot { width: 11px; height: 11px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 4px oklch(78% 0.15 155 / 0.18); }
+  .brand small { color: var(--ink-faint); font-weight: 500; font-size: 12px; }
+  .bar nav { margin-left: auto; display: flex; gap: 18px; flex-wrap: wrap; }
+  .bar nav a { color: var(--ink-dim); font-size: 14px; }
+  .bar nav a:hover { color: var(--ink); }
+  .pill {
+    font-family: var(--mono); font-size: 11.5px; letter-spacing: .3px;
+    border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px;
+    color: var(--ink-dim);
+  }
+
+  /* ----- hero / live incident console ----- */
+  .hero { padding: 46px 0 26px; }
+  .hero h1 {
+    font-size: clamp(28px, 4.4vw, 46px);
+    line-height: 1.08; margin: 0 0 14px; letter-spacing: -0.4px; max-width: 18ch;
+  }
+  .hero h1 em { font-style: normal; color: var(--recall); }
+  .lede { font-size: clamp(16px, 1.9vw, 19px); color: var(--ink-dim); max-width: 60ch; margin: 0 0 6px; }
+  .lede b { color: var(--ink); font-weight: 600; }
+  .hint { font-size: 13px; color: var(--ink-faint); margin: 14px 0 0; font-family: var(--mono); }
+
+  /* console grid */
+  .console {
+    display: grid;
+    grid-template-columns: 1.35fr 1fr;
+    gap: 18px;
+    margin-top: 30px;
+  }
+  @media (max-width: 880px) { .console { grid-template-columns: 1fr; } }
+
+  .panel {
+    background: var(--bg-panel);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+  .panel > .head {
+    display: flex; align-items: center; gap: 10px;
+    padding: 11px 14px; border-bottom: 1px solid var(--line);
+    background: oklch(23% 0.025 250);
+    font-size: 12.5px; letter-spacing: .4px; text-transform: uppercase; color: var(--ink-faint);
+    font-family: var(--mono);
+  }
+  .panel > .head .led { width: 8px; height: 8px; border-radius: 50%; }
+  .led.ok { background: var(--ok); } .led.warn { background: var(--warn); } .led.crit { background: var(--crit); }
+  .panel > .head .grow { margin-left: auto; text-transform: none; letter-spacing: 0; }
+
+  /* uptime / latency stat tiles */
+  .tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: var(--line); }
+  .tile { background: var(--bg-panel); padding: 13px 14px; }
+  .tile .k { font-size: 11px; color: var(--ink-faint); text-transform: uppercase; letter-spacing: .5px; }
+  .tile .v { font-family: var(--mono); font-size: 22px; margin-top: 4px; font-variant-numeric: tabular-nums; }
+  .tile .v.ok { color: var(--ok); } .tile .v.warn { color: var(--warn); } .tile .v.crit { color: var(--crit); }
+  .tile .sub { font-size: 11px; color: var(--ink-faint); margin-top: 2px; font-family: var(--mono); }
+
+  /* the live incident feed */
+  .feed { padding: 6px 0; min-height: 250px; }
+  .feed .line {
+    display: grid; grid-template-columns: 64px 16px 1fr; gap: 8px;
+    padding: 7px 14px; font-family: var(--mono); font-size: 13px;
+    border-left: 2px solid transparent;
+    opacity: 0; transform: translateY(4px);
+    animation: lineIn .45s ease forwards;
+  }
+  @keyframes lineIn { to { opacity: 1; transform: none; } }
+  .feed .line .t { color: var(--ink-faint); font-variant-numeric: tabular-nums; }
+  .feed .line .sev { font-weight: 700; }
+  .feed .line.info .sev { color: var(--accent); }
+  .feed .line.warn { border-left-color: var(--warn); } .feed .line.warn .sev { color: var(--warn); }
+  .feed .line.crit { border-left-color: var(--crit); background: oklch(70% 0.19 25 / 0.07); } .feed .line.crit .sev { color: var(--crit); }
+  .feed .line .msg b { color: var(--ink); font-weight: 600; }
+
+  /* ----- the recall column: memory that ARRIVES ----- */
+  .recall-col { display: flex; flex-direction: column; }
+  .recall-head .grow { color: var(--recall); }
+  .recall-stage { padding: 10px; flex: 1; display: flex; flex-direction: column; gap: 10px; min-height: 250px; }
+  .recall-empty { color: var(--ink-faint); font-family: var(--mono); font-size: 12.5px; padding: 14px; line-height: 1.7; }
+
+  .memory {
+    position: relative;
+    background: var(--bg-raised);
+    border: 1px solid oklch(55% 0.10 285 / 0.5);
+    border-left: 3px solid var(--recall);
+    border-radius: 8px;
+    padding: 12px 13px 13px;
+    opacity: 0;
+    transform: translateY(10px) scale(.985);
+    animation: surface .9s cubic-bezier(.16,.84,.36,1) forwards;
+    box-shadow: 0 6px 22px oklch(0% 0 0 / 0.28);
+  }
+  @keyframes surface {
+    0%   { opacity: 0; transform: translateY(14px) scale(.97); filter: blur(3px); }
+    55%  { opacity: 1; }
+    100% { opacity: 1; transform: none; filter: none; }
+  }
+  .memory.fade { animation: sink .8s ease forwards; }
+  @keyframes sink { to { opacity: .28; transform: translateY(-4px) scale(.99); filter: saturate(.5); } }
+
+  .memory .tag {
+    display: inline-block; font-family: var(--mono); font-size: 10.5px;
+    color: var(--recall); letter-spacing: .4px; text-transform: uppercase;
+    border: 1px solid oklch(55% 0.10 285 / 0.5); border-radius: 999px; padding: 1px 8px;
+    margin-bottom: 7px;
+  }
+  .memory .why {
+    font-size: 11.5px; color: var(--recall-dim); font-family: var(--mono);
+    margin-bottom: 6px; display: flex; align-items: baseline; gap: 6px;
+  }
+  .memory .why .arrow { color: var(--recall); }
+  .memory .ttl { font-weight: 650; font-size: 14.5px; margin: 0 0 4px; }
+  .memory .body { font-size: 13px; color: var(--ink-dim); margin: 0; }
+  .memory .meta { margin-top: 9px; font-family: var(--mono); font-size: 11px; color: var(--ink-faint); display: flex; gap: 12px; flex-wrap: wrap; }
+  .memory .sim { color: var(--recall); }
+
+  .live-note {
+    font-size: 12px; color: var(--ink-faint); text-align: center;
+    padding: 8px; font-family: var(--mono);
+  }
+  .live-note .blink { color: var(--recall); animation: blink 1.8s steps(2) infinite; }
+  @keyframes blink { 50% { opacity: .25; } }
+
+  /* ----- sections ----- */
+  section.block { padding: 40px 0; border-top: 1px solid var(--line); }
+  section.block h2 { font-size: clamp(20px, 3vw, 28px); margin: 0 0 6px; letter-spacing: -0.3px; }
+  section.block .kicker { font-family: var(--mono); font-size: 12px; color: var(--recall-dim); letter-spacing: .6px; text-transform: uppercase; margin: 0 0 14px; }
+  section.block p.intro { color: var(--ink-dim); max-width: 66ch; margin: 0 0 24px; }
+
+  .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  @media (max-width: 800px) { .grid3 { grid-template-columns: 1fr; } }
+  .card { background: var(--bg-panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; }
+  .card h3 { margin: 0 0 6px; font-size: 15px; display: flex; align-items: center; gap: 8px; }
+  .card p { margin: 0; color: var(--ink-dim); font-size: 13.5px; }
+  .card .ico { width: 20px; height: 20px; flex: none; }
+
+  /* surfaces table */
+  table.surfaces { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  table.surfaces th, table.surfaces td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  table.surfaces th { color: var(--ink-faint); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .4px; }
+  table.surfaces td:first-child { font-family: var(--mono); color: var(--ink); white-space: nowrap; }
+  table.surfaces td { color: var(--ink-dim); }
+
+  /* agent / runbook block */
+  .runbook {
+    background: var(--bg-panel); border: 1px solid var(--line); border-radius: var(--radius);
+    overflow: hidden;
+  }
+  .runbook .rb-head { padding: 10px 14px; border-bottom: 1px solid var(--line); font-family: var(--mono); font-size: 12px; color: var(--ink-faint); background: oklch(23% 0.025 250); display: flex; align-items: center; gap: 8px; }
+  .runbook pre { margin: 0; padding: 16px; overflow-x: auto; font-family: var(--mono); font-size: 13px; line-height: 1.7; color: var(--ink-dim); }
+  .runbook pre .c { color: var(--ink-faint); } .runbook pre .p { color: var(--ok); } .runbook pre .v { color: var(--accent); }
+
+  /* cta */
+  .cta-row { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 22px; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 8px;
+    border-radius: 9px; padding: 11px 18px; font-size: 14px; font-weight: 600;
+    border: 1px solid var(--line); color: var(--ink); background: var(--bg-raised);
+  }
+  .btn.primary { background: var(--accent); color: oklch(18% 0.02 250); border-color: transparent; }
+  .btn.primary:hover { text-decoration: none; filter: brightness(1.06); }
+  .btn:hover { text-decoration: none; border-color: var(--ink-faint); }
+
+  footer { border-top: 1px solid var(--line); padding: 28px 0 50px; color: var(--ink-faint); font-size: 13px; }
+  footer .frow { display: flex; gap: 26px; flex-wrap: wrap; align-items: center; }
+  footer a { color: var(--ink-dim); }
+  footer .note { margin-top: 14px; max-width: 70ch; line-height: 1.6; }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition: none !important; scroll-behavior: auto !important; }
+    .memory { opacity: 1 !important; transform: none !important; filter: none !important; }
+    .feed .line { opacity: 1 !important; transform: none !important; }
+    .live-note .blink { animation: none; }
+  }
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="bar">
+  <div class="row">
+    <span class="brand">
+      <span class="dot" aria-hidden="true"></span>
+      Memex
+      <small>on-call memory · Vector Space Day 2026</small>
+    </span>
+    <span class="pill" aria-hidden="true">LLM-free at runtime</span>
+    <nav aria-label="Primary">
+      <a href="#how">How it surfaces</a>
+      <a href="#surfaces">Surfaces</a>
+      <a href="#agent">Agent / MCP</a>
+      <a href="https://github.com/Two-Weeks-Team/memex">Repo</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+
+  <!-- HERO: a live incident console where the past arrives on its own -->
+  <div class="wrap hero">
+    <h1>The fix you wrote six months ago <em>comes back to you</em> mid-incident.</h1>
+    <p class="lede">
+      Twenty years on call teaches one thing: you never remember the runbook on your own
+      schedule — it returns <b>the moment the situation calls for it</b>. Memex watches the
+      context unfold and lets the relevant past <b>surface by itself</b>. You didn't search.
+      You didn't hover. It arrived.
+    </p>
+    <p class="hint" aria-hidden="true">// watch the right-hand column. nobody is touching the keyboard.</p>
+
+    <div class="console" role="region" aria-label="Simulated on-call console">
+      <!-- LEFT: the evolving incident -->
+      <div class="panel">
+        <div class="head">
+          <span class="led crit" id="board-led" aria-hidden="true"></span>
+          service: auth-gateway
+          <span class="grow" id="board-clock">live</span>
+        </div>
+        <div class="tiles">
+          <div class="tile">
+            <div class="k">Uptime (30d)</div>
+            <div class="v ok">99.94%</div>
+            <div class="sub">err-budget 41% left</div>
+          </div>
+          <div class="tile">
+            <div class="k">p99 latency</div>
+            <div class="v warn" id="lat">312ms</div>
+            <div class="sub" id="lat-sub">+ rising</div>
+          </div>
+          <div class="tile">
+            <div class="k">5xx rate</div>
+            <div class="v crit" id="err">2.7%</div>
+            <div class="sub" id="err-sub">retry storm</div>
+          </div>
+        </div>
+        <div class="feed" id="feed" aria-live="off" aria-label="Incident timeline"></div>
+      </div>
+
+      <!-- RIGHT: memory that arises unbidden -->
+      <div class="panel recall-col">
+        <div class="head recall-head">
+          <span class="led" style="background: var(--recall);" aria-hidden="true"></span>
+          recall
+          <span class="grow">arriving on its own</span>
+        </div>
+        <div class="recall-stage" id="stage" aria-live="polite" aria-label="Memories that surfaced">
+          <p class="recall-empty" id="empty">
+            Nothing forced. As the incident below evolves, fragments of your own past
+            sessions rise here — the ones the moment evokes.
+          </p>
+        </div>
+        <div class="live-note" aria-hidden="true">
+          <span class="blink">●</span> associative recall · context-triggered
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- HOW IT SURFACES -->
+  <section class="block" id="how">
+    <div class="wrap">
+      <p class="kicker">why it feels involuntary</p>
+      <h2>It isn't search. The situation calls the memory up.</h2>
+      <p class="intro">
+        A search box waits for you to know what you've forgotten — which, mid-incident at 3am,
+        you don't. Memex works the other way around. The live context becomes a query you never
+        typed, and the nearest pieces of your own history surface on their own cadence.
+      </p>
+      <div class="grid3">
+        <div class="card">
+          <h3>
+            <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="oklch(80% 0.13 285)" stroke-width="1.7" aria-hidden="true"><path d="M12 3v6m0 0a3 3 0 1 0 0 6 3 3 0 0 0 0-6Zm0 6v6M5 12H3m18 0h-2"/></svg>
+            Context becomes the query
+          </h3>
+          <p>The error text, the failing service, the stack you're staring at — all of it is
+          embedded and matched against your corpus by similarity. No keywords to guess.</p>
+        </div>
+        <div class="card">
+          <h3>
+            <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="oklch(80% 0.13 285)" stroke-width="1.7" aria-hidden="true"><path d="M4 18c4-9 12-9 16 0M4 9c4 6 12 6 16 0"/></svg>
+            Associative trails, not folders
+          </h3>
+          <p>Vannevar Bush's 1945 idea: move through memory by association. Qdrant holds the
+          vectors; the trail from "now" to "that time before" is distance, not a filename.</p>
+        </div>
+        <div class="card">
+          <h3>
+            <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="oklch(80% 0.13 285)" stroke-width="1.7" aria-hidden="true"><path d="M12 8v4l3 2m6-2a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"/></svg>
+            On its own timing
+          </h3>
+          <p>Proactive Recall pushes the relevant fragment when the moment evokes it — irregular,
+          lifelike, unbidden. You're the recipient, not the seeker.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- WHAT IT ACTUALLY IS -->
+  <section class="block" id="surfaces">
+    <div class="wrap">
+      <p class="kicker">the corpus you own</p>
+      <h2>Your Claude Code &amp; Codex history, made navigable.</h2>
+      <p class="intro">
+        Claude Code silently migrates and deletes old sessions. Memex reads
+        <code style="font-family:var(--mono);color:var(--accent)">~/.claude/projects/**/*.jsonl</code>
+        (plus legacy transcripts and <code style="font-family:var(--mono);color:var(--accent)">history.jsonl</code>),
+        embeds it into Qdrant, and gives you a handful of ways to move through it by similarity
+        instead of keywords. No model runs at query time.
+      </p>
+      <table class="surfaces">
+        <thead><tr><th>Surface</th><th>What it does</th></tr></thead>
+        <tbody>
+          <tr><td>Proactive Recall</td><td>Pushes the relevant past fragment when the current context evokes it — the autonomous arrival you just watched.</td></tr>
+          <tr><td>Lens</td><td>Named-vector weighted search across the corpus when you <em>do</em> want to steer.</td></tr>
+          <tr><td>Topology</td><td>Distance-matrix → minimum-spanning-tree graph of how your sessions relate.</td></tr>
+          <tr><td>Time Machine</td><td>Replay a past session in sequence — step back into the night you fixed it.</td></tr>
+          <tr><td>Mix / Discovery</td><td>Positive/negative recommendation: "more like this, less like that."</td></tr>
+          <tr><td>Companion / Wrapped / Loop Breaker</td><td>The agent-memory layer — catches repeated dead-ends and recurring patterns over time.</td></tr>
+          <tr><td>Dashboard</td><td>The standing board: corpus size, recent activity, collection health.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- AGENT / MCP -->
+  <section class="block" id="agent">
+    <div class="wrap">
+      <p class="kicker">put it where you already work</p>
+      <h2>Recall inside the agent — 11 MCP tools over stdio + HTTP.</h2>
+      <p class="intro">
+        The same recall runs as an MCP server, so your agent in Claude Code, Codex, or Cursor
+        can pull from your past sessions while it works. A server/Docker variant bundles Qdrant +
+        web UI + MCP into one image for a box you control.
+      </p>
+      <div class="runbook" role="group" aria-label="Setup commands">
+        <div class="rb-head"><span class="led ok" aria-hidden="true"></span> setup.sh — copy/paste</div>
+        <pre><span class="c"># add Memex as an MCP server to your agent</span>
+<span class="p">claude</span> mcp add memex -- <span class="v">memex-mcp</span>
+
+<span class="c"># or run the all-in-one server variant (Qdrant + web + MCP)</span>
+<span class="p">docker</span> run -p <span class="v">8080:8080</span> ghcr.io/two-weeks-team/memex
+
+<span class="c"># 11 tools become available to the agent over stdio + HTTP</span>
+<span class="c"># recall, lens, topology, mix, time-machine, … — no LLM at query time</span></pre>
+      </div>
+      <div class="cta-row">
+        <a class="btn primary" href="https://two-weeks-team.github.io/memex/">Open the live landing</a>
+        <a class="btn" href="https://github.com/Two-Weeks-Team/memex">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8a8 8 0 0 0 5.47 7.59c.4.07.55-.17.55-.38v-1.34c-2.23.49-2.7-1.07-2.7-1.07-.36-.93-.89-1.18-.89-1.18-.73-.5.05-.49.05-.49.81.06 1.23.83 1.23.83.72 1.23 1.88.87 2.34.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.83-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.6 7.6 0 0 1 4 0c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.52.56.83 1.28.83 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48v2.2c0 .21.15.46.55.38A8 8 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
+          View the repo
+        </a>
+        <a class="btn" href="https://github.com/Two-Weeks-Team/memex#docker">Server / Docker variant</a>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="frow">
+      <span class="brand"><span class="dot" aria-hidden="true"></span> Memex</span>
+      <a href="https://github.com/Two-Weeks-Team/memex">github.com/Two-Weeks-Team/memex</a>
+      <a href="https://two-weeks-team.github.io/memex/">two-weeks-team.github.io/memex</a>
+      <a href="#agent">MCP integration</a>
+    </div>
+    <p class="note">
+      Built for Qdrant Vector Space Day 2026 — "Think Outside the Bot." Memex is a non-chatbot,
+      LLM-free-at-runtime tool over the session history you own. The incident above is a scripted
+      illustration of how Proactive Recall behaves; it is not live telemetry.
+    </p>
+  </div>
+</footer>
+
+<script>
+(function () {
+  "use strict";
+
+  var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  var feed  = document.getElementById("feed");
+  var stage = document.getElementById("stage");
+  var empty = document.getElementById("empty");
+  var boardLed = document.getElementById("board-led");
+  var clock = document.getElementById("board-clock");
+  var latEl = document.getElementById("lat");
+  var errEl = document.getElementById("err");
+
+  // ---- the scripted incident: log lines arrive on their own ----
+  // each step may carry a memory that surfaces BECAUSE the situation evoked it.
+  var script = [
+    { at: 0,    cls: "info", sev: "INFO", msg: "Deploy <b>auth-gateway v2.14.0</b> rolled out to prod." },
+    { at: 1400, cls: "info", sev: "INFO", msg: "Canary healthy. Promoting to 100%." },
+    { at: 3000, cls: "warn", sev: "WARN", msg: "p99 latency on <b>/token/refresh</b> climbing — 180ms → 312ms.",
+      lat: "312ms",
+      mem: {
+        tag: "session · 2025-11-14",
+        why: "/token/refresh latency",
+        ttl: "You traced this exact endpoint before",
+        body: "“refresh slow under load — connection pool exhausted, not the DB. Bumped pool 20→60, latency dropped back.”",
+        sim: "0.89", src: "claude/auth-svc · 41 msgs"
+      }
+    },
+    { at: 5200, cls: "crit", sev: "CRIT", msg: "5xx rate on auth-gateway spikes to <b>2.7%</b>. Clients retrying.", err: "2.7%" },
+    { at: 6800, cls: "crit", sev: "CRIT", msg: "Downstream <b>session-store</b> reporting connection refused.",
+      mem: {
+        tag: "session · 2025-08-02",
+        why: "retry storm + session-store",
+        ttl: "A retry storm took this same path down",
+        body: "“thundering-herd on session-store after a deploy. Fix wasn’t the store — it was the missing jittered backoff in the gateway client.”",
+        sim: "0.93", src: "codex/incident-0802 · 67 msgs"
+      }
+    },
+    { at: 9000, cls: "info", sev: "INFO", msg: "On-call: checking gateway retry config…" },
+    { at: 10200, cls: "warn", sev: "WARN", msg: "Config diff: <b>retry.backoff = fixed</b> (expected: exponential+jitter).",
+      mem: {
+        tag: "runbook · pinned 2025-08-03",
+        why: "the fix you wrote after last time",
+        ttl: "The runbook you wrote the morning after",
+        body: "“RUNBOOK: gateway retry must be exponential + jitter. Set retry.backoff=expo, jitter=full, cap=2s. This prevents the herd. — written so I’d never debug it cold again.”",
+        sim: "0.95", src: "claude/runbooks · pinned"
+      }
+    },
+    { at: 13000, cls: "info", sev: "INFO", msg: "Applied <b>retry.backoff=expo, jitter=full</b>. 5xx falling: 2.7% → 0.4%.", err: "0.4%", clearErr: true },
+    { at: 14600, cls: "info", sev: "INFO", msg: "p99 recovering — 312ms → 190ms. Incident stabilizing.", lat: "190ms", clearLat: true }
+  ];
+
+  function pad(n){ return (n < 10 ? "0" : "") + n; }
+  function stamp(ms){
+    // a fake but consistent 03:1x clock
+    var base = 3 * 3600 + 11 * 60; // 03:11:00
+    var t = base + Math.floor(ms / 1000);
+    return pad(Math.floor(t/3600)%24) + ":" + pad(Math.floor(t/60)%60) + ":" + pad(t%60);
+  }
+
+  function addLine(step) {
+    var el = document.createElement("div");
+    el.className = "line " + step.cls;
+    el.innerHTML =
+      '<span class="t">' + stamp(step.at) + '</span>' +
+      '<span class="sev">' + (step.cls === "crit" ? "✕" : step.cls === "warn" ? "▲" : "·") + '</span>' +
+      '<span class="msg">' + step.msg + '</span>';
+    if (reduce) { el.style.animation = "none"; el.style.opacity = "1"; el.style.transform = "none"; }
+    feed.appendChild(el);
+    feed.scrollTop = feed.scrollHeight;
+
+    if (step.lat) latEl.textContent = step.lat;
+    if (step.err) errEl.textContent = step.err;
+    if (step.clearErr) { errEl.className = "v ok"; boardLed.className = "led ok"; }
+    if (step.clearLat) { latEl.className = "v ok"; }
+  }
+
+  function dimOlder() {
+    var cards = stage.querySelectorAll(".memory:not(.fade)");
+    // keep the two most recent vivid; gently sink the rest
+    for (var i = 0; i < cards.length - 1; i++) {
+      cards[i].classList.add("fade");
+    }
+  }
+
+  function surfaceMemory(m) {
+    if (empty && empty.parentNode) empty.parentNode.removeChild(empty), empty = null;
+    dimOlder();
+    var el = document.createElement("article");
+    el.className = "memory";
+    if (reduce) el.style.animation = "none";
+    el.innerHTML =
+      '<span class="tag">' + m.tag + '</span>' +
+      '<div class="why"><span class="arrow">↑ arose because</span> ' + m.why + '</div>' +
+      '<p class="ttl">' + m.ttl + '</p>' +
+      '<p class="body">' + m.body + '</p>' +
+      '<div class="meta"><span class="sim">similarity ' + m.sim + '</span><span>' + m.src + '</span></div>';
+    stage.appendChild(el);
+    // trim very old fully-faded cards so the stage doesn't grow unbounded
+    var faded = stage.querySelectorAll(".memory.fade");
+    if (faded.length > 2) faded[0].parentNode.removeChild(faded[0]);
+  }
+
+  var idx = 0, start = null, raf;
+  function run(ts) {
+    if (start === null) start = ts;
+    var elapsed = ts - start;
+    while (idx < script.length && script[idx].at <= elapsed) {
+      var step = script[idx];
+      addLine(step);
+      if (step.mem) surfaceMemory(step.mem);
+      idx++;
+    }
+    if (idx < script.length) {
+      raf = requestAnimationFrame(run);
+    } else {
+      // brief pause, then loop the night again
+      clock.textContent = "stabilized · replaying";
+      setTimeout(reset, 6000);
+    }
+  }
+
+  function reset() {
+    cancelAnimationFrame(raf);
+    feed.innerHTML = "";
+    stage.innerHTML = '<p class="recall-empty" id="empty">Nothing forced. As the incident below evolves, fragments of your own past sessions rise here — the ones the moment evokes.</p>';
+    empty = document.getElementById("empty");
+    latEl.textContent = "312ms"; latEl.className = "v warn";
+    errEl.textContent = "2.7%"; errEl.className = "v crit";
+    boardLed.className = "led crit";
+    clock.textContent = "live";
+    idx = 0; start = null;
+    raf = requestAnimationFrame(run);
+  }
+
+  // Only animate when the console is on screen; pause when it isn't (respect attention + battery).
+  var consoleEl = document.querySelector(".console");
+  var started = false;
+  function begin(){ if (!started) { started = true; raf = requestAnimationFrame(run); } }
+
+  if ("IntersectionObserver" in window) {
+    var io = new IntersectionObserver(function(entries){
+      entries.forEach(function(e){ if (e.isIntersecting) begin(); });
+    }, { threshold: 0.25 });
+    io.observe(consoleEl);
+  } else {
+    begin();
+  }
+})();
+</script>
+</body>
+</html>

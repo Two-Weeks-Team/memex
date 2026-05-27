@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Memex — the thought is already rising</title>
+<style>
+  :root {
+    --bg: oklch(16% 0.02 265);
+    --bg-soft: oklch(21% 0.03 265);
+    --ink: oklch(94% 0.01 265);
+    --ink-dim: oklch(70% 0.02 265);
+    --ink-faint: oklch(54% 0.02 265);
+    --accent: oklch(78% 0.16 200);
+    --accent-soft: oklch(78% 0.16 200 / 0.16);
+    --rise: oklch(82% 0.14 150);
+    --line: oklch(30% 0.02 265);
+    --focus: oklch(88% 0.18 95);
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, sans-serif;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--accent); }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 0 24px; }
+
+  /* ---- the autonomous stage ---- */
+  .stage {
+    min-height: 100svh;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding: 56px 0 48px;
+  }
+  .kicker {
+    font-size: 0.78rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    margin: 0 0 18px;
+  }
+  h1 {
+    font-size: clamp(2rem, 6vw, 3.1rem);
+    line-height: 1.08;
+    letter-spacing: -0.02em;
+    margin: 0 0 14px;
+    font-weight: 650;
+  }
+  .lede {
+    font-size: clamp(1.05rem, 2.4vw, 1.25rem);
+    color: var(--ink-dim);
+    margin: 0 0 36px;
+    max-width: 56ch;
+  }
+
+  /* the live "moment" panel — the page is doing the recalling, not you */
+  .console {
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: linear-gradient(180deg, var(--bg-soft), var(--bg));
+    padding: 22px 22px 18px;
+    position: relative;
+    overflow: hidden;
+  }
+  .console::before {
+    content: "";
+    position: absolute; inset: 0;
+    background: radial-gradient(120% 80% at 80% 0%, var(--accent-soft), transparent 60%);
+    pointer-events: none;
+  }
+  .now-row {
+    display: flex; align-items: center; gap: 10px;
+    font-size: 0.78rem; color: var(--ink-faint);
+    letter-spacing: 0.06em; text-transform: uppercase;
+    margin-bottom: 10px;
+  }
+  .pulse {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 0 0 var(--accent-soft);
+    animation: pulse 2.4s ease-out infinite;
+  }
+  @keyframes pulse {
+    0% { box-shadow: 0 0 0 0 oklch(78% 0.16 200 / 0.5); }
+    70% { box-shadow: 0 0 0 12px oklch(78% 0.16 200 / 0); }
+    100% { box-shadow: 0 0 0 0 oklch(78% 0.16 200 / 0); }
+  }
+  .now-line {
+    font-size: 1.08rem;
+    color: var(--ink);
+    margin: 0 0 4px;
+    min-height: 1.6em;
+  }
+  .now-cursor {
+    display: inline-block; width: 0.6ch;
+    background: var(--accent); color: transparent;
+    animation: blink 1.1s step-end infinite;
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  .divider {
+    margin: 18px 0 4px;
+    font-size: 0.72rem; letter-spacing: 0.12em; text-transform: uppercase;
+    color: var(--ink-faint);
+    display: flex; align-items: center; gap: 10px;
+  }
+  .divider::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+
+  /* recalled memories rise on their own */
+  .recall-stack { position: relative; min-height: 132px; margin-top: 6px; }
+  .memory {
+    border-left: 2px solid var(--rise);
+    background: oklch(82% 0.14 150 / 0.06);
+    border-radius: 0 8px 8px 0;
+    padding: 10px 14px;
+    margin-bottom: 10px;
+    opacity: 0;
+    transform: translateY(10px);
+    transition: opacity 0.7s ease, transform 0.7s ease;
+  }
+  .memory.risen { opacity: 1; transform: translateY(0); }
+  .memory .when { font-size: 0.72rem; color: var(--ink-faint); letter-spacing: 0.04em; }
+  .memory .what { font-size: 0.97rem; color: var(--ink); margin-top: 2px; }
+  .memory .what b { color: var(--rise); font-weight: 600; }
+
+  .unbidden-note {
+    margin: 22px 0 0;
+    font-size: 0.9rem;
+    color: var(--ink-faint);
+    font-style: italic;
+  }
+
+  /* ---- single CTA ---- */
+  .cta-row {
+    margin-top: 34px;
+    display: flex; flex-wrap: wrap; gap: 12px; align-items: center;
+  }
+  .btn {
+    display: inline-flex; align-items: center; gap: 8px;
+    background: var(--accent);
+    color: oklch(16% 0.02 265);
+    text-decoration: none;
+    font-weight: 600;
+    padding: 12px 20px;
+    border-radius: 10px;
+    font-size: 0.98rem;
+  }
+  .btn:hover { background: oklch(83% 0.16 200); }
+  .btn svg { width: 18px; height: 18px; }
+  .btn-ghost {
+    background: transparent;
+    color: var(--ink);
+    border: 1px solid var(--line);
+  }
+  .btn-ghost:hover { border-color: var(--ink-faint); }
+
+  /* ---- thin support section (kept minimal, speed-first) ---- */
+  .support { border-top: 1px solid var(--line); padding: 44px 0 64px; }
+  .support h2 {
+    font-size: 1.15rem; margin: 0 0 18px; font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+  .facts { display: grid; gap: 16px; grid-template-columns: 1fr; }
+  @media (min-width: 620px) { .facts { grid-template-columns: 1fr 1fr; } }
+  .fact { font-size: 0.94rem; color: var(--ink-dim); }
+  .fact b { color: var(--ink); display: block; margin-bottom: 2px; font-weight: 600; }
+  .fact code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    background: var(--bg-soft);
+    border: 1px solid var(--line);
+    border-radius: 5px;
+    padding: 1px 6px;
+    font-size: 0.85em;
+    color: var(--accent);
+  }
+  .links { margin-top: 26px; font-size: 0.92rem; display: flex; flex-wrap: wrap; gap: 18px; }
+  footer {
+    border-top: 1px solid var(--line);
+    padding: 22px 0 40px;
+    font-size: 0.82rem; color: var(--ink-faint);
+  }
+  footer a { color: var(--ink-dim); }
+
+  :focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; border-radius: 6px; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .pulse, .now-cursor { animation: none; }
+    .memory { transition: opacity 0.2s ease; transform: none; }
+    .memory.risen { transform: none; }
+    html { scroll-behavior: auto; }
+  }
+</style>
+</head>
+<body>
+
+  <main class="stage">
+    <div class="wrap">
+      <p class="kicker">Memex · associative memory for your AI sessions</p>
+      <h1>You didn't go looking.<br>The thought is already rising.</h1>
+      <p class="lede">
+        You don't document every memory. Yet the moment a situation arrives, the relevant
+        past thought surfaces on its own — before you finish forming the question.
+      </p>
+
+      <!-- The page is the one recalling. The visitor only watches it happen. -->
+      <section class="console" aria-label="A live look at recall arriving on its own">
+        <div class="now-row">
+          <span class="pulse" aria-hidden="true"></span>
+          <span>right now, you're working on…</span>
+        </div>
+        <p class="now-line" id="nowLine" aria-live="off"></p>
+
+        <div class="divider" id="rises" aria-hidden="true">surfacing on its own</div>
+
+        <div class="recall-stack" id="recallStack" aria-live="polite" aria-atomic="false">
+          <!-- memories injected by script as they rise -->
+        </div>
+
+        <p class="unbidden-note" id="note">No search box. You didn't ask. It came to you.</p>
+      </section>
+
+      <div class="cta-row">
+        <a class="btn" href="https://github.com/Two-Weeks-Team/memex">
+          <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+            <path d="M8 0a8 8 0 0 0-2.53 15.59c.4.07.55-.17.55-.38v-1.34c-2.23.49-2.7-1.07-2.7-1.07-.36-.93-.89-1.18-.89-1.18-.73-.5.05-.49.05-.49.8.06 1.23.83 1.23.83.71 1.23 1.87.87 2.33.67.07-.52.28-.87.5-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.83-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.6 7.6 0 0 1 4 0c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.52.56.83 1.28.83 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48v2.2c0 .21.15.46.55.38A8 8 0 0 0 8 0Z"/>
+          </svg>
+          Get Memex on GitHub
+        </a>
+        <a class="btn btn-ghost" href="https://two-weeks-team.github.io/memex/">See the live landing</a>
+      </div>
+    </div>
+  </main>
+
+  <section class="support">
+    <div class="wrap">
+      <h2>What is actually happening underneath</h2>
+      <div class="facts">
+        <p class="fact"><b>Your own corpus</b>It reads your Claude Code / Codex session history (<code>~/.claude/projects/**/*.jsonl</code>) and keeps a corpus you own — even after Claude Code migrates or deletes old sessions.</p>
+        <p class="fact"><b>Moved by similarity, not keywords</b>History becomes navigable space backed by Qdrant: Time Machine replay, Lens, Topology graph, Mix/Discovery, and proactive Recall.</p>
+        <p class="fact"><b>No LLM at runtime</b>Not a chatbot. The surfacing above is associative retrieval over vectors — no model call when a memory rises.</p>
+        <p class="fact"><b>Lives inside your agent</b>11 MCP tools over stdio + HTTP. Add it with <code>claude mcp add</code>; a server/Docker image runs Qdrant + web + MCP together.</p>
+      </div>
+      <div class="links">
+        <a href="https://github.com/Two-Weeks-Team/memex">Repository</a>
+        <a href="https://two-weeks-team.github.io/memex/">Live landing</a>
+        <a href="https://github.com/Two-Weeks-Team/memex#docker">Server / Docker variant</a>
+        <a href="https://github.com/Two-Weeks-Team/memex#mcp">MCP agent integration</a>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <div class="wrap">
+      Built for <a href="https://qdrant.tech">Qdrant Vector Space Day 2026</a> — "Think Outside the Bot."
+      After Vannevar Bush's 1945 <em>Memex</em> and its associative trails.
+    </div>
+  </footer>
+
+<script>
+(function () {
+  var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // Each scene = a *current situation* the page presents, and the past thoughts
+  // that rise unbidden because the moment called them up. The visitor never asks.
+  var scenes = [
+    {
+      now: "debugging an auth retry loop that 401s on refresh…",
+      memories: [
+        { when: "6 weeks ago · proj/api", what: "you fixed this exact thing — the refresh token was <b>cached before rotation</b>." },
+        { when: "3 months ago · notes", what: "\"<b>clock skew</b> can also fake a 401 — check the iat tolerance.\"" }
+      ]
+    },
+    {
+      now: "writing a migration and wondering about rollback…",
+      memories: [
+        { when: "last month · proj/db", what: "your past self left a note: \"<b>always wrap the backfill</b> in a separate, idempotent step.\"" },
+        { when: "9 weeks ago · review", what: "the migration that bit you had <b>no down() path</b>." }
+      ]
+    },
+    {
+      now: "naming a new vector collection in Qdrant…",
+      memories: [
+        { when: "2 weeks ago · proj/memex", what: "you already settled the schema — <b>named vectors per lens</b>, cosine distance." },
+        { when: "last week · chat", what: "\"don't re-embed on every run — <b>cache by content hash</b>.\"" }
+      ]
+    }
+  ];
+
+  var nowLine = document.getElementById('nowLine');
+  var stack = document.getElementById('recallStack');
+  var sceneIndex = -1;
+  var timers = [];
+
+  function clearTimers() { timers.forEach(clearTimeout); timers = []; }
+
+  function typeNow(text, done) {
+    if (reduce) { nowLine.textContent = text; done(); return; }
+    nowLine.innerHTML = '';
+    var i = 0;
+    var cursor = document.createElement('span');
+    cursor.className = 'now-cursor';
+    cursor.textContent = '.';
+    nowLine.appendChild(document.createTextNode(''));
+    nowLine.appendChild(cursor);
+    (function step() {
+      if (i < text.length) {
+        nowLine.firstChild.textContent += text.charAt(i++);
+        // irregular, lifelike typing cadence
+        var d = 26 + Math.random() * 70;
+        if (text.charAt(i - 1) === ' ') d += Math.random() * 40;
+        timers.push(setTimeout(step, d));
+      } else {
+        timers.push(setTimeout(function () {
+          if (cursor.parentNode) cursor.parentNode.removeChild(cursor);
+          done();
+        }, 420));
+      }
+    })();
+  }
+
+  function riseMemories(memories) {
+    stack.innerHTML = '';
+    memories.forEach(function (m, idx) {
+      var el = document.createElement('div');
+      el.className = 'memory';
+      el.innerHTML = '<div class="when">' + m.when + '</div><div class="what">' + m.what + '</div>';
+      stack.appendChild(el);
+      // they arrive on their own, staggered, not all at once
+      var delay = reduce ? 120 * idx : 650 + idx * (900 + Math.random() * 700);
+      timers.push(setTimeout(function () { el.classList.add('risen'); }, delay));
+    });
+  }
+
+  function nextScene() {
+    clearTimers();
+    sceneIndex = (sceneIndex + 1) % scenes.length;
+    var scene = scenes[sceneIndex];
+    typeNow(scene.now, function () {
+      riseMemories(scene.memories);
+      // hold, then the next moment arrives on its own
+      var hold = reduce ? 3200 : 5200 + scene.memories.length * 700;
+      timers.push(setTimeout(nextScene, hold));
+    });
+  }
+
+  nextScene();
+})();
+</script>
+</body>
+</html>

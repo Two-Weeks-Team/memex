@@ -1,0 +1,569 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Memex — recall by similarity, no model in the loop</title>
+<meta name="description" content="Memex turns your Claude Code / Codex history into a navigable associative memory backed by Qdrant. Past notes surface on their own — by vector distance, not by a language model.">
+<style>
+  :root{
+    --bg:        oklch(0.18 0.02 250);
+    --bg-2:      oklch(0.22 0.02 250);
+    --panel:     oklch(0.25 0.02 250);
+    --panel-2:   oklch(0.29 0.02 250);
+    --line:      oklch(0.40 0.02 250);
+    --line-soft: oklch(0.34 0.02 250);
+    --ink:       oklch(0.96 0.01 250);
+    --ink-dim:   oklch(0.75 0.02 250);
+    --ink-faint: oklch(0.60 0.02 250);
+    --accent:    oklch(0.72 0.13 215);
+    --accent-ink:oklch(0.18 0.04 215);
+    --ok:        oklch(0.78 0.14 150);
+    --warn:      oklch(0.80 0.13 85);
+    --radius:6px;
+    --maxw:1060px;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  @media (prefers-reduced-motion: reduce){html{scroll-behavior:auto}}
+  body{
+    margin:0;
+    background:var(--bg);
+    color:var(--ink);
+    font-family:system-ui,-apple-system,sans-serif;
+    line-height:1.55;
+    font-size:16px;
+    -webkit-font-smoothing:antialiased;
+  }
+  a{color:var(--accent);text-decoration:none}
+  a:hover{text-decoration:underline}
+  a:focus-visible,button:focus-visible{
+    outline:2px solid var(--accent);
+    outline-offset:2px;
+    border-radius:3px;
+  }
+  .wrap{max-width:var(--maxw);margin:0 auto;padding:0 20px}
+  .mono{font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace}
+
+  /* ---- top bar ---- */
+  header.top{
+    border-bottom:1px solid var(--line-soft);
+    background:var(--bg);
+    position:sticky;top:0;z-index:20;
+  }
+  .top .wrap{display:flex;align-items:center;gap:16px;height:56px}
+  .brand{display:flex;align-items:center;gap:9px;font-weight:600;letter-spacing:.2px}
+  .brand svg{display:block}
+  .top nav{margin-left:auto;display:flex;gap:18px;align-items:center}
+  .top nav a{color:var(--ink-dim);font-size:14px}
+  .top nav a:hover{color:var(--ink)}
+  .btn{
+    display:inline-block;border:1px solid var(--line);
+    background:var(--panel-2);color:var(--ink);
+    padding:8px 14px;border-radius:var(--radius);
+    font-size:14px;font-weight:600;cursor:pointer;
+  }
+  .btn:hover{background:var(--panel);text-decoration:none}
+  .btn.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+  .btn.primary:hover{background:oklch(0.78 0.13 215)}
+
+  /* ---- hero ---- */
+  .hero{padding:54px 0 30px;border-bottom:1px solid var(--line-soft)}
+  .pill{
+    display:inline-block;font-size:12px;letter-spacing:.4px;text-transform:uppercase;
+    color:var(--ink-dim);border:1px solid var(--line-soft);
+    padding:4px 10px;border-radius:999px;background:var(--bg-2);
+  }
+  .hero h1{font-size:clamp(28px,4.4vw,42px);line-height:1.12;margin:18px 0 12px;letter-spacing:-.5px}
+  .hero h1 em{font-style:normal;color:var(--accent)}
+  .hero p.lead{font-size:18px;color:var(--ink-dim);max-width:60ch;margin:0 0 22px}
+  .cta-row{display:flex;flex-wrap:wrap;gap:12px;align-items:center}
+  .note-line{font-size:13px;color:var(--ink-faint);margin-top:14px}
+
+  /* ---- the demo panel ---- */
+  .demo{padding:30px 0 8px}
+  .demo-grid{display:grid;grid-template-columns:1.1fr 1fr;gap:22px;align-items:start}
+  @media (max-width:840px){.demo-grid{grid-template-columns:1fr}}
+  .card{
+    background:var(--panel);border:1px solid var(--line-soft);
+    border-radius:var(--radius);overflow:hidden;
+  }
+  .card-head{
+    display:flex;align-items:center;gap:8px;
+    padding:10px 14px;border-bottom:1px solid var(--line-soft);
+    background:var(--panel-2);font-size:13px;color:var(--ink-dim);
+  }
+  .dot{width:9px;height:9px;border-radius:50%;background:var(--ink-faint)}
+  .dot.live{background:var(--ok)}
+  .card-body{padding:14px}
+
+  /* current context (left) */
+  .ctx-label{font-size:12px;text-transform:uppercase;letter-spacing:.4px;color:var(--ink-faint);margin:0 0 6px}
+  .ctx-line{
+    font-size:14px;background:var(--bg-2);border:1px solid var(--line-soft);
+    border-radius:var(--radius);padding:10px 12px;margin:0 0 10px;
+    min-height:44px;display:flex;align-items:center;
+  }
+  .ctx-line .mono{color:var(--ink)}
+  .typing{border-right:2px solid var(--accent);padding-right:2px}
+  @media (prefers-reduced-motion: reduce){.typing{border-right:none}}
+  .ctx-meta{font-size:12px;color:var(--ink-faint);display:flex;justify-content:space-between;gap:8px}
+
+  /* surfaced memories (right) */
+  .surfaced-head{display:flex;align-items:center;justify-content:space-between;margin:0 0 4px}
+  .surfaced-head h3{font-size:14px;margin:0;font-weight:600}
+  .surfaced-head .sub{font-size:12px;color:var(--ink-faint)}
+  #recallList{list-style:none;margin:0;padding:0;min-height:208px}
+  .recall{
+    border:1px solid var(--line-soft);border-radius:var(--radius);
+    background:var(--bg-2);padding:10px 12px;margin:0 0 9px;
+    opacity:0;transform:translateY(6px);
+    transition:opacity .45s ease, transform .45s ease;
+  }
+  .recall.show{opacity:1;transform:none}
+  @media (prefers-reduced-motion: reduce){
+    .recall{transition:none;transform:none}
+  }
+  .recall .r-top{display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-bottom:3px}
+  .recall .r-when{font-size:12px;color:var(--ink-faint)}
+  .recall .r-text{font-size:14px;color:var(--ink)}
+  .recall .r-why{
+    font-size:12px;color:var(--ink-dim);margin-top:6px;
+    display:flex;align-items:center;gap:8px;
+  }
+  /* deterministic similarity bar — the mechanism, shown */
+  .simbar{flex:1;height:6px;background:var(--panel-2);border-radius:3px;overflow:hidden;border:1px solid var(--line-soft)}
+  .simbar > i{display:block;height:100%;background:var(--accent)}
+  .simval{font-variant-numeric:tabular-nums;color:var(--ink-dim);min-width:46px;text-align:right}
+  .empty{color:var(--ink-faint);font-size:13px;padding:8px 0}
+
+  .why-strip{
+    margin-top:6px;font-size:12px;color:var(--ink-faint);
+    border-top:1px solid var(--line-soft);padding-top:10px;
+  }
+  .why-strip b{color:var(--ink-dim);font-weight:600}
+
+  /* ---- honest mechanism section ---- */
+  section{padding:46px 0;border-bottom:1px solid var(--line-soft)}
+  h2{font-size:24px;margin:0 0 6px;letter-spacing:-.3px}
+  .sec-sub{color:var(--ink-dim);max-width:64ch;margin:0 0 26px}
+  .steps{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+  @media (max-width:760px){.steps{grid-template-columns:1fr}}
+  .step{background:var(--panel);border:1px solid var(--line-soft);border-radius:var(--radius);padding:16px}
+  .step .n{font-size:12px;color:var(--accent);font-weight:700;letter-spacing:.5px}
+  .step h4{margin:6px 0 6px;font-size:15px}
+  .step p{margin:0;font-size:14px;color:var(--ink-dim)}
+  .nollm{
+    margin-top:24px;display:flex;gap:12px;align-items:flex-start;
+    background:var(--bg-2);border:1px solid var(--line-soft);
+    border-left:3px solid var(--ok);border-radius:var(--radius);padding:14px 16px;
+  }
+  .nollm svg{flex:none;margin-top:2px}
+  .nollm p{margin:0;font-size:14px;color:var(--ink-dim)}
+  .nollm b{color:var(--ink)}
+
+  /* ---- surfaces table ---- */
+  table.surf{width:100%;border-collapse:collapse;font-size:14px}
+  table.surf th,table.surf td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line-soft);vertical-align:top}
+  table.surf th{color:var(--ink-faint);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.4px}
+  table.surf td b{color:var(--ink)}
+  table.surf td span{color:var(--ink-dim)}
+
+  /* ---- agent / install ---- */
+  .two{display:grid;grid-template-columns:1fr 1fr;gap:22px}
+  @media (max-width:760px){.two{grid-template-columns:1fr}}
+  pre.code{
+    background:var(--bg-2);border:1px solid var(--line-soft);border-radius:var(--radius);
+    padding:14px;overflow:auto;font-size:13px;color:var(--ink);margin:0;
+  }
+  pre.code .c{color:var(--ink-faint)}
+  .factlist{list-style:none;margin:0;padding:0}
+  .factlist li{padding:8px 0;border-bottom:1px solid var(--line-soft);font-size:14px;color:var(--ink-dim);display:flex;gap:10px}
+  .factlist li:last-child{border-bottom:none}
+  .factlist b{color:var(--ink);font-weight:600}
+  .check{color:var(--ok);flex:none}
+
+  footer{padding:30px 0 50px;color:var(--ink-faint);font-size:13px}
+  footer .wrap{display:flex;flex-wrap:wrap;gap:18px;align-items:center;justify-content:space-between}
+  footer a{color:var(--ink-dim)}
+  footer .links{display:flex;flex-wrap:wrap;gap:16px}
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="wrap">
+    <span class="brand">
+      <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true">
+        <circle cx="11" cy="11" r="9.5" fill="none" stroke="oklch(0.72 0.13 215)" stroke-width="1.4"/>
+        <circle cx="6.5" cy="8" r="1.6" fill="oklch(0.72 0.13 215)"/>
+        <circle cx="15" cy="7" r="1.6" fill="oklch(0.96 0.01 250)"/>
+        <circle cx="13" cy="15" r="1.6" fill="oklch(0.96 0.01 250)"/>
+        <path d="M6.5 8 L15 7 M15 7 L13 15 M6.5 8 L13 15" stroke="oklch(0.40 0.02 250)" stroke-width="1"/>
+      </svg>
+      Memex
+    </span>
+    <nav>
+      <a href="#how">How recall works</a>
+      <a href="#surfaces">Surfaces</a>
+      <a href="#agents">For agents</a>
+      <a href="https://github.com/Two-Weeks-Team/memex" rel="noopener">Source</a>
+      <a class="btn primary" href="https://two-weeks-team.github.io/memex/" rel="noopener">Live landing</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+
+<!-- HERO -->
+<div class="hero">
+  <div class="wrap">
+    <span class="pill">No language model in the loop at runtime</span>
+    <h1>The right past note <em>comes back to you</em> —<br>by geometry, not by a model guessing.</h1>
+    <p class="lead">
+      You don't catalog every memory. Yet mid-task, the relevant one returns on its own.
+      Memex reproduces that with something boringly deterministic: vector distance in
+      Qdrant. Same context in, same memories out. Nothing is invented.
+    </p>
+    <div class="cta-row">
+      <a class="btn primary" href="https://github.com/Two-Weeks-Team/memex" rel="noopener">Get the source</a>
+      <a class="btn" href="#how">See exactly how it surfaces</a>
+    </div>
+    <p class="note-line">Open-source. Built for Qdrant Vector Space Day 2026 — "Think Outside the Bot."</p>
+  </div>
+</div>
+
+<!-- AUTONOMOUS RECALL DEMO -->
+<div class="demo">
+  <div class="wrap">
+    <div class="demo-grid">
+
+      <!-- LEFT: the situation you're in (autonomous, scripted — not a search box) -->
+      <div class="card">
+        <div class="card-head">
+          <span class="dot live" id="ctxDot"></span>
+          <span id="ctxHead">Your current session — running</span>
+        </div>
+        <div class="card-body">
+          <p class="ctx-label">What you're working on right now</p>
+          <div class="ctx-line"><span class="mono typing" id="ctxText"></span></div>
+          <div class="ctx-meta">
+            <span id="ctxFile" class="mono">—</span>
+            <span id="ctxClock" class="mono">—</span>
+          </div>
+          <p class="why-strip">
+            <b>Read this panel, don't drive it.</b> There's no search box. The text above is
+            your <i>situation</i>. Memex watches the working context and, on its own cadence,
+            pulls back the nearest points from your history. You did not go looking.
+          </p>
+        </div>
+      </div>
+
+      <!-- RIGHT: memories that rise unbidden, with the reason they rose -->
+      <div class="card">
+        <div class="card-head">
+          <span class="dot" id="recallDot"></span>
+          <span>Surfaced from your corpus &middot; <span class="mono">~/.claude/projects/**/*.jsonl</span></span>
+        </div>
+        <div class="card-body">
+          <div class="surfaced-head">
+            <h3>Came back to you</h3>
+            <span class="sub" id="recallSub">waiting for the moment…</span>
+          </div>
+          <ul id="recallList" aria-live="polite">
+            <li class="empty" id="emptyRow">Nothing forced. As the situation develops, related past notes rise here.</li>
+          </ul>
+          <p class="why-strip">
+            <b>Why each one rose:</b> the bar is cosine similarity between your current
+            context vector and that stored memory. Higher = nearer in the same space.
+            That distance is the whole reason it surfaced — no model decided for you.
+          </p>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- HOW: the honest mechanism -->
+<section id="how">
+  <div class="wrap">
+    <h2>How a memory surfaces — the whole mechanism</h2>
+    <p class="sec-sub">
+      Three deterministic steps. There is nothing else hiding behind them. The "it knew what
+      I needed" feeling is just nearest-neighbor lookup in a shared vector space.
+    </p>
+    <div class="steps">
+      <div class="step">
+        <span class="n">STEP 1 · ONCE</span>
+        <h4>Your history is embedded</h4>
+        <p>
+          Past Claude Code / Codex sessions (plus legacy transcripts and
+          <span class="mono">history.jsonl</span>) become vectors and are stored as points
+          in Qdrant. This is indexing — it happens up front, not while you read.
+        </p>
+      </div>
+      <div class="step">
+        <span class="n">STEP 2 · LIVE</span>
+        <h4>Your current context becomes a point</h4>
+        <p>
+          What you're doing right now is turned into a vector too — in the same space as
+          everything you've ever done. Same input always lands at the same coordinates.
+        </p>
+      </div>
+      <div class="step">
+        <span class="n">STEP 3 · LIVE</span>
+        <h4>The nearest points are returned</h4>
+        <p>
+          Qdrant returns the closest stored points by distance. Those are the memories that
+          "come back." Run it twice on the same context and you get the same result, in the
+          same order. No sampling, no guessing.
+        </p>
+      </div>
+    </div>
+    <div class="nollm">
+      <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true">
+        <circle cx="10" cy="10" r="9" fill="none" stroke="oklch(0.78 0.14 150)" stroke-width="1.5"/>
+        <path d="M6 10.5 l2.5 2.5 L14.5 7" fill="none" stroke="oklch(0.78 0.14 150)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <p>
+        <b>No LLM runs at retrieval time.</b> Embedding plus vector search is the entire
+        pipeline that brings a memory back. Nothing rephrases your past, invents a summary,
+        or "thinks" on your behalf. The structure of your own history is what surfaces it —
+        Vannevar Bush's 1945 associative trails, made literal as distance.
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- SURFACES -->
+<section id="surfaces">
+  <div class="wrap">
+    <h2>Surfaces over the same corpus</h2>
+    <p class="sec-sub">
+      Every view reads the same Qdrant points. Each is a different, predictable lens on
+      distance — not a different opinion about your data.
+    </p>
+    <table class="surf">
+      <thead>
+        <tr><th style="width:24%">Surface</th><th>What it does</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><b>Proactive Recall</b></td><td><span>Surfaces nearby past notes as your situation changes — the panel above. You receive; you don't query.</span></td></tr>
+        <tr><td><b>Lens</b></td><td><span>Named-vector weighted search when you <i>do</i> want to steer — blend dimensions instead of typing keywords.</span></td></tr>
+        <tr><td><b>Topology</b></td><td><span>Distance matrix reduced to a minimum-spanning-tree graph of your history. The shape is the similarity structure.</span></td></tr>
+        <tr><td><b>Mix / Discovery</b></td><td><span>Positive/negative recommendation: "more like these points, less like those." Set algebra over vectors.</span></td></tr>
+        <tr><td><b>Time Machine</b></td><td><span>Replay sessions in order. Move through time instead of distance.</span></td></tr>
+        <tr><td><b>Dashboard</b></td><td><span>Corpus overview: what's indexed, point counts, where things live.</span></td></tr>
+        <tr><td><b>Companion / Wrapped / Loop Breaker</b></td><td><span>Agent-memory layer that reuses the same store across sessions.</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- AGENTS / INSTALL -->
+<section id="agents">
+  <div class="wrap">
+    <h2>Run it locally, or wire it into your agent</h2>
+    <p class="sec-sub">
+      Your sessions stay a corpus you own — Claude Code silently migrates and deletes old
+      ones; Memex keeps them and lets you move by similarity.
+    </p>
+    <div class="two">
+      <div>
+        <p class="ctx-label" style="margin-bottom:8px">Add the MCP server (11 tools over stdio + HTTP)</p>
+        <pre class="code"><span class="c"># register Memex as an MCP server</span>
+claude mcp add memex \
+  -- memex-mcp --transport stdio
+
+<span class="c"># or run the all-in-one server / Docker variant</span>
+<span class="c"># (Qdrant + web UI + MCP in one image)</span>
+docker run -p 8080:8080 \
+  -v ~/.claude:/data/claude:ro \
+  twoweeks/memex</pre>
+        <p class="note-line">Works in Claude Code, Codex, and Cursor. Exact commands &amp; flags live in the repo README.</p>
+      </div>
+      <div>
+        <p class="ctx-label" style="margin-bottom:8px">What you can rely on</p>
+        <ul class="factlist">
+          <li><svg class="check" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5 l3 3 L13 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg><span><b>Deterministic recall.</b> Same context returns the same points, same order.</span></li>
+          <li><svg class="check" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5 l3 3 L13 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg><span><b>LLM-free at runtime.</b> Embed + vector search only. No chatbot, no generation.</span></li>
+          <li><svg class="check" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5 l3 3 L13 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg><span><b>Your corpus, on your disk.</b> Reads local session files; mount read-only.</span></li>
+          <li><svg class="check" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5 l3 3 L13 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg><span><b>Open source.</b> Read the retrieval code; verify the claims above.</span></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <span class="brand">
+      <svg width="18" height="18" viewBox="0 0 22 22" aria-hidden="true">
+        <circle cx="11" cy="11" r="9.5" fill="none" stroke="oklch(0.72 0.13 215)" stroke-width="1.4"/>
+        <circle cx="6.5" cy="8" r="1.6" fill="oklch(0.72 0.13 215)"/>
+        <circle cx="15" cy="7" r="1.6" fill="oklch(0.96 0.01 250)"/>
+        <circle cx="13" cy="15" r="1.6" fill="oklch(0.96 0.01 250)"/>
+      </svg>
+      Memex
+    </span>
+    <div class="links">
+      <a href="https://github.com/Two-Weeks-Team/memex" rel="noopener">Source code</a>
+      <a href="https://two-weeks-team.github.io/memex/" rel="noopener">Live landing</a>
+      <a href="#agents">Server / Docker variant</a>
+      <a href="#agents">MCP integration</a>
+    </div>
+    <span>Vector Space Day 2026 · recall by distance, not by a model.</span>
+  </div>
+</footer>
+
+<script>
+(function(){
+  "use strict";
+
+  // ---- Scripted scenarios. The page presents a *situation*; memories rise on their
+  //      own cadence in response. The visitor never types or clicks to retrieve. ----
+  var SCENARIOS = [
+    {
+      ctx: "debugging an auth retry that 401s after token refresh",
+      file: "src/auth/refresh.ts",
+      memories: [
+        { when:"3 weeks ago", text:"refresh raced the request queue — fixed by awaiting the new token before retry", sim:0.91 },
+        { when:"2 months ago", text:"401 loop: clock skew made the refreshed JWT look expired on arrival", sim:0.84 },
+        { when:"last week", text:"note: interceptor retried the SAME stale token, never the fresh one", sim:0.77 }
+      ]
+    },
+    {
+      ctx: "writing a migration that backfills a nullable column",
+      file: "db/migrations/0042_backfill.sql",
+      memories: [
+        { when:"a month ago", text:"backfill locked the table — chunked the UPDATE in 5k batches instead", sim:0.88 },
+        { when:"6 weeks ago", text:"forgot the NOT NULL had to come AFTER the backfill, not before", sim:0.81 },
+        { when:"yesterday", text:"reminder: add a down-migration or staging rollback is painful", sim:0.69 }
+      ]
+    },
+    {
+      ctx: "the Qdrant query feels slow on a 200k-point collection",
+      file: "search/recall.py",
+      memories: [
+        { when:"2 weeks ago", text:"HNSW ef too low — recall dropped; raised it and latency stayed fine", sim:0.90 },
+        { when:"a month ago", text:"unindexed payload filter forced a full scan — added a keyword index", sim:0.83 },
+        { when:"3 months ago", text:"batching upserts cut indexing time roughly in half", sim:0.72 }
+      ]
+    }
+  ];
+
+  var ctxText   = document.getElementById("ctxText");
+  var ctxFile   = document.getElementById("ctxFile");
+  var ctxClock  = document.getElementById("ctxClock");
+  var ctxHead   = document.getElementById("ctxHead");
+  var recallList= document.getElementById("recallList");
+  var recallSub = document.getElementById("recallSub");
+  var recallDot = document.getElementById("recallDot");
+  var emptyRow  = document.getElementById("emptyRow");
+
+  var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  // running clock — purely cosmetic "this is a live session" indicator
+  function tick(){
+    var d = new Date();
+    var hh = String(d.getHours()).padStart(2,"0");
+    var mm = String(d.getMinutes()).padStart(2,"0");
+    var ss = String(d.getSeconds()).padStart(2,"0");
+    ctxClock.textContent = hh+":"+mm+":"+ss;
+  }
+  tick();
+  setInterval(tick, 1000);
+
+  function clearRecall(){
+    recallList.innerHTML = "";
+    emptyRow = document.createElement("li");
+    emptyRow.className = "empty";
+    emptyRow.textContent = "Nothing forced. As the situation develops, related past notes rise here.";
+    recallList.appendChild(emptyRow);
+  }
+
+  function renderMemory(m, delay){
+    var li = document.createElement("li");
+    li.className = "recall";
+    var pct = Math.round(m.sim*100);
+    li.innerHTML =
+      '<div class="r-top">'+
+        '<span class="r-text"></span>'+
+        '<span class="r-when"></span>'+
+      '</div>'+
+      '<div class="r-why">'+
+        '<span class="mono">similarity</span>'+
+        '<span class="simbar"><i style="width:0%"></i></span>'+
+        '<span class="simval mono">'+pct+'%</span>'+
+      '</div>';
+    li.querySelector(".r-text").textContent = m.text;
+    li.querySelector(".r-when").textContent = m.when;
+    recallList.appendChild(li);
+
+    var bar = li.querySelector(".simbar > i");
+    if (reduce){
+      li.classList.add("show");
+      bar.style.width = pct + "%";
+    } else {
+      setTimeout(function(){
+        li.classList.add("show");
+        // animate the deterministic distance bar
+        requestAnimationFrame(function(){ bar.style.transition="width .6s ease"; bar.style.width = pct+"%"; });
+      }, delay);
+    }
+  }
+
+  // type out the current situation, char by char (cosmetic — it's not an input)
+  function typeContext(str, done){
+    if (reduce){ ctxText.textContent = str; ctxText.classList.remove("typing"); done(); return; }
+    ctxText.classList.add("typing");
+    ctxText.textContent = "";
+    var i = 0;
+    var iv = setInterval(function(){
+      ctxText.textContent = str.slice(0, ++i);
+      if (i >= str.length){ clearInterval(iv); ctxText.classList.remove("typing"); done(); }
+    }, 34);
+  }
+
+  var idx = 0;
+
+  function runScenario(){
+    var s = SCENARIOS[idx];
+    ctxHead.textContent = "Your current session — running";
+    recallDot.classList.remove("live");
+    recallSub.textContent = "watching the context…";
+    clearRecall();
+    ctxFile.textContent = "— ";
+
+    typeContext(s.ctx, function(){
+      ctxFile.textContent = s.file;
+      // a beat after the situation settles, memories begin to rise on their own
+      var lead = reduce ? 0 : 700;
+      setTimeout(function(){
+        recallDot.classList.add("live");
+        recallSub.textContent = s.memories.length + " surfaced by distance";
+        if (emptyRow && emptyRow.parentNode) emptyRow.parentNode.removeChild(emptyRow);
+        // irregular, lifelike timing between arrivals
+        var gaps = reduce ? [0,0,0] : [0, 900, 1700];
+        s.memories.forEach(function(m, k){
+          renderMemory(m, gaps[k] || (k*900));
+        });
+      }, lead);
+    });
+
+    idx = (idx + 1) % SCENARIOS.length;
+  }
+
+  // first run shortly after load; then advance to the next situation periodically.
+  // This is autonomous: the visitor takes no action.
+  setTimeout(runScenario, 600);
+  setInterval(runScenario, reduce ? 9000 : 11000);
+
+})();
+</script>
+
+</body>
+</html>

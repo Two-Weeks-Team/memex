@@ -1,0 +1,411 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Memex — the history speaks up on its own</title>
+<style>
+  /* ---- OKLCH palette (2026) ---- */
+  :root{
+    --bg:        oklch(16% 0.02 265);
+    --bg-soft:   oklch(20% 0.025 265);
+    --panel:     oklch(22% 0.028 265);
+    --line:      oklch(32% 0.03 265);
+    --ink:       oklch(92% 0.01 250);
+    --ink-dim:   oklch(70% 0.02 250);
+    --ink-faint: oklch(54% 0.02 250);
+    --prompt:    oklch(80% 0.16 150);   /* green prompt */
+    --accent:    oklch(78% 0.15 200);   /* cyan */
+    --recall:    oklch(80% 0.16 300);   /* violet — the unbidden tail */
+    --recall-bg: oklch(30% 0.07 300 / 0.32);
+    --err:       oklch(72% 0.18 25);
+    --warn:      oklch(82% 0.15 85);
+    --focus:     oklch(85% 0.16 200);
+    --mono: ui-monospace, "SF Mono", "Cascadia Code", "JetBrains Mono", Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, sans-serif;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font-family:var(--sans); line-height:1.55;
+    -webkit-font-smoothing:antialiased;
+  }
+  a{color:var(--accent); text-decoration:none}
+  a:hover{text-decoration:underline}
+  a:focus-visible, button:focus-visible{
+    outline:2px solid var(--focus); outline-offset:3px; border-radius:4px;
+  }
+  .wrap{max-width:860px; margin:0 auto; padding:0 20px}
+  .skip{position:absolute; left:-9999px; top:0; background:var(--panel); padding:8px 14px; z-index:50}
+  .skip:focus{left:12px; top:12px}
+
+  /* ---- header / nav ---- */
+  header{border-bottom:1px solid var(--line); padding:14px 0; position:sticky; top:0; background:oklch(16% 0.02 265 / 0.92); backdrop-filter:blur(8px); z-index:10}
+  .bar{display:flex; align-items:center; gap:14px; flex-wrap:wrap}
+  .logo{font-family:var(--mono); font-weight:600; font-size:15px; color:var(--ink); letter-spacing:.02em}
+  .logo b{color:var(--prompt)}
+  nav{margin-left:auto; display:flex; gap:18px; flex-wrap:wrap; font-size:14px}
+  nav a{color:var(--ink-dim)}
+
+  /* ---- hero ---- */
+  .hero{padding:54px 0 30px}
+  .ascii{font-family:var(--mono); white-space:pre; color:var(--prompt); font-size:clamp(8px,1.9vw,15px); line-height:1.15; margin:0 0 22px; overflow-x:auto}
+  h1{font-size:clamp(26px,4.6vw,40px); line-height:1.15; margin:0 0 14px; letter-spacing:-0.01em}
+  h1 .u{color:var(--recall)}
+  .lede{font-size:clamp(16px,2.2vw,19px); color:var(--ink-dim); max-width:62ch; margin:0 0 8px}
+  .sub{font-size:14px; color:var(--ink-faint); max-width:60ch}
+
+  /* ---- terminal ---- */
+  .term{
+    margin:30px 0 8px; background:var(--bg-soft); border:1px solid var(--line);
+    border-radius:10px; overflow:hidden; box-shadow:0 20px 60px oklch(0% 0 0 / 0.35);
+  }
+  .term-top{display:flex; align-items:center; gap:8px; padding:10px 14px; border-bottom:1px solid var(--line); background:var(--panel)}
+  .dot{width:11px; height:11px; border-radius:50%}
+  .dot.r{background:oklch(70% 0.17 25)} .dot.y{background:oklch(82% 0.15 85)} .dot.g{background:oklch(78% 0.16 150)}
+  .term-title{margin-left:8px; font-family:var(--mono); font-size:12.5px; color:var(--ink-faint)}
+  .term-tag{margin-left:auto; font-family:var(--mono); font-size:11px; color:var(--ink-faint); border:1px solid var(--line); padding:2px 8px; border-radius:20px}
+  .screen{
+    font-family:var(--mono); font-size:13.5px; line-height:1.65;
+    padding:18px 18px 22px; min-height:340px; white-space:pre-wrap; word-break:break-word;
+  }
+  .screen .line{display:block}
+  .pmt{color:var(--prompt)}
+  .pmt .cwd{color:var(--accent)}
+  .cmd{color:var(--ink)}
+  .out{color:var(--ink-dim)}
+  .errln{color:var(--err)}
+  .muted{color:var(--ink-faint)}
+
+  /* the unbidden recall block */
+  .recall{
+    display:block; margin:10px 0; padding:10px 12px 11px 14px;
+    border-left:3px solid var(--recall); background:var(--recall-bg);
+    border-radius:0 7px 7px 0; color:var(--ink);
+  }
+  .recall .hdr{color:var(--recall); font-weight:600}
+  .recall .hit{color:var(--ink-dim)}
+  .recall .hit b{color:var(--ink)}
+  .recall .sim{color:var(--accent)}
+  .recall .foot{color:var(--ink-faint); font-size:12px}
+
+  .cursor{display:inline-block; width:8px; height:16px; background:var(--prompt); vertical-align:-2px; animation:blink 1.05s steps(1) infinite}
+  @keyframes blink{50%{opacity:0}}
+
+  .term-note{font-size:12.5px; color:var(--ink-faint); margin:8px 2px 0; display:flex; gap:10px; align-items:baseline; flex-wrap:wrap}
+  .term-note button{
+    font-family:var(--mono); font-size:12px; background:transparent; color:var(--ink-dim);
+    border:1px solid var(--line); border-radius:6px; padding:3px 9px; cursor:pointer;
+  }
+  .term-note button:hover{border-color:var(--recall); color:var(--ink)}
+
+  /* ---- sections ---- */
+  section{padding:40px 0; border-top:1px solid var(--line)}
+  h2{font-size:clamp(20px,3vw,26px); margin:0 0 6px; letter-spacing:-0.01em}
+  h2 .hash{color:var(--ink-faint); font-family:var(--mono); font-weight:400}
+  .sec-lede{color:var(--ink-dim); max-width:64ch; margin:0 0 22px}
+
+  .cards{display:grid; grid-template-columns:1fr 1fr; gap:14px}
+  .card{background:var(--bg-soft); border:1px solid var(--line); border-radius:9px; padding:16px}
+  .card h3{margin:0 0 6px; font-size:15px; font-family:var(--mono); color:var(--ink)}
+  .card p{margin:0; font-size:14px; color:var(--ink-dim)}
+  .card .key{color:var(--recall)}
+
+  /* code block */
+  pre.code{
+    background:oklch(13% 0.018 265); border:1px solid var(--line); border-radius:9px;
+    padding:16px 18px; overflow-x:auto; font-family:var(--mono); font-size:13px;
+    line-height:1.7; color:var(--ink-dim); position:relative;
+  }
+  pre.code .c{color:var(--ink-faint)}      /* comment */
+  pre.code .p{color:var(--prompt)}         /* binary / prompt */
+  pre.code .a{color:var(--accent)}         /* flags */
+  pre.code .v{color:var(--recall)}         /* values */
+  pre.code .arrow{color:var(--ink-faint)}
+  .copy{
+    position:absolute; top:10px; right:10px; font-family:var(--mono); font-size:11px;
+    background:var(--panel); color:var(--ink-dim); border:1px solid var(--line);
+    border-radius:6px; padding:3px 8px; cursor:pointer;
+  }
+  .copy:hover{color:var(--ink); border-color:var(--accent)}
+
+  ul.facts{list-style:none; padding:0; margin:0; display:grid; gap:10px}
+  ul.facts li{font-size:14.5px; color:var(--ink-dim); padding-left:22px; position:relative}
+  ul.facts li::before{content:"▸"; color:var(--prompt); position:absolute; left:0}
+  ul.facts li b{color:var(--ink)}
+
+  .tools{display:grid; grid-template-columns:1fr 1fr; gap:6px 22px; font-family:var(--mono); font-size:13px}
+  .tools div{padding:6px 0; border-bottom:1px solid var(--line); color:var(--ink-dim)}
+  .tools div code{color:var(--recall)}
+
+  footer{padding:34px 0 50px; border-top:1px solid var(--line); color:var(--ink-faint); font-size:13.5px}
+  footer .links{display:flex; gap:20px; flex-wrap:wrap; margin-bottom:14px; font-family:var(--mono); font-size:14px}
+  footer p{margin:6px 0; max-width:66ch}
+  .badge{display:inline-block; font-family:var(--mono); font-size:11px; border:1px solid var(--line); border-radius:20px; padding:3px 10px; color:var(--ink-dim); margin:2px 4px 2px 0}
+
+  @media (max-width:640px){
+    .cards, .tools{grid-template-columns:1fr}
+    nav{width:100%; gap:14px}
+  }
+  @media (prefers-reduced-motion: reduce){
+    .cursor{animation:none}
+    html{scroll-behavior:auto}
+  }
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header>
+  <div class="wrap bar">
+    <span class="logo"><b>$</b> memex</span>
+    <nav aria-label="Primary">
+      <a href="#how">how it works</a>
+      <a href="#install">install</a>
+      <a href="#mcp">mcp / agents</a>
+      <a href="https://github.com/Two-Weeks-Team/memex">repo</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+<div class="wrap">
+
+  <section class="hero" style="border-top:none">
+    <pre class="ascii" aria-hidden="true">
+  _ __ ___   ___ _ __ ___   _____  __
+ | '_ ` _ \ / _ \ '_ ` _ \ / _ \ \/ /
+ | | | | | |  __/ | | | | |  __/>  <
+ |_| |_| |_|\___|_| |_| |_|\___/_/\_\
+                                        </pre>
+    <h1>You didn't search for it.<br>The session <span class="u">printed itself</span> into your scrollback.</h1>
+    <p class="lede">You're mid-task in your terminal. A past session — the one where you already
+      solved this — rises into the log <em>on its own</em>, because the moment called it up.
+      No query typed. No box to fill. The history speaks up unbidden.</p>
+    <p class="sub">Memex turns your Claude Code / Codex session corpus into a navigable spatial memory
+      backed by local Qdrant. The terminal below is a recreation of the proactive-recall watcher — recall
+      arrives as an autonomous tail, not a <code>grep</code> you ran.</p>
+  </section>
+
+</div>
+
+<div class="wrap">
+  <div class="term" role="img" aria-label="A terminal session: while running build and git commands, a violet 'Memex recall' block appears on its own — surfacing a past session that solved a similar WAL WouldBlock error, with similarity scores. The visitor types nothing; recall arrives unprompted.">
+    <div class="term-top">
+      <span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
+      <span class="term-title">zsh — ~/dev/acme-saas — memex watcher attached</span>
+      <span class="term-tag">recall: passive</span>
+    </div>
+    <div class="screen" id="screen" aria-hidden="true"></div>
+  </div>
+  <p class="term-note">
+    <span>The watcher polls your active session every 12s. Nothing here is typed by you — the recall block is the part that arrives unasked.</span>
+    <button id="replay" type="button">↻ replay</button>
+  </p>
+</div>
+
+<div class="wrap">
+
+  <section id="how">
+    <h2><span class="hash">## </span>recall as a tail, not a query</h2>
+    <p class="sec-lede">The trap is to build a search box. Memex's proactive layer is the opposite:
+      while you work in <em>one</em> session, a 60-second watcher embeds your fresh turns and runs a
+      filtered neighbor query against everything you've ever done. When a past session matches the
+      situation you're in, it surfaces — to you, on its own cadence.</p>
+    <div class="cards">
+      <div class="card">
+        <h3><span class="key">situation →</span> not keystroke</h3>
+        <p>Retrieval is triggered by the <em>context you're in</em> — a fresh <code>tool_result.is_error</code>,
+          a repeated loop — not by something you typed. You are the recipient.</p>
+      </div>
+      <div class="card">
+        <h3><span class="key">error vector</span> + filter</h3>
+        <p>A <code>query()</code> on the dedicated <code>error</code> named vector with a
+          <code>has_errors=true</code> payload filter. The neighbor it finds is usually the session that resolved it.</p>
+      </div>
+      <div class="card">
+        <h3>zero LLM at runtime</h3>
+        <p>No chatbot, no generative call in the loop. The "answer" is a vector neighbor in your own
+          local Qdrant on <code>localhost:6334</code>. The corpus stays on your machine.</p>
+      </div>
+      <div class="card">
+        <h3>a corpus <span class="key">you own</span></h3>
+        <p>Claude Code silently migrates and deletes old sessions. Memex reads both legacy and modern
+          <code>~/.claude/projects/**/*.jsonl</code> and snapshots them so cleanups can't reach them.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="install">
+    <h2><span class="hash">## </span>install — terminal first</h2>
+    <p class="sec-lede">Memex is a desktop app (macOS, Apple Silicon, v0.1.0 — unsigned MVP) and a CLI over the
+      same indexed corpus. Start Qdrant, index a corpus, then drive everything from the shell.</p>
+    <pre class="code"><button class="copy" data-copy="bash scripts/start-qdrant.sh">copy</button><span class="c"># 1. start Qdrant — the load-bearing dependency</span>
+<span class="p">bash</span> scripts/start-qdrant.sh
+
+<span class="c"># 2. index a corpus (synthetic sample ships with the repo — no private data)</span>
+<span class="p">memex</span> scan <span class="a">--path</span> <span class="v">examples/sample-corpus</span> <span class="a">--index</span>
+
+<span class="c"># 3. drive the Qdrant-backed surfaces from the terminal</span>
+<span class="p">memex</span> lens     <span class="v">"build error"</span> <span class="a">--error</span> <span class="v">2.0</span> <span class="a">--content</span> <span class="v">1.0</span>   <span class="c"># weighted named-vector lens</span>
+<span class="p">memex</span> mix      <span class="a">--pos</span> <span class="v">&lt;id&gt;</span> <span class="a">--neg</span> <span class="v">&lt;id&gt;</span>                  <span class="c"># Discovery API recommendation</span>
+<span class="p">memex</span> topology <span class="a">--sample</span> <span class="v">12</span> <span class="a">--out</span> <span class="v">/tmp/topo.json</span>       <span class="c"># Distance Matrix → MST</span>
+<span class="p">memex</span> recall   <span class="v">"cargo build linker error"</span>             <span class="c"># the proactive-recall query, by hand</span></pre>
+    <p class="sub" style="margin-top:14px; color:var(--ink-faint)">
+      Source build and clean-machine Gatekeeper steps:
+      <a href="https://github.com/Two-Weeks-Team/memex/blob/main/docs/INSTALL.md">docs/INSTALL.md</a>.
+      Prefer headless? The <a href="https://github.com/Two-Weeks-Team/memex/blob/main/deploy/web/README.md">server / Docker variant</a>
+      runs Qdrant + web UI/API + MCP in one image.</p>
+  </section>
+
+  <section id="mcp">
+    <h2><span class="hash">## </span>mcp — your agent recalls through Memex</h2>
+    <p class="sec-lede">The same proactive recall, but for an AI agent. Wire Memex's MCP server into Claude Code once;
+      then mid-conversation your agent can reach into your local session corpus — and the
+      <em>Cold Start Killer</em> can inject a memory primer at turn 0, before you ask anything.</p>
+    <pre class="code"><button class="copy" data-copy="claude mcp add memex /path/to/memex/src-tauri/target/release/memex mcp">copy</button><span class="c"># one-time wiring — point Claude Code at the memex binary you already run</span>
+<span class="p">claude</span> mcp add memex <span class="v">/path/to/memex/src-tauri/target/release/memex</span> mcp
+
+<span class="c"># …or let memex print the exact line for your machine</span>
+<span class="p">memex</span> install-mcp            <span class="c"># echoes the `claude mcp add …` line</span>
+<span class="p">memex</span> install-mcp <span class="a">--run</span>      <span class="c"># runs it for you</span>
+
+<span class="p">claude</span> mcp list
+<span class="arrow">#  memex: /…/memex mcp - ✓ Connected</span></pre>
+    <p class="sec-lede" style="margin-top:22px">11 tools, each a typed handle on a Qdrant primitive your desktop app already uses:</p>
+    <div class="tools">
+      <div><code>find_similar_sessions</code> five-vector lens search</div>
+      <div><code>find_similar_error</code> error-vector neighbor + filter</div>
+      <div><code>predict_next_action</code> "what past-you did next"</div>
+      <div><code>mix_similar_sessions</code> Discovery API recommend</div>
+      <div><code>get_session_summary</code> payload metadata</div>
+      <div><code>get_session_turn</code> a single re-parsed turn</div>
+      <div><code>list_recent_sessions</code> recent-first walk</div>
+      <div><code>analyze_corpus_topology</code> MST + gap insights</div>
+      <div><code>snapshot_export</code> portable collection snapshot</div>
+      <div><code>get_project_memory</code> Cold Start Killer primer</div>
+      <div><code>generate_wrapped_report</code> engineering Wrapped digest</div>
+    </div>
+  </section>
+
+  <section id="facts">
+    <h2><span class="hash">## </span>what it actually is</h2>
+    <ul class="facts">
+      <li>A <b>non-chatbot, LLM-free-at-runtime</b> tool over your Claude Code / Codex session history.</li>
+      <li>Surfaces: Time Machine replay, <b>Lens</b>, <b>Topology</b>, <b>Mix/Discovery</b>, <b>proactive Recall</b>, plus the Companion / Wrapped / Loop Breaker agent-memory layer.</li>
+      <li>Built on <b>Qdrant 1.18</b> + FastEmbed — five distinct Qdrant primitives <em>are</em> the product, not a sidecar.</li>
+      <li>Reason to exist: Claude Code silently migrates and deletes old sessions; Memex preserves a corpus <b>you own</b>, traversed by similarity not keywords.</li>
+      <li>Built for <b>Qdrant Vector Space Day 2026 — "Think Outside the Bot."</b></li>
+      <li>Status: <b>v0.1.0</b>, macOS Apple Silicon, unsigned MVP — needs local Qdrant on <code>localhost:6334</code>.</li>
+    </ul>
+  </section>
+
+</div>
+
+<footer>
+  <div class="wrap">
+    <div class="links">
+      <a href="https://github.com/Two-Weeks-Team/memex">github.com/Two-Weeks-Team/memex</a>
+      <a href="https://two-weeks-team.github.io/memex/">live landing</a>
+      <a href="https://github.com/Two-Weeks-Team/memex/blob/main/deploy/web/README.md">server / Docker</a>
+      <a href="https://github.com/Two-Weeks-Team/memex/releases/latest">download v0.1.0</a>
+    </div>
+    <span class="badge">Apache-2.0</span>
+    <span class="badge">100% local</span>
+    <span class="badge">no telemetry</span>
+    <span class="badge">no LLM at runtime</span>
+    <span class="badge">Qdrant VSD 2026</span>
+    <p>Vannevar Bush imagined the original Memex in 1945 — associative trails, not a search box.
+      This is a hackathon MVP, not production-hardened. The terminal above is an honest recreation of the
+      proactive-recall watcher; similarity scores shown are illustrative of the real <code>error</code>-vector neighbor output.</p>
+  </div>
+</footer>
+</main>
+
+<script>
+(function(){
+  "use strict";
+  var screen = document.getElementById("screen");
+  var replayBtn = document.getElementById("replay");
+  var reduce = window.matchMedia("(prefers-reduced-motion: reduce)");
+
+  // Each step: {t:'cmd'|'out'|'err'|'recall'|'gap', html, after}
+  // 'after' = ms to wait BEFORE this step shows (lifelike irregular timing).
+  // The 'recall' steps are the part the user did NOT type — they arrive on their own.
+  var script = [
+    {t:"cmd", after:300,  html:'<span class="pmt"><span class="cwd">~/dev/acme-saas</span> $</span> <span class="cmd">cargo build --release</span>'},
+    {t:"out", after:700,  html:'<span class="out">   Compiling acme-indexer v0.3.1</span>'},
+    {t:"out", after:520,  html:'<span class="out">   Compiling qdrant-client v1.18</span>'},
+    {t:"err", after:780,  html:'<span class="errln">error: WAL Kind(WouldBlock) — connection pool exhausted at indexer/src/wal.rs:142</span>'},
+    {t:"out", after:300,  html:'<span class="muted">   …staring at it. didn\'t we hit this before?</span>'},
+    // ---- the unbidden arrival: visitor typed nothing ----
+    {t:"recall", after:1500, html:
+      '<span class="recall">' +
+        '<span class="hdr">⏺ memex · recall (you didn\'t ask)</span>\n' +
+        '<span class="hit">  matched on the <b>error</b> named vector · has_errors=true · 3 neighbors</span>\n' +
+        '<span class="hit">    1. <b>project-redesign</b> · 2026-04-12 · <span class="sim">sim 0.91</span> · "fix wal contention in indexer"</span>\n' +
+        '<span class="hit">    2. <b>memex</b>           · 2026-03-30 · <span class="sim">sim 0.84</span> · "Phase 6 polling + recall"</span>\n' +
+        '<span class="hit">    3. <b>ckm-rails</b>       · 2026-02-04 · <span class="sim">sim 0.71</span> · "concurrent migration retries"</span>\n' +
+        '<span class="foot">  ↳ session #1 already solved this. opening turn 487 in replay…</span>' +
+      '</span>'},
+    {t:"out", after:1300, html:'<span class="out">   …right. the WouldBlock was the pool size. I remember now.</span>'},
+    {t:"cmd", after:900,  html:'<span class="pmt"><span class="cwd">~/dev/acme-saas</span> $</span> <span class="cmd"><span class="cursor" aria-hidden="true"></span></span>'}
+  ];
+
+  function renderStatic(){
+    screen.innerHTML = "";
+    script.forEach(function(s){
+      var div = document.createElement("span");
+      div.className = "line";
+      div.innerHTML = s.html;
+      screen.appendChild(div);
+      screen.appendChild(document.createTextNode("\n"));
+    });
+  }
+
+  var timers = [];
+  function clearTimers(){ timers.forEach(clearTimeout); timers = []; }
+
+  function play(){
+    clearTimers();
+    screen.innerHTML = "";
+    var delay = 200;
+    script.forEach(function(s){
+      delay += s.after;
+      timers.push(setTimeout(function(){
+        var div = document.createElement("span");
+        div.className = "line";
+        div.innerHTML = s.html;
+        screen.appendChild(div);
+        screen.appendChild(document.createTextNode("\n"));
+      }, delay));
+    });
+  }
+
+  // honor reduced-motion: show the whole transcript at once, no timed reveal.
+  if (reduce.matches){
+    renderStatic();
+  } else {
+    play();
+  }
+
+  replayBtn.addEventListener("click", function(){
+    if (reduce.matches){ renderStatic(); }
+    else { play(); }
+  });
+
+  // copy buttons
+  document.querySelectorAll(".copy").forEach(function(btn){
+    btn.addEventListener("click", function(){
+      var text = btn.getAttribute("data-copy");
+      var done = function(){ var o = btn.textContent; btn.textContent = "copied"; setTimeout(function(){ btn.textContent = o; }, 1200); };
+      if (navigator.clipboard && navigator.clipboard.writeText){
+        navigator.clipboard.writeText(text).then(done, done);
+      } else { done(); }
+    });
+  });
+})();
+</script>
+</body>
+</html>

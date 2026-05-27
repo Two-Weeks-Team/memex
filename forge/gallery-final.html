@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Memex landing — 36 WOW scenes, by scene-arrival family</title>
+<style>
+  :root { color-scheme: dark; --bg:#07070a; --card:#141418; --bd:rgba(255,255,255,.13);
+          --fg:rgba(255,255,255,.96); --fg2:rgba(255,255,255,.58); --ac:#0a84ff; --mag:#bf5af2; --gold:#ffd60a; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg);
+         font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif; }
+  header { padding:34px 24px 4px; max-width:1600px; margin:0 auto; }
+  h1 { margin:0 0 8px; font-size:25px; letter-spacing:-.01em; }
+  .sub { margin:0; color:var(--fg2); font-size:14px; max-width:940px; }
+  .sub em { color:#e9d8ff; font-style:normal; }
+  .note { color:#8a8a8e; font-size:12.5px; margin-top:10px; }
+  .fam { max-width:1600px; margin:0 auto; padding:26px 24px 4px; }
+  .fam h2 { font-size:15px; letter-spacing:.04em; text-transform:uppercase; color:var(--mag);
+            border-top:1px solid var(--bd); padding-top:18px; margin:0; }
+  .fam h2 small { color:var(--fg2); text-transform:none; letter-spacing:0; font-weight:400; margin-left:8px; }
+  .grid { display:grid; gap:20px; padding:14px 24px 8px; max-width:1600px; margin:0 auto;
+          grid-template-columns:repeat(auto-fill,minmax(400px,1fr)); }
+  .card { background:var(--card); border:1px solid var(--bd); border-radius:15px; overflow:hidden;
+          display:flex; flex-direction:column; position:relative; }
+  .card.fav { border-color:rgba(255,214,10,.55); box-shadow:0 0 0 1px rgba(255,214,10,.28); }
+  .tagid { position:absolute; top:10px; left:10px; z-index:2; font:700 12px/1 ui-monospace,monospace;
+           background:rgba(0,0,0,.7); color:#fff; padding:5px 8px; border-radius:7px; border:1px solid var(--bd); }
+  .star { position:absolute; top:10px; right:10px; z-index:2; font-size:13px; background:rgba(255,214,10,.16);
+          color:var(--gold); border:1px solid rgba(255,214,10,.5); padding:4px 9px; border-radius:999px; font-weight:600; }
+  .meta { padding:13px 15px 11px 50px; }
+  .meta h3 { margin:0; font-size:15px; }
+  .frame { border-top:1px solid var(--bd); border-bottom:1px solid var(--bd);
+           height:440px; background:#000; overflow:hidden; }
+  .frame iframe { width:1320px; height:1150px; border:0; transform:scale(.40); transform-origin:0 0; pointer-events:none; }
+  .bar { display:flex; gap:10px; align-items:center; padding:11px 15px; }
+  .open { font-size:13px; font-weight:600; color:#fff; background:var(--ac); border:0;
+          padding:7px 14px; border-radius:8px; text-decoration:none; }
+  .open:hover { background:#1a90ff; }
+  .file { margin-left:auto; font:11px ui-monospace,monospace; color:var(--fg2); }
+  footer { max-width:1600px; margin:0 auto; padding:24px; color:var(--fg2); font-size:13.5px; }
+  code { font-family:ui-monospace,monospace; background:rgba(255,255,255,.08); padding:1px 6px; border-radius:5px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Memex landing — 36 WOW scenes</h1>
+  <p class="sub">Every mockup brings <em>a single SCENE of a memory before your eyes</em> — a vivid full-bleed moment that materializes on its own (the situation calls it up; never search/hover/click). No chatbot/feed/terminal. Grouped by <b>how the scene arrives</b>; your earlier favorites marked ⭐.</p>
+  <p class="note">36 live iframes at once is heavy — the gallery may stutter. <b>Open full ↗</b> for the real motion + WOW. Reduced-motion users see each scene resolved & static. v1 (26, search-leaning) is in <code>gallery.html</code>.</p>
+</header>
+<div id="root"></div>
+<footer>
+  Converge: tell me your finalist(s) by id (e.g. <code>P81</code> or “P52 hologram as hero + P27 constellation transitions”). I'll build the real <code>index.html</code> — fusing the chosen scene-arrival(s), wiring the real 11 MCP tool names + links, and running an accessibility/contrast pass.
+</footer>
+<script>
+const F = [
+  ["A · Resolve from chaos","noise / pattern / scan settling into the moment", [
+    ["P90",0,"Noise → form","P90-noise-to-form.html"],["P86",0,"Reaction-diffusion","P86-reaction-diffusion.html"],
+    ["P83",0,"Particle swarm","P83-particle-swarm.html"],["P49",0,"Oscilloscope trace","P49-oscilloscope.html"],
+    ["P81",1,"Thermal / x-ray scan","P81-thermal-reveal.html"],["P93",0,"Déjà-vu glitch","P93-dejavu-glitch.html"],
+  ]],
+  ["B · Develop & surface","the scene emerges / rises through a medium", [
+    ["P57",0,"Photo self-develops","P57-photo-develops.html"],["P35",0,"Ink-in-water bloom","P35-ink-bloom.html"],
+    ["P100",0,"Palimpsest bleeds back","P100-palimpsest.html"],["P40",0,"Frost crystal forms","P40-frost-crystal.html"],
+    ["P96",0,"Focus-pull (back of mind)","P96-back-of-mind.html"],["P79",0,"Out of shadow","P79-shadow-play.html"],
+  ]],
+  ["C · Light & projection","the moment is cast in light", [
+    ["P52",1,"Holographic projection","P52-holographic.html"],["P76",0,"Projector / film","P76-projector-film.html"],
+    ["P77",0,"Neon sign","P77-neon-sign.html"],["P78",0,"Prism spectrum","P78-prism-spectrum.html"],
+    ["P80",0,"Lighthouse beam","P80-lighthouse.html"],["P32",0,"Planetarium dome","P32-planetarium.html"],
+  ]],
+  ["D · Material, glass & craft","a physical material forms the scene", [
+    ["P51",1,"Liquid chrome coalesce","P51-liquid-chrome.html"],["P53",0,"Ferrofluid relief","P53-ferrofluid.html"],
+    ["P54",0,"Stained glass kindles","P54-stained-glass.html"],["P55",0,"Origami unfolds","P55-origami.html"],
+    ["P45",0,"Vinyl groove plays","P45-vinyl-groove.html"],["P82",0,"Caustics gather","P82-caustics.html"],
+    ["P67",0,"Kinetic type","P67-kinetic-type.html"],
+  ]],
+  ["E · Depth & dimension","you move into / through space to the scene", [
+    ["P61",0,"Memory-palace (3D)","P61-memory-palace.html"],["P62",0,"Isometric city","P62-isometric-city.html"],
+    ["P98",0,"Lenticular shift","P98-lenticular.html"],["P29",0,"Deep-space dive","P29-deepspace-parallax.html"],
+    ["P59",0,"Transit arrival","P59-transit-arrival.html"],["P64",0,"Weather front","P64-weather-front.html"],
+  ]],
+  ["F · Cosmic & celestial","the scene composes out of the sky / depths", [
+    ["P27",1,"Constellation resolves","P27-constellation.html"],["P28",0,"Aurora crystallize","P28-aurora.html"],
+    ["P30",0,"Orbital decay","P30-orbital-decay.html"],["P37",0,"Bioluminescent deep-sea","P37-deep-sea.html"],
+    ["P92",0,"Firefly jar","P92-firefly-jar.html"],
+  ]],
+];
+const root = document.getElementById("root");
+for (const [fname,fdesc,items] of F) {
+  const fam = document.createElement("div"); fam.className = "fam";
+  fam.innerHTML = `<h2>${fname}<small>${fdesc}</small></h2>`;
+  root.appendChild(fam);
+  const grid = document.createElement("div"); grid.className = "grid";
+  for (const [id,fav,title,file] of items) {
+    const c = document.createElement("div"); c.className = "card " + (fav?"fav":"");
+    c.innerHTML = `
+      <div class="tagid">${id}</div>${fav?'<div class="star">⭐ your pick</div>':''}
+      <div class="meta"><h3>${title}</h3></div>
+      <div class="frame"><iframe loading="lazy" src="${file}" title="${title}"></iframe></div>
+      <div class="bar"><a class="open" href="${file}" target="_blank" rel="noopener">Open full ↗</a><span class="file">${file}</span></div>`;
+    grid.appendChild(c);
+  }
+  root.appendChild(grid);
+}
+</script>
+</body>
+</html>

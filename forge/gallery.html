@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Memex landing — 26 mockups, ranked (Gate H1)</title>
+<style>
+  :root { color-scheme: dark; --bg:#0e0e11; --card:#16161a; --bd:rgba(255,255,255,.12);
+          --fg:rgba(255,255,255,.95); --fg2:rgba(255,255,255,.58); --ac:#0a84ff;
+          --t1:#ffd60a; --t2:#30d158; --t3:#0a84ff; --t4:#8a8a8e; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg);
+         font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif; }
+  header { padding:30px 24px 6px; max-width:1500px; margin:0 auto; }
+  h1 { margin:0 0 6px; font-size:23px; letter-spacing:-.01em; }
+  header p { margin:0 0 4px; color:var(--fg2); font-size:13.5px; max-width:880px; }
+  .legend { display:flex; flex-wrap:wrap; gap:14px; margin:12px 0 0; font-size:12.5px; color:var(--fg2); }
+  .legend b { font-weight:600; }
+  .tg { display:inline-block; width:10px; height:10px; border-radius:3px; vertical-align:middle; margin-right:5px; }
+  .grid { display:grid; gap:20px; padding:20px 24px 70px; max-width:1500px; margin:0 auto;
+          grid-template-columns:repeat(auto-fill,minmax(390px,1fr)); }
+  .card { background:var(--card); border:1px solid var(--bd); border-radius:14px; overflow:hidden;
+          display:flex; flex-direction:column; position:relative; }
+  .card.tier1 { border-color:rgba(255,214,10,.5); box-shadow:0 0 0 1px rgba(255,214,10,.25); }
+  .rank { position:absolute; top:10px; left:10px; z-index:2; font:700 13px/1 ui-monospace,monospace;
+          background:rgba(0,0,0,.66); color:#fff; padding:5px 8px; border-radius:8px; border:1px solid var(--bd); }
+  .meta { padding:13px 15px 11px 52px; }
+  .row { display:flex; align-items:center; gap:8px; margin-bottom:6px; }
+  .tier { font:11px/1 ui-monospace,monospace; padding:3px 8px; border-radius:999px; border:1px solid var(--bd); }
+  .tier1c { color:#ffd60a; background:rgba(255,214,10,.12); border-color:rgba(255,214,10,.4); }
+  .tier2c { color:#30d158; background:rgba(48,209,88,.12); border-color:rgba(48,209,88,.4); }
+  .tier3c { color:#5ac8fa; background:rgba(90,200,250,.12); border-color:rgba(90,200,250,.4); }
+  .tier4c { color:#aeaeb2; background:rgba(174,174,178,.12); border-color:rgba(174,174,178,.4); }
+  .pid { font:11px ui-monospace,monospace; color:var(--fg2); }
+  .meta h2 { margin:0 0 5px; font-size:15.5px; }
+  .meta p { margin:0; color:var(--fg2); font-size:12.7px; }
+  .frame { border-top:1px solid var(--bd); border-bottom:1px solid var(--bd);
+           height:430px; background:#000; overflow:hidden; }
+  .frame iframe { width:1300px; height:1075px; border:0; transform:scale(.40); transform-origin:0 0; pointer-events:none; }
+  .bar { display:flex; gap:10px; align-items:center; padding:11px 15px; }
+  .open { font-size:13px; font-weight:600; color:#fff; background:var(--ac); border:0;
+          padding:7px 14px; border-radius:8px; text-decoration:none; }
+  .open:hover { background:#1a90ff; }
+  .file { margin-left:auto; font:11px ui-monospace,monospace; color:var(--fg2); }
+  footer { max-width:1500px; margin:0 auto; padding:0 24px 50px; color:var(--fg2); font-size:13px; }
+  code { font-family:ui-monospace,monospace; background:rgba(255,255,255,.07); padding:1px 6px; border-radius:4px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Memex landing — 26 mockups, my recommended rank</h1>
+  <p>All 26 advocate mockups, none omitted. Shared north-star: <em>"you don't document every memory, yet when the moment comes the relevant thought surfaces <b>on its own</b>"</em> — involuntary arising, not searching. Ranked #1→#26 below; rank is a recommendation for you to validate. Previews are live (scaled 40%, non-interactive) — click <b>Open full ↗</b> to interact.</p>
+  <div class="legend">
+    <span><i class="tg" style="background:#ffd60a"></i><b>★ Top</b> — best embody "arrives unbidden" + on-message</span>
+    <span><i class="tg" style="background:#30d158"></i><b>◆ Strong</b></span>
+    <span><i class="tg" style="background:#5ac8fa"></i><b>● Distinct/good</b></span>
+    <span><i class="tg" style="background:#8a8a8e"></i><b>○ Search-leaning</b> — visitor drives retrieval (the trap you flagged)</span>
+  </div>
+</header>
+<div class="grid" id="grid"></div>
+<footer>
+  Gate&nbsp;H1: tell me which to lock (by id, e.g. <code>P09</code>; combinations like “P19 base + P14's teaching block” welcome). The chosen mockup becomes the new <code>index.html</code> — real 11 MCP-tool names, links, and an accessibility/contrast pass are reconciled on adoption.
+</footer>
+<script>
+const T = {1:["tier1","tier1c","★"],2:["tier2","tier2c","◆"],3:["tier3","tier3c","●"],4:["tier4","tier4c","○"]};
+const cards = [
+  [1,1,"P09","CLI devotee — recall prints itself","On a real build error, the past session that solved it prints into your scrollback — unbidden, no query typed. Concrete, technical, maps to the real proactive-recall watcher.","P09-cli-devotee.html"],
+  [2,1,"P19","Embedded · MCP — before you ask","The memory is injected into your coding agent at turn 0, before you type anything. Directly showcases the agent-integration story.","P19-embedded.html"],
+  [3,1,"P25","AI-native — the agent remembers","Mid-task a past fragment rises into the agent's context on its own; honest twist: Memex is LLM-free and remembers *for* it.","P25-ai-native.html"],
+  [4,1,"P14","Educator — names ‘this is NOT search’","Auto-plays the arrival and explicitly contrasts search (you fetch) vs associative recall (it comes to you) — teaches the exact distinction.","P14-educator.html"],
+  [5,1,"P26","Anti-AI — pure geometry","Shows WHY each memory surfaced (deterministic cosine similarity), no LLM in the loop. ‘Think Outside the Bot’, literal + auditable.","P26-anti-ai.html"],
+  [6,2,"P02","Ops veteran — the runbook returns","A 3am incident timeline; your own past runbook surfaces itself, tagged ‘↑ arose because…’. Dramatic, situation-driven.","P02-ops-veteran.html"],
+  [7,2,"P24","Reluctant adopter — skeptic won over","Leads with every reason to refuse, then the demo auto-starts and the fix shows up unbidden; honest amber ‘what it won't do’ table.","P24-reluctant-adopter.html"],
+  [8,2,"P08","Slack-native — an unrequested nudge","The memory drops in like a teammate’s ‘didn’t you hit this in March?’ — the composer is disabled on purpose (you don’t ask).","P08-slack-native.html"],
+  [9,2,"P03","Speed-obsessed — already rising","The situation types itself out and the right thought is already surfacing; clean, looped, zero query, zero wait.","P03-speed-obsessed.html"],
+  [10,2,"P16","Solo founder — your past self speaks up","Present-context + past-self panes; the old decision fills itself in, tagged with why it came back. No team, no wiki.","P16-solo-founder.html"],
+  [11,2,"P21","Indie hacker — the 2am fix returns","Build log hits a 401 and the session that already solved it rises. ‘Nothing to click, hover, or type — that’s the point.’","P21-indie-hacker.html"],
+  [12,2,"P04","Cost-conscious — paid once, free forever","The lesson you earned the hard way returns on its own at $0 runtime; local, no model spend at recall.","P04-cost-conscious.html"],
+  [13,2,"P12","Privacy hawk — local & unbidden","Recall rises by vector math on your own hardware; nothing is queried out. Autonomy of recall AND of data.","P12-privacy-hawk.html"],
+  [14,3,"P06","Spreadsheet jockey — the grid recalls for you","A calm dense session grid reorders itself to the moment — relevant rows climb on their own. No sort/filter/Ctrl-F.","P06-spreadsheet-jockey.html"],
+  [15,3,"P17","Enterprise — institutional memory surfaces itself","Hard-won org knowledge arrives unbidden; governance framed honestly (local-first, no faked SSO/SAML/SOC2).","P17-enterprise-buyer.html"],
+  [16,3,"P20","OSS maintainer — a memory you own, resurfacing","Apache-2.0 repo-style page; two-pane self-surfacing; you own the corpus, preserved against silent migrations.","P20-oss-maintainer.html"],
+  [17,3,"P15","Community — a teammate’s solution rises","A shared past solution surfaces for the next person who hits the wall (with an honest single-user-today disclaimer).","P15-community-builder.html"],
+  [18,3,"P01","Contrarian — field notes, not a SaaS hero","Terminal / ruled-notebook aesthetic; ‘Everyone shipped a chatbot. We didn’t.’ Structurally anti-chatbot, anti-search.","P01-contrarian.html"],
+  [19,3,"P11","Pragmatist — 30-second skim","Minimal & fast; one tasteful scroll-triggered cascade where dim thoughts rise. Substance over spectacle.","P11-pragmatist.html"],
+  [20,3,"P18","Designer — cinematic descent","Latent fragments surface into amber and thread into trails as you scroll deeper; strong typographic mood.","P18-designer.html"],
+  [21,3,"P22","Researcher — Bush 1945 preprint","Citation-grade line from associative trails to Qdrant; numbered sections, Figure 1, real references, BibTeX export.","P22-researcher.html"],
+  [22,4,"P13","Data-nerd — the topology graph","An MST graph hero is visually compelling, but you approach a node to surface it (it does have an idle auto-loop).","P13-data-nerd.html"],
+  [23,4,"P10","Dreamer — ambient field","Atmospheric <canvas> memory-field, but motes brighten on cursor proximity — the visitor is driving it.","P10-dreamer.html"],
+  [24,4,"P23","Game designer — playable toy","Delightful, but you move an ‘attention point’ to surface cards — gentle hunting more than spontaneous arrival.","P23-game-designer.html"],
+  [25,4,"P07","Mobile-first","Great phone UX, but tap-to-surface-neighbors is the visitor driving retrieval.","P07-mobile-first.html"],
+  [26,4,"P05","Design-forward","Best accessibility of the set, but hover/focus-to-reveal is literally hunting — the arising trap to avoid.","P05-design-forward.html"],
+];
+const grid = document.getElementById("grid");
+for (const [rank,tier,id,title,why,file] of cards) {
+  const [cls,badge,glyph] = T[tier];
+  const c = document.createElement("div"); c.className = "card " + (tier===1?"tier1":"");
+  c.innerHTML = `
+    <div class="rank">#${rank}</div>
+    <div class="meta">
+      <div class="row"><span class="tier ${badge}">${glyph} ${["","Top","Strong","Good","Search-leaning"][tier]}</span><span class="pid">${id}</span></div>
+      <h2>${title}</h2><p>${why}</p>
+    </div>
+    <div class="frame"><iframe loading="lazy" src="${file}" title="${title}"></iframe></div>
+    <div class="bar"><a class="open" href="${file}" target="_blank" rel="noopener">Open full ↗</a><span class="file">${file}</span></div>`;
+  grid.appendChild(c);
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Memex — On Associative Trails (after Bush, 1945)</title>
+<meta name="description" content="Memex turns your Claude Code / Codex session history into a navigable associative memory backed by Qdrant. A working realization of the associative trail Vannevar Bush described in 1945." />
+<style>
+  /* ---- Color: OKLCH, paper-on-dark, restrained ---- */
+  :root {
+    --paper:        oklch(0.97 0.012 85);   /* warm off-white "page" */
+    --ink:          oklch(0.26 0.02 265);    /* near-black text */
+    --ink-soft:     oklch(0.44 0.02 265);    /* secondary text */
+    --rule:         oklch(0.86 0.01 85);     /* hairline rules */
+    --trail:        oklch(0.58 0.13 250);    /* associative trail blue */
+    --trail-warm:   oklch(0.62 0.15 55);     /* citation / mark accent */
+    --node:         oklch(0.40 0.04 265);
+    --bg:           oklch(0.21 0.018 265);   /* outer dark frame */
+    --code-bg:      oklch(0.93 0.012 85);
+    --link:         oklch(0.45 0.13 250);
+    --focus:        oklch(0.62 0.15 55);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper:    oklch(0.985 0.01 85);  /* keep the "page" light for readability */
+    }
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    * { animation: none !important; transition: none !important; }
+  }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, "Times New Roman", serif;
+    font-size: 18px;
+    line-height: 1.62;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* The single column "paper" */
+  .sheet {
+    max-width: 46rem;
+    margin: 0 auto;
+    background: var(--paper);
+    padding: clamp(2rem, 5vw, 5rem) clamp(1.25rem, 5vw, 4.5rem);
+    box-shadow: 0 0 0 1px oklch(0 0 0 / 0.04), 0 2.4rem 5rem oklch(0 0 0 / 0.45);
+  }
+
+  a { color: var(--link); text-underline-offset: 0.18em; text-decoration-thickness: 0.06em; }
+  a:hover { text-decoration-thickness: 0.12em; }
+  :focus-visible { outline: 0.16rem solid var(--focus); outline-offset: 0.2rem; border-radius: 0.1rem; }
+
+  .skip {
+    position: absolute; left: -999px; top: 0;
+    background: var(--ink); color: var(--paper); padding: 0.6rem 1rem; z-index: 10;
+  }
+  .skip:focus { left: 0.5rem; top: 0.5rem; }
+
+  /* ---- Masthead ---- */
+  .masthead { border-bottom: 0.18rem double var(--ink); padding-bottom: 1rem; margin-bottom: 2rem; }
+  .venue {
+    font-family: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+    font-size: 0.72rem; letter-spacing: 0.14em; text-transform: uppercase;
+    color: var(--ink-soft); display: flex; flex-wrap: wrap; gap: 0.4rem 1.2rem;
+    justify-content: space-between;
+  }
+  h1 {
+    font-size: clamp(1.9rem, 6vw, 3rem); line-height: 1.12; margin: 1.1rem 0 0.5rem;
+    font-weight: 600; letter-spacing: -0.01em;
+  }
+  h1 .sub { display: block; font-size: 0.46em; font-style: italic; color: var(--ink-soft); font-weight: 400; margin-top: 0.5rem; }
+  .byline {
+    font-style: italic; color: var(--ink-soft); font-size: 0.95rem; margin: 0.4rem 0 0;
+  }
+  .abstract {
+    margin: 1.6rem 0 0; padding: 1rem 1.2rem; background: oklch(0.94 0.012 85);
+    border-left: 0.2rem solid var(--trail); font-size: 0.96rem;
+  }
+  .abstract b { font-variant: small-caps; letter-spacing: 0.04em; }
+
+  /* ---- Section headings ---- */
+  h2 {
+    font-size: 1.32rem; margin: 2.8rem 0 0.7rem; font-weight: 600;
+    display: flex; align-items: baseline; gap: 0.7rem;
+  }
+  h2 .n {
+    font-family: ui-monospace, monospace; font-size: 0.8rem; color: var(--trail-warm);
+    border: 0.09rem solid var(--rule); border-radius: 2rem; padding: 0.05rem 0.55rem;
+    flex: none;
+  }
+  h3 { font-size: 1.05rem; margin: 1.6rem 0 0.4rem; font-weight: 600; font-variant: small-caps; letter-spacing: 0.03em; }
+  p { margin: 0.75rem 0; }
+
+  sup.cite { font-size: 0.7em; }
+  sup.cite a { color: var(--trail-warm); text-decoration: none; font-weight: 600; }
+  mark { background: oklch(0.9 0.09 95); color: inherit; padding: 0 0.12em; }
+
+  /* ---- Figures ---- */
+  figure { margin: 1.8rem 0; }
+  figure svg { display: block; width: 100%; height: auto; background: oklch(0.99 0.005 85); border: 0.09rem solid var(--rule); }
+  figcaption {
+    font-size: 0.82rem; color: var(--ink-soft); margin-top: 0.6rem; line-height: 1.5;
+    border-bottom: 0.09rem solid var(--rule); padding-bottom: 0.7rem;
+  }
+  figcaption b { color: var(--ink); }
+
+  /* ---- The associative-trail interactive figure ---- */
+  .trailfig text { font-family: ui-monospace, monospace; font-size: 11px; fill: var(--ink-soft); }
+  .trailfig .node circle { fill: var(--paper); stroke: var(--node); stroke-width: 1.4; transition: stroke .25s, fill .25s; }
+  .trailfig .node text { transition: fill .25s, font-weight .25s; }
+  .trailfig .edge { stroke: var(--rule); stroke-width: 1.2; fill: none; transition: stroke .3s, stroke-width .3s, opacity .3s; opacity: .55; }
+  /* surfacing: when a node is "approached" (hover/focus), its trail lights up */
+  .trailfig .node:hover circle,
+  .trailfig .node:focus-visible circle { stroke: var(--trail); fill: oklch(0.95 0.04 250); }
+  .trailfig .node:hover text,
+  .trailfig .node:focus-visible text { fill: var(--ink); font-weight: 700; }
+  .trailfig .node[data-surfaced="1"] circle { stroke: var(--trail); stroke-width: 2; fill: oklch(0.96 0.03 250); }
+  .trailfig .node[data-surfaced="1"] text { fill: var(--ink); font-weight: 700; }
+  .trailfig .edge[data-surfaced="1"] { stroke: var(--trail); stroke-width: 2.2; opacity: 1; }
+  .trailfig .dot { fill: var(--trail); opacity: 0; }
+  .trailfig .dot[data-surfaced="1"] { opacity: 1; }
+  @media (prefers-reduced-motion: no-preference) {
+    .trailfig .dot[data-surfaced="1"] { animation: travel 1.6s ease-in-out infinite; }
+  }
+
+  /* ---- Tables ---- */
+  table { width: 100%; border-collapse: collapse; margin: 1.2rem 0; font-size: 0.9rem; }
+  caption { text-align: left; font-size: 0.82rem; color: var(--ink-soft); margin-bottom: 0.5rem; }
+  caption b { color: var(--ink); }
+  th, td { text-align: left; padding: 0.5rem 0.7rem; border-bottom: 0.09rem solid var(--rule); vertical-align: top; }
+  thead th { border-bottom: 0.14rem solid var(--ink); font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em; }
+  td code, p code, li code { background: var(--code-bg); padding: 0.05rem 0.32rem; border-radius: 0.2rem; font-family: ui-monospace, monospace; font-size: 0.84em; }
+
+  pre {
+    background: var(--code-bg); border: 0.09rem solid var(--rule); border-left: 0.2rem solid var(--node);
+    padding: 0.9rem 1.1rem; overflow-x: auto; font-size: 0.82rem; line-height: 1.6;
+    font-family: ui-monospace, monospace; border-radius: 0.2rem;
+  }
+  pre .cm { color: var(--ink-soft); }
+
+  ul, ol { padding-left: 1.4rem; }
+  li { margin: 0.35rem 0; }
+
+  blockquote {
+    margin: 1.4rem 0; padding: 0.4rem 0 0.4rem 1.2rem; border-left: 0.2rem solid var(--trail-warm);
+    font-style: italic; color: var(--ink);
+  }
+  blockquote cite { display: block; font-style: normal; font-size: 0.82rem; color: var(--ink-soft); margin-top: 0.5rem; }
+
+  /* ---- References ---- */
+  .refs { font-size: 0.84rem; line-height: 1.55; }
+  .refs li { margin: 0.6rem 0; }
+  .refs li[id] { scroll-margin-top: 1rem; }
+
+  /* ---- BibTeX block ---- */
+  .bibtex-wrap { margin: 1.4rem 0; }
+  .bibtex-wrap button {
+    font-family: ui-monospace, monospace; font-size: 0.78rem; cursor: pointer;
+    background: var(--ink); color: var(--paper); border: none; padding: 0.5rem 0.9rem;
+    border-radius: 0.2rem; letter-spacing: 0.03em;
+  }
+  .bibtex-wrap button:hover { background: var(--trail); }
+  .bibtex-wrap button[aria-pressed="true"] { background: var(--trail-warm); }
+  #bibtex { margin-top: 0.8rem; }
+
+  /* ---- Footer ---- */
+  footer { margin-top: 3rem; border-top: 0.18rem double var(--ink); padding-top: 1.2rem; font-size: 0.84rem; color: var(--ink-soft); }
+  footer a { color: var(--link); }
+  .footlinks { display: flex; flex-wrap: wrap; gap: 0.4rem 1.4rem; margin: 0.6rem 0; }
+
+  @keyframes travel { 0% { offset-distance: 0%; } 100% { offset-distance: 100%; } }
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<main id="main" class="sheet">
+
+  <header class="masthead">
+    <div class="venue">
+      <span>Qdrant Vector Space Day 2026 · "Think Outside the Bot"</span>
+      <span>Preprint · v0 · 2026</span>
+    </div>
+    <h1>
+      On Associative Trails
+      <span class="sub">A working realization of Vannevar Bush's <em>memex</em>, eighty years on</span>
+    </h1>
+    <p class="byline">Two-Weeks-Team · Memex project &nbsp;|&nbsp; correspondence: the repository, below</p>
+
+    <p class="abstract">
+      <b>Abstract.</b> In 1945, Vannevar Bush proposed the <em>memex</em>: a device that would store a
+      person's records and let them be retrieved not by indexing but by <em>association</em> — chains of
+      linked items he called <em>associative trails</em>.<sup class="cite"><a href="#ref-bush" aria-label="reference 1, Bush 1945">[1]</a></sup>
+      This page describes a small, concrete tool that takes that idea literally for one specific corpus:
+      your <b>Claude&nbsp;Code / Codex session history</b>. It is <mark>not a chatbot and runs no LLM at query
+      time</mark>; it embeds your transcripts and stores them in <a href="https://qdrant.tech" rel="noopener">Qdrant</a><sup class="cite"><a href="#ref-qdrant" aria-label="reference 3">[3]</a></sup>
+      so you can move through them by similarity rather than keywords. The claims here are deliberately
+      narrow and verifiable against the source.
+    </p>
+  </header>
+
+  <!-- ============ §1 ============ -->
+  <h2><span class="n">§1</span> The problem, stated plainly</h2>
+  <p>
+    A developer's working memory of a project lives partly in chat transcripts. Those transcripts accumulate
+    on disk as <code>~/.claude/projects/**/*.jsonl</code> (plus legacy transcripts and a <code>history.jsonl</code>).
+    Tooling tends to treat them as disposable: sessions are silently migrated or deleted. The corpus you
+    actually thought <em>through</em> is therefore both <em>large</em> and <em>fragile</em>, and it is keyed by
+    nothing useful — you cannot grep your way back to "that approach we discarded last month," because you
+    no longer remember the words you used.
+  </p>
+  <p>
+    Bush diagnosed exactly this gap. The trouble, he wrote, is not that we record too little but that
+    retrieval is <em>artificial</em>:
+  </p>
+  <blockquote>
+    "The human mind … operates by association. With one item in its grasp, it snaps instantly to the next
+    that is suggested by the association of thoughts… Selection by association, rather than by indexing,
+    may yet be mechanized."
+    <cite>— V. Bush, <em>As We May Think</em>, The Atlantic, July 1945.<sup class="cite"><a href="#ref-bush">[1]</a></sup></cite>
+  </blockquote>
+
+  <!-- ============ §2 — the interactive figure ============ -->
+  <h2><span class="n">§2</span> An associative trail, illustrated</h2>
+  <p>
+    The figure below is the page's one interactive element. It is not a search box. Each node is a session
+    fragment; the lines are <em>trails</em> — proximity in embedding space. Move focus to (or hover) any node:
+    its nearest neighbours <em>surface</em>, and the trail between them lights up. This is the same gesture the
+    tool offers — approaching one memory brings the associated ones forward, the way a thought "comes back to
+    you." Keyboard users: <kbd>Tab</kbd> through the nodes.
+  </p>
+
+  <figure>
+    <svg class="trailfig" viewBox="0 0 640 320" role="group" aria-label="Interactive diagram of an associative trail between six session fragments. Focusing a node surfaces its nearest neighbours.">
+      <!-- edges: id pairs encode the trail -->
+      <path class="edge" id="e-a-b" data-pair="a,b" d="M110,90 C200,70 240,120 330,120" />
+      <path class="edge" id="e-b-c" data-pair="b,c" d="M330,120 C400,130 460,90 540,80" />
+      <path class="edge" id="e-a-d" data-pair="a,d" d="M110,90 C140,170 150,210 200,250" />
+      <path class="edge" id="e-d-e" data-pair="d,e" d="M200,250 C290,275 360,255 430,245" />
+      <path class="edge" id="e-c-e" data-pair="c,e" d="M540,80 C560,150 510,210 430,245" />
+      <path class="edge" id="e-b-e" data-pair="b,e" d="M330,120 C350,180 370,210 430,245" />
+
+      <!-- travelling dot along a representative trail -->
+      <circle class="dot" id="dot-a-b" r="4" style="offset-path: path('M110,90 C200,70 240,120 330,120');" />
+
+      <!-- nodes: each focusable, with data-neighbors -->
+      <g class="node" tabindex="0" role="button" data-id="a" data-neighbors="b,d" aria-label="Fragment A: chose Qdrant over a flat index. Neighbours: B, D.">
+        <circle cx="110" cy="90" r="13" /><text x="110" y="68" text-anchor="middle">A · "chose Qdrant"</text>
+      </g>
+      <g class="node" tabindex="0" role="button" data-id="b" data-neighbors="a,c,e" aria-label="Fragment B: named-vector weighting. Neighbours: A, C, E.">
+        <circle cx="330" cy="120" r="13" /><text x="330" y="150" text-anchor="middle">B · "Lens weights"</text>
+      </g>
+      <g class="node" tabindex="0" role="button" data-id="c" data-neighbors="b,e" aria-label="Fragment C: MST topology graph. Neighbours: B, E.">
+        <circle cx="540" cy="80" r="13" /><text x="540" y="58" text-anchor="middle">C · "MST topology"</text>
+      </g>
+      <g class="node" tabindex="0" role="button" data-id="d" data-neighbors="a,e" aria-label="Fragment D: discarded approach. Neighbours: A, E.">
+        <circle cx="200" cy="250" r="13" /><text x="200" y="278" text-anchor="middle">D · "discarded idea"</text>
+      </g>
+      <g class="node" tabindex="0" role="button" data-id="e" data-neighbors="d,c,b" aria-label="Fragment E: proactive recall fired. Neighbours: D, C, B.">
+        <circle cx="430" cy="245" r="13" /><text x="430" y="273" text-anchor="middle">E · "Recall fired"</text>
+      </g>
+    </svg>
+    <figcaption>
+      <b>Figure&nbsp;1.</b> A fragment of an associative trail. Nodes are session excerpts; edges are
+      embedding-space proximity. <b>Surfacing</b> is modelled as focus/hover: approaching one fragment brings its
+      nearest neighbours forward. Compare Bush's "trail of many items" stitched together by the researcher.<sup class="cite"><a href="#ref-bush">[1]</a></sup>
+      <em>Reduced-motion preference disables the travelling marker.</em>
+    </figcaption>
+  </figure>
+
+  <!-- ============ §3 ============ -->
+  <h2><span class="n">§3</span> Method — what the tool actually does</h2>
+  <p>
+    The mapping from Bush's 1945 specification to 2026 mechanics is direct, and we state it without
+    embellishment.
+  </p>
+
+  <table>
+    <caption><b>Table&nbsp;1.</b> Bush's <em>memex</em> faculties and their concrete counterparts. No claim is made that this exhausts Bush's vision; only that these correspondences are literal.</caption>
+    <thead>
+      <tr><th scope="col">Memex faculty (1945)</th><th scope="col">Memex tool (2026)</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>A private store of "books, records, and communications"</td><td>Local session corpus: <code>~/.claude/projects/**/*.jsonl</code> + legacy transcripts + <code>history.jsonl</code> — <b>a corpus you own</b>.</td></tr>
+      <tr><td>Retrieval by association, not by index</td><td>Vector similarity in <a href="https://qdrant.tech" rel="noopener">Qdrant</a>; movement by distance, not by keyword.</td></tr>
+      <tr><td>"Associative trails" of linked items</td><td><b>Topology</b>: distance-matrix → minimum-spanning-tree graph over fragments.</td></tr>
+      <tr><td>Trails the user can re-traverse later</td><td><b>Time Machine</b> (replay) and <b>Lens</b> (named-vector weighted views).</td></tr>
+      <tr><td>Items that resurface when relevant</td><td><b>Proactive Recall</b> and <b>Mix / Discovery</b> (positive / negative recommendation).</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Design constraints (and what they rule out)</h3>
+  <ul>
+    <li><b>LLM-free at query time.</b> Embeddings are computed and stored; retrieval is vector arithmetic. There is no generative model answering you, so there is nothing to hallucinate a citation. This is a deliberate limitation, not a feature claim.</li>
+    <li><b>No chatbot surface.</b> The interfaces are spatial (Topology, Time Machine, Dashboard, and a Companion / Wrapped / Loop-Breaker agent-memory layer), not conversational.</li>
+    <li><b>Reproducible substrate.</b> A server / Docker variant packages Qdrant + web UI + MCP server in one image, so the experiment can be re-run on another machine.</li>
+  </ul>
+
+  <!-- ============ §4 ============ -->
+  <h2><span class="n">§4</span> Reproducibility &amp; agent integration</h2>
+  <p>
+    The corpus, the store, and the access layer are all open. Memex exposes <b>11 MCP tools</b> over stdio and
+    HTTP, so an agent in Claude&nbsp;Code, Codex, or Cursor can traverse the same trails programmatically. To
+    register it as an MCP server:
+  </p>
+  <pre><span class="cm"># register the Memex MCP server with Claude Code</span>
+claude mcp add memex -- memex-mcp        <span class="cm"># 11 tools over stdio</span>
+<span class="cm"># or run the all-in-one image (Qdrant + web UI + MCP)</span>
+docker run -p 6333:6333 -p 8080:8080 memex:server</pre>
+  <p>
+    Source, the live landing page, and the server variant are linked below. We encourage inspection of the
+    ingestion and embedding code rather than taking these descriptions on faith — the value of an associative
+    memory is precisely that it should be <em>auditable</em>.
+  </p>
+
+  <!-- ============ §5 ============ -->
+  <h2><span class="n">§5</span> Limitations &amp; honest scope</h2>
+  <ul>
+    <li>Retrieval quality is bounded by the embedding model and by how much of your history survives on disk; Memex preserves the corpus but cannot recover sessions already deleted before first ingest.</li>
+    <li>"Surfacing" is similarity, not understanding. A neighbour in vector space is <em>plausibly</em> related, not <em>provably</em> so. Treat surfaced trails as leads, not conclusions.</li>
+    <li>This page is a project preview built for a hackathon. Numbers, latencies, and recall metrics are intentionally <em>absent</em> rather than estimated, because they have not been measured under a fixed protocol.</li>
+  </ul>
+
+  <!-- ============ References ============ -->
+  <h2><span class="n">§R</span> References</h2>
+  <ol class="refs">
+    <li id="ref-bush">
+      V. Bush. "As We May Think." <em>The Atlantic Monthly</em>, vol. 176, no. 1, pp. 101–108, July 1945.
+      Available: <a href="https://www.theatlantic.com/magazine/archive/1945/07/as-we-may-think/303881/" rel="noopener">theatlantic.com/magazine/archive/1945/07/as-we-may-think/</a>.
+    </li>
+    <li id="ref-memex">
+      Two-Weeks-Team. "Memex — associative memory over Claude Code / Codex session history." Source repository, 2026.
+      Available: <a href="https://github.com/Two-Weeks-Team/memex" rel="noopener">github.com/Two-Weeks-Team/memex</a>.
+      Live preview: <a href="https://two-weeks-team.github.io/memex/" rel="noopener">two-weeks-team.github.io/memex</a>.
+    </li>
+    <li id="ref-qdrant">
+      Qdrant. "Qdrant — vector similarity search engine." Documentation, 2026.
+      Available: <a href="https://qdrant.tech" rel="noopener">qdrant.tech</a>.
+      Event: <em>Vector Space Day 2026 — "Think Outside the Bot."</em>
+    </li>
+  </ol>
+
+  <!-- ============ BibTeX export ============ -->
+  <h3>Cite this</h3>
+  <div class="bibtex-wrap">
+    <button id="bibBtn" type="button" aria-pressed="false" aria-controls="bibtex">Copy BibTeX (Bush 1945 + Memex)</button>
+    <pre id="bibtex" tabindex="0" aria-label="BibTeX entries">@article{bush1945,
+  author  = {Bush, Vannevar},
+  title   = {As We May Think},
+  journal = {The Atlantic Monthly},
+  volume  = {176},
+  number  = {1},
+  pages   = {101--108},
+  year    = {1945},
+  month   = jul,
+  url     = {https://www.theatlantic.com/magazine/archive/1945/07/as-we-may-think/303881/}
+}
+
+@misc{memex2026,
+  author       = {{Two-Weeks-Team}},
+  title        = {Memex: an associative memory over Claude Code and Codex session history},
+  howpublished = {\url{https://github.com/Two-Weeks-Team/memex}},
+  note         = {Live preview: https://two-weeks-team.github.io/memex/. Built for Qdrant Vector Space Day 2026},
+  year         = {2026}
+}</pre>
+  </div>
+
+  <footer>
+    <p>Memex is a non-chatbot, LLM-free-at-runtime tool built for <b>Qdrant Vector Space Day 2026</b>. It does not run a language model when you query it.</p>
+    <nav class="footlinks" aria-label="Project links">
+      <a href="https://github.com/Two-Weeks-Team/memex" rel="noopener">Repository</a>
+      <a href="https://two-weeks-team.github.io/memex/" rel="noopener">Live landing</a>
+      <a href="https://github.com/Two-Weeks-Team/memex#server" rel="noopener">Server / Docker variant</a>
+      <a href="https://www.theatlantic.com/magazine/archive/1945/07/as-we-may-think/303881/" rel="noopener">Bush 1945 (primary source)</a>
+      <a href="https://qdrant.tech" rel="noopener">Qdrant</a>
+    </nav>
+    <p style="font-size:0.78rem;">Typeset as a single self-contained page. Inline CSS + vanilla JS, no build step, no external libraries.</p>
+  </footer>
+
+</main>
+
+<script>
+(function () {
+  "use strict";
+
+  // ---------- §2: associative-trail surfacing ----------
+  var svg = document.querySelector(".trailfig");
+  if (svg) {
+    var nodes = Array.prototype.slice.call(svg.querySelectorAll(".node"));
+    var edges = Array.prototype.slice.call(svg.querySelectorAll(".edge"));
+    var dots  = Array.prototype.slice.call(svg.querySelectorAll(".dot"));
+
+    function clear() {
+      nodes.forEach(function (n) { n.removeAttribute("data-surfaced"); });
+      edges.forEach(function (e) { e.removeAttribute("data-surfaced"); });
+      dots.forEach(function (d) { d.removeAttribute("data-surfaced"); });
+    }
+
+    function edgeMatches(edge, a, b) {
+      var pair = (edge.getAttribute("data-pair") || "").split(",");
+      return (pair[0] === a && pair[1] === b) || (pair[0] === b && pair[1] === a);
+    }
+
+    function surface(node) {
+      clear();
+      var id = node.getAttribute("data-id");
+      var neigh = (node.getAttribute("data-neighbors") || "").split(",").filter(Boolean);
+      // surface this node
+      node.setAttribute("data-surfaced", "1");
+      // surface neighbours + connecting edges
+      neigh.forEach(function (nid) {
+        var target = svg.querySelector('.node[data-id="' + nid + '"]');
+        if (target) target.setAttribute("data-surfaced", "1");
+        edges.forEach(function (e) {
+          if (edgeMatches(e, id, nid)) e.setAttribute("data-surfaced", "1");
+        });
+        dots.forEach(function (d) {
+          var did = d.id.replace("dot-", "");
+          if (edgeMatches({ getAttribute: function () { return did.replace("-", ","); } }, id, nid)) {
+            d.setAttribute("data-surfaced", "1");
+          }
+        });
+      });
+    }
+
+    nodes.forEach(function (n) {
+      n.addEventListener("mouseenter", function () { surface(n); });
+      n.addEventListener("focus", function () { surface(n); });
+      n.addEventListener("keydown", function (ev) {
+        if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); surface(n); }
+      });
+    });
+    svg.addEventListener("mouseleave", clear);
+    // surface one trail on load so the motif is visible without interaction
+    surface(nodes[1]);
+  }
+
+  // ---------- BibTeX copy ----------
+  var btn = document.getElementById("bibBtn");
+  var pre = document.getElementById("bibtex");
+  if (btn && pre) {
+    btn.addEventListener("click", function () {
+      var text = pre.textContent;
+      function done() {
+        var prev = btn.textContent;
+        btn.textContent = "Copied to clipboard ✓";
+        btn.setAttribute("aria-pressed", "true");
+        setTimeout(function () { btn.textContent = prev; btn.setAttribute("aria-pressed", "false"); }, 2200);
+      }
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(done, selectFallback);
+      } else {
+        selectFallback();
+      }
+      function selectFallback() {
+        // select the text so the user can copy manually
+        var range = document.createRange();
+        range.selectNodeContents(pre);
+        var sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+        pre.focus();
+        btn.textContent = "Selected — press ⌘/Ctrl+C";
+        setTimeout(function () { btn.textContent = "Copy BibTeX (Bush 1945 + Memex)"; }, 2600);
+      }
+    });
+  }
+})();
+</script>
+</body>
+</html>

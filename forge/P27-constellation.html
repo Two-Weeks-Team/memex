@@ -1,0 +1,652 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Memex — the night sky remembers</title>
+<meta name="description" content="Memex turns your Claude Code & Codex session history into a navigable associative memory. The relevant moment surfaces on its own — like a constellation resolving out of the dark." />
+<style>
+  :root{
+    --ink:#dfe6ff;
+    --dim:#8c97c4;
+    --faint:#5a6494;
+    --star:#fbf7e8;
+    --line:#7da2ff;
+    --warm:#ffcf86;        /* lamp / screen glow */
+    --warm-2:#ff9a5a;
+    --cyan:#8fe6ff;
+    --accent:#a9c2ff;
+    --bg0:#04060f;
+    --bg1:#080b1c;
+    --panel: rgba(10,14,30,.55);
+    --hair: rgba(160,178,255,.18);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    background:
+      radial-gradient(1200px 760px at 72% 18%, #0f1736 0%, transparent 60%),
+      radial-gradient(1400px 900px at 18% 90%, #0a0f24 0%, transparent 55%),
+      linear-gradient(180deg, var(--bg1), var(--bg0) 70%);
+    color:var(--ink);
+    font:16px/1.6 ui-sans-serif,-apple-system,"Segoe UI",Roboto,Inter,system-ui,sans-serif;
+    overflow-x:hidden;
+    -webkit-font-smoothing:antialiased;
+  }
+  a{color:var(--accent);text-decoration:none}
+  a:hover{text-decoration:underline}
+  code,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+
+  /* ---------- the cosmos stage ---------- */
+  .stage{position:relative;width:100%;height:100svh;min-height:620px;overflow:hidden}
+  #sky{position:absolute;inset:0;width:100%;height:100%;display:block}
+
+  /* soft vignette so type stays legible over the field */
+  .stage::after{
+    content:"";position:absolute;inset:0;pointer-events:none;
+    background:
+      radial-gradient(120% 80% at 50% 42%, transparent 38%, rgba(4,6,15,.62) 100%),
+      linear-gradient(180deg, rgba(4,6,15,.42) 0%, transparent 26%, transparent 64%, rgba(4,6,15,.85) 100%);
+  }
+
+  /* ---------- overlaid copy ---------- */
+  .hud{position:absolute;inset:0;display:flex;flex-direction:column;pointer-events:none;z-index:3}
+  .hud > *{pointer-events:auto}
+
+  .topbar{display:flex;align-items:center;justify-content:space-between;gap:16px;
+    padding:22px clamp(18px,5vw,56px)}
+  .brand{display:flex;align-items:center;gap:11px;font-weight:700;letter-spacing:.16em;
+    text-transform:uppercase;font-size:13px;color:var(--ink)}
+  .brand .dot{width:9px;height:9px;border-radius:50%;background:var(--warm);
+    box-shadow:0 0 10px 2px rgba(255,207,134,.7)}
+  .topbar nav{display:flex;gap:clamp(10px,2.4vw,26px);font-size:13px;color:var(--dim);
+    letter-spacing:.02em}
+  .topbar nav a{color:var(--dim)}
+  .topbar nav a:hover{color:var(--ink)}
+
+  .hero{margin-top:auto;padding:0 clamp(18px,5vw,56px) clamp(26px,6vh,64px);max-width:760px}
+
+  /* the "current situation" prompt that calls the memory up */
+  .moment{display:inline-flex;align-items:center;gap:10px;margin-bottom:20px;
+    padding:8px 14px;border:1px solid var(--hair);border-radius:999px;
+    background:var(--panel);backdrop-filter:blur(6px);
+    font-size:12.5px;letter-spacing:.02em;color:var(--dim)}
+  .moment .pulse{width:7px;height:7px;border-radius:50%;background:var(--cyan);
+    box-shadow:0 0 0 0 rgba(143,230,255,.6);animation:pulse 2.6s ease-out infinite}
+  .moment b{color:var(--ink);font-weight:600}
+  @keyframes pulse{
+    0%{box-shadow:0 0 0 0 rgba(143,230,255,.55)}
+    70%{box-shadow:0 0 0 9px rgba(143,230,255,0)}
+    100%{box-shadow:0 0 0 0 rgba(143,230,255,0)}
+  }
+
+  h1{margin:0;font-weight:680;font-size:clamp(33px,6vw,62px);line-height:1.04;
+    letter-spacing:-.018em;color:#fff;text-shadow:0 2px 40px rgba(8,12,30,.7)}
+  h1 .glow{color:var(--warm);text-shadow:0 0 28px rgba(255,207,134,.45)}
+  .lede{margin:18px 0 0;font-size:clamp(15px,2.1vw,18.5px);color:var(--dim);max-width:600px}
+  .lede b{color:var(--ink);font-weight:600}
+
+  .cta{display:flex;flex-wrap:wrap;gap:13px;margin-top:28px}
+  .btn{display:inline-flex;align-items:center;gap:9px;padding:12px 20px;border-radius:11px;
+    font-size:14.5px;font-weight:600;letter-spacing:.01em;border:1px solid transparent;
+    transition:transform .15s ease, box-shadow .25s ease, background .25s ease}
+  .btn:hover{text-decoration:none;transform:translateY(-1px)}
+  .btn-primary{background:linear-gradient(180deg,#ffe1ad,#ffcf86);color:#2a1c05;
+    box-shadow:0 8px 30px rgba(255,207,134,.28)}
+  .btn-primary:hover{box-shadow:0 12px 36px rgba(255,207,134,.4)}
+  .btn-ghost{border-color:var(--hair);color:var(--ink);background:var(--panel);
+    backdrop-filter:blur(6px)}
+  .btn-ghost:hover{border-color:rgba(160,178,255,.42)}
+
+  .legend{margin-top:22px;font-size:12.5px;color:var(--faint);letter-spacing:.01em;
+    display:flex;align-items:center;gap:9px}
+  .legend .scene-label{color:var(--warm);font-weight:600;letter-spacing:.04em}
+
+  /* small replay control, lower-right of the stage */
+  .replay{position:absolute;right:clamp(16px,4vw,40px);bottom:clamp(20px,5vh,40px);
+    display:inline-flex;align-items:center;gap:8px;padding:9px 14px;border-radius:999px;
+    border:1px solid var(--hair);background:var(--panel);backdrop-filter:blur(6px);
+    color:var(--dim);font-size:12.5px;cursor:pointer;z-index:4}
+  .replay:hover{color:var(--ink);border-color:rgba(160,178,255,.4)}
+  .replay svg{width:13px;height:13px;fill:currentColor}
+
+  /* ---------- the ground-truth section below the fold ---------- */
+  .below{position:relative;z-index:2;max-width:1080px;margin:0 auto;
+    padding:clamp(56px,10vh,110px) clamp(18px,5vw,40px) 40px}
+  .kicker{font-size:12px;letter-spacing:.22em;text-transform:uppercase;color:var(--faint);
+    margin:0 0 14px}
+  .below h2{font-size:clamp(24px,4vw,38px);line-height:1.12;margin:0;color:#fff;
+    letter-spacing:-.01em;font-weight:660;max-width:760px}
+  .below p.sub{color:var(--dim);max-width:680px;margin:16px 0 0;font-size:16px}
+
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(238px,1fr));gap:16px;
+    margin-top:42px}
+  .card{border:1px solid var(--hair);border-radius:16px;padding:22px 22px 24px;
+    background:linear-gradient(180deg, rgba(14,19,40,.6), rgba(8,11,24,.45));
+    transition:border-color .2s ease, transform .2s ease}
+  .card:hover{border-color:rgba(160,178,255,.4);transform:translateY(-2px)}
+  .card h3{margin:0 0 8px;font-size:16px;color:#fff;letter-spacing:.01em;
+    display:flex;align-items:center;gap:9px}
+  .card h3 .gp{width:8px;height:8px;border-radius:50%;background:var(--line);
+    box-shadow:0 0 8px 1px rgba(125,162,255,.7);flex:0 0 auto}
+  .card p{margin:0;font-size:14px;color:var(--dim);line-height:1.55}
+
+  .facts{margin-top:44px;border:1px solid var(--hair);border-radius:16px;overflow:hidden;
+    background:rgba(8,11,24,.5)}
+  .facts .row{display:grid;grid-template-columns:160px 1fr;gap:18px;padding:16px 22px;
+    border-top:1px solid rgba(160,178,255,.08);font-size:14.5px}
+  .facts .row:first-child{border-top:0}
+  .facts .row .lab{color:var(--faint);letter-spacing:.04em;font-size:12.5px;
+    text-transform:uppercase;padding-top:2px}
+  .facts .row .val{color:var(--ink)}
+  .facts .row .val .mono{color:var(--cyan);font-size:13.5px}
+
+  .addline{margin-top:34px;border:1px solid var(--hair);border-radius:14px;
+    background:#06091a;padding:16px 18px;font-size:13.5px;color:var(--dim);overflow-x:auto}
+  .addline .mono{color:var(--ink)}
+  .addline .c{color:var(--warm)}
+
+  footer{position:relative;z-index:2;border-top:1px solid var(--hair);margin-top:60px}
+  .foot{max-width:1080px;margin:0 auto;padding:28px clamp(18px,5vw,40px) 60px;
+    display:flex;flex-wrap:wrap;gap:18px;justify-content:space-between;align-items:center;
+    color:var(--faint);font-size:13px}
+  .foot a{color:var(--dim)}
+  .foot .links{display:flex;flex-wrap:wrap;gap:18px}
+
+  /* ---------- reduced motion: static, completed constellation-scene ---------- */
+  @media (prefers-reduced-motion: reduce){
+    .moment .pulse{animation:none}
+  }
+
+  @media (max-width:640px){
+    .topbar nav{display:none}
+    .facts .row{grid-template-columns:1fr;gap:4px}
+    .replay{display:none}
+  }
+</style>
+</head>
+<body>
+
+<section class="stage" aria-label="A constellation resolving out of the night sky into a remembered coding moment">
+  <canvas id="sky" aria-hidden="true"></canvas>
+
+  <div class="hud">
+    <header class="topbar">
+      <div class="brand"><span class="dot" aria-hidden="true"></span> Memex</div>
+      <nav aria-label="Primary">
+        <a href="https://github.com/Two-Weeks-Team/memex">Repo</a>
+        <a href="https://two-weeks-team.github.io/memex/">Live</a>
+        <a href="#how">How it works</a>
+        <a href="#agent">For agents</a>
+      </nav>
+    </header>
+
+    <div class="hero">
+      <span class="moment">
+        <span class="pulse" aria-hidden="true"></span>
+        Right now you're <b>debugging an auth-retry loop</b> &mdash; and the sky stirs&hellip;
+      </span>
+
+      <h1>You solved this once.<br>The night sky <span class="glow">remembers&nbsp;it.</span></h1>
+
+      <p class="lede">
+        You never wrote it down. But scattered points of an old session find each other,
+        draw their lines, and resolve into the <b>scene of the moment you fixed it</b> &mdash;
+        the late-night desk, the screen, the working patch &mdash; surfacing on its own,
+        because right now called it up.
+      </p>
+
+      <div class="cta">
+        <a class="btn btn-primary" href="https://github.com/Two-Weeks-Team/memex">Get Memex on GitHub</a>
+        <a class="btn btn-ghost" href="https://two-weeks-team.github.io/memex/">See it live</a>
+      </div>
+
+      <p class="legend">
+        <span class="scene-label" id="sceneName">resolving&hellip;</span>
+        <span aria-hidden="true">&middot;</span>
+        an associative trail, not a search
+      </p>
+    </div>
+
+    <button class="replay" id="replay" type="button" aria-label="Replay the constellation forming">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5V1L7 6l5 5V7a5 5 0 1 1-5 5H5a7 7 0 1 0 7-7z"/></svg>
+      Recall again
+    </button>
+  </div>
+</section>
+
+<main class="below">
+  <section id="how">
+    <p class="kicker">What just happened</p>
+    <h2>People don't document every memory &mdash; yet when the moment arrives,
+      the relevant thought surfaces on its own.</h2>
+    <p class="sub">
+      Memex is a non-chatbot, LLM-free-at-runtime tool that reads your existing
+      Claude&nbsp;Code and Codex session history and turns it into a navigable
+      associative memory backed by <b style="color:var(--ink)">Qdrant</b>. You move through your own past by
+      <i>similarity</i>, not keywords &mdash; and the relevant moment can rise to you proactively.
+    </p>
+
+    <div class="grid">
+      <article class="card">
+        <h3><span class="gp" aria-hidden="true"></span>Time Machine</h3>
+        <p>Replay any past session as it happened &mdash; the whole scene, not a snippet.</p>
+      </article>
+      <article class="card">
+        <h3><span class="gp" aria-hidden="true"></span>Lens</h3>
+        <p>Named-vector weighted search to look through your history from one angle at a time.</p>
+      </article>
+      <article class="card">
+        <h3><span class="gp" aria-hidden="true"></span>Topology</h3>
+        <p>A distance-matrix &rarr; MST graph: the constellation of how your sessions actually connect.</p>
+      </article>
+      <article class="card">
+        <h3><span class="gp" aria-hidden="true"></span>Mix &amp; Discovery</h3>
+        <p>Positive / negative recommendation to pull related work toward you and push noise away.</p>
+      </article>
+      <article class="card">
+        <h3><span class="gp" aria-hidden="true"></span>Proactive Recall</h3>
+        <p>The piece that lit the sky above: a relevant past moment surfaces because the current one evoked it.</p>
+      </article>
+      <article class="card">
+        <h3><span class="gp" aria-hidden="true"></span>Companion · Wrapped · Loop&nbsp;Breaker</h3>
+        <p>An agent-memory layer over your corpus &mdash; recap what you've done, and catch yourself circling.</p>
+      </article>
+    </div>
+
+    <div class="facts" aria-label="What Memex is">
+      <div class="row"><div class="lab">Reads</div>
+        <div class="val"><span class="mono">~/.claude/projects/**/*.jsonl</span>, legacy transcripts, and <span class="mono">history.jsonl</span></div></div>
+      <div class="row"><div class="lab">Backed by</div>
+        <div class="val">Qdrant &mdash; navigate by vector similarity, no runtime LLM</div></div>
+      <div class="row"><div class="lab">Why</div>
+        <div class="val">Claude&nbsp;Code silently migrates and deletes old sessions. Memex keeps a corpus <b style="color:var(--ink)">you own.</b></div></div>
+      <div class="row"><div class="lab">Built for</div>
+        <div class="val">Qdrant Vector Space Day 2026 &mdash; <i>"Think Outside the Bot."</i></div></div>
+    </div>
+  </section>
+
+  <section id="agent">
+    <p class="kicker" style="margin-top:56px">For your agent</p>
+    <h2 style="font-size:clamp(20px,3vw,28px)">11 MCP tools over stdio + HTTP &mdash;
+      works in Claude&nbsp;Code, Codex, and Cursor.</h2>
+    <p class="sub">A server / Docker variant runs Qdrant, the web UI, and the MCP server in one image.
+      The tools let an agent recall, replay, and connect across your own history.</p>
+    <div class="addline mono">
+      <span class="c">$</span> claude mcp add memex -- memex-mcp
+    </div>
+    <p style="margin-top:18px;font-size:14px">
+      <a href="https://github.com/Two-Weeks-Team/memex#server--docker">Server / Docker variant</a>
+      &nbsp;&middot;&nbsp;
+      <a href="https://github.com/Two-Weeks-Team/memex">MCP integration &amp; the 11 tools</a>
+    </p>
+  </section>
+</main>
+
+<footer>
+  <div class="foot">
+    <div>Memex &mdash; a memory you own, surfaced by association.</div>
+    <div class="links">
+      <a href="https://github.com/Two-Weeks-Team/memex">GitHub</a>
+      <a href="https://two-weeks-team.github.io/memex/">Live landing</a>
+      <a href="https://github.com/Two-Weeks-Team/memex#server--docker">Docker</a>
+    </div>
+  </div>
+</footer>
+
+<script>
+(function(){
+  "use strict";
+
+  var canvas = document.getElementById('sky');
+  var ctx = canvas.getContext('2d');
+  var sceneName = document.getElementById('sceneName');
+  var replayBtn = document.getElementById('replay');
+
+  var DPR = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+  var W = 0, H = 0;            // CSS pixels
+  var reduce = window.matchMedia &&
+               window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // ---- background drifting starfield -------------------------------------
+  var bgStars = [];
+  function buildBg(){
+    bgStars.length = 0;
+    var n = Math.round((W * H) / 5200);
+    n = Math.max(110, Math.min(420, n));
+    for (var i=0;i<n;i++){
+      bgStars.push({
+        x: Math.random(),
+        y: Math.random(),
+        z: 0.3 + Math.random()*1.7,          // depth → parallax + size
+        r: 0.4 + Math.random()*1.3,
+        tw: Math.random()*Math.PI*2,
+        tws: 0.4 + Math.random()*1.4,
+        hue: Math.random() < 0.12 ? 'warm' : (Math.random()<0.1 ? 'cyan' : 'star')
+      });
+    }
+  }
+
+  /* ---------------------------------------------------------------------------
+     THE SCENE the constellation resolves into.
+     A late-night coding moment, drawn in normalized [0..1] space so it scales:
+     a person seated at a desk, a desk lamp arcing overhead, a glowing monitor,
+     a mug, a chair. These are not abstract dots — connected, they read as a
+     recognizable tableau: "the night you fixed it."
+     pts: anchor stars.  links: [a,b] index pairs forming the figure's lines.
+  --------------------------------------------------------------------------- */
+  var FIG = {
+    // Authored in a normalized [0..1] box (figure aspect ~ 1.55:1, matches figT).
+    // Composition (read left→right): a PERSON seated, facing a MONITOR on a DESK,
+    // an angled DESK LAMP throwing warm light onto the screen, a MUG beside it.
+    // The figure is deliberately laid out so the connected stars read as a SCENE.
+    pts: [
+      /* ---- PERSON (left), facing right toward the screen ---- */
+      // head is a small ring of stars so it reads as a head, not a dot
+      {x:0.205, y:0.205, key:true},   //0  head top
+      {x:0.250, y:0.230},             //1  head right
+      {x:0.245, y:0.290},             //2  head lower-right (jaw)
+      {x:0.195, y:0.305},             //3  head lower-left (chin)
+      {x:0.160, y:0.255},             //4  head left
+      {x:0.170, y:0.205},             //5  head upper-left
+      // torso / back / seated lap
+      {x:0.215, y:0.330},             //6  neck
+      {x:0.190, y:0.470, key:true},   //7  lower back
+      {x:0.300, y:0.480},             //8  lap / knee (seated)
+      // arm reaching forward to the keyboard
+      {x:0.240, y:0.395},             //9  shoulder
+      {x:0.360, y:0.455},             //10 forearm
+      {x:0.430, y:0.500},             //11 hand on keyboard
+      // chair back behind the person
+      {x:0.140, y:0.330},             //12 chair top
+      {x:0.150, y:0.560},             //13 chair foot
+
+      /* ---- DESK (the horizon line the whole scene sits on) ---- */
+      {x:0.090, y:0.560, key:true},   //14 desk left edge
+      {x:0.930, y:0.560, key:true},   //15 desk right edge
+
+      /* ---- MONITOR (right of person), clean upright rectangle ---- */
+      {x:0.540, y:0.215, key:true},   //16 screen TL
+      {x:0.800, y:0.215, key:true},   //17 screen TR
+      {x:0.800, y:0.430, key:true},   //18 screen BR
+      {x:0.540, y:0.430, key:true},   //19 screen BL
+      {x:0.670, y:0.480},             //20 monitor stand neck
+      {x:0.610, y:0.560},             //21 monitor foot (on desk)
+
+      /* ---- DESK LAMP (far right), arm bent over the screen ---- */
+      {x:0.880, y:0.560},             //22 lamp base (on desk)
+      {x:0.890, y:0.380},             //23 lamp elbow
+      {x:0.755, y:0.250, key:true},   //24 lamp head (warm glow source)
+
+      /* ---- MUG on the desk between person and monitor ---- */
+      {x:0.455, y:0.520},             //25 mug left
+      {x:0.500, y:0.520},             //26 mug right
+      {x:0.455, y:0.560},             //27 mug base-left
+      {x:0.500, y:0.560}              //28 mug base-right
+    ],
+    links: [
+      // head ring (closed loop → reads as a head)
+      [0,1],[1,2],[2,3],[3,4],[4,5],[5,0],
+      // spine + seated body
+      [2,6],[6,7],[7,8],
+      // chair back
+      [12,7],[7,13],
+      // arm to keyboard
+      [6,9],[9,10],[10,11],
+      // desk horizon
+      [14,15],
+      // monitor rectangle + stand to desk
+      [16,17],[17,18],[18,19],[19,16],[18,20],[19,20],[20,21],
+      // lamp arm, head aimed back over the screen
+      [22,23],[23,24],
+      // mug
+      [25,26],[25,27],[26,28],[27,28]
+    ],
+    // warm light sources (lamp head + the monitor corners) for the glow bloom
+    glow: [24, 16, 17, 18, 19]
+  };
+
+  // place figure into device space with a little global transform
+  var figT = {ox:0, oy:0, s:1};
+  function layoutFigure(){
+    // The figure is the centerpiece (authored box 1.55:1). On wide screens it sits
+    // in the upper-RIGHT so it never collides with the headline on the lower-left;
+    // on narrow screens it centers in the upper band above the copy.
+    var narrow = W < 820;
+    var byW = W * (narrow ? 0.94 : 0.64);
+    var byH = (H * (narrow ? 0.50 : 0.62)) * 1.55;
+    figT.s = Math.min(byW, byH);
+    if (narrow){
+      figT.ox = (W - figT.s) * 0.5;
+      figT.oy = H*0.06;
+    } else {
+      // anchor to the right edge with a margin; raise it above the hero copy
+      figT.ox = W - figT.s - W*0.04;
+      figT.oy = H*0.085;
+    }
+    // resolve absolute coords + a stable per-star twinkle phase
+    for (var i=0;i<FIG.pts.length;i++){
+      var p = FIG.pts[i];
+      p.ax = figT.ox + p.x * figT.s;
+      p.ay = figT.oy + p.y * (figT.s/1.55);
+      if (p._ph === undefined) p._ph = Math.random()*Math.PI*2;
+    }
+    // precompute link lengths for draw-on timing
+    for (var j=0;j<FIG.links.length;j++){
+      var a = FIG.pts[FIG.links[j][0]], b = FIG.pts[FIG.links[j][1]];
+      FIG.links[j]._len = Math.hypot(b.ax-a.ax, b.ay-a.ay);
+    }
+  }
+
+  // ---- timeline / animation state ---------------------------------------
+  var T0 = 0;
+  // phase durations (ms)
+  var STAR_IN = 1400;     // anchor stars fade/zoom in
+  var LINE_IN = 2600;     // lines draw themselves
+  var SETTLE  = 900;      // scene holds + glow blooms
+  var TOTAL   = STAR_IN + LINE_IN + SETTLE;
+
+  function reset(now){
+    T0 = now;
+    sceneName.textContent = 'resolving…';
+    sceneNamed = false;
+  }
+  var sceneNamed = false;
+
+  function resize(){
+    var box = canvas.parentElement.getBoundingClientRect();
+    W = Math.max(1, Math.round(box.width));
+    H = Math.max(1, Math.round(box.height));
+    canvas.style.width = W + 'px';
+    canvas.style.height = H + 'px';
+    canvas.width = Math.round(W*DPR);
+    canvas.height = Math.round(H*DPR);
+    ctx.setTransform(DPR,0,0,DPR,0,0);
+    buildBg();
+    layoutFigure();
+  }
+
+  function col(kind, a){
+    if (kind === 'warm') return 'rgba(255,207,134,'+a+')';
+    if (kind === 'cyan') return 'rgba(143,230,255,'+a+')';
+    return 'rgba(251,247,232,'+a+')';
+  }
+
+  function easeOutCubic(t){ return 1 - Math.pow(1-t, 3); }
+
+  // soft star sprite
+  function drawStar(x, y, r, alpha, kind){
+    var g = ctx.createRadialGradient(x,y,0, x,y, r*4.2);
+    g.addColorStop(0, col(kind, alpha));
+    g.addColorStop(0.4, col(kind, alpha*0.5));
+    g.addColorStop(1, col(kind, 0));
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(x,y, r*4.2, 0, Math.PI*2); ctx.fill();
+    // bright core
+    ctx.fillStyle = col(kind, Math.min(1, alpha*1.2));
+    ctx.beginPath(); ctx.arc(x,y, r*0.9, 0, Math.PI*2); ctx.fill();
+  }
+
+  var driftT = 0;
+
+  function frame(now){
+    if (!T0) T0 = now;
+    var el = now - T0;
+    driftT += 0.0016;
+
+    ctx.clearRect(0,0,W,H);
+
+    // ---- drifting background field (subtle parallax sway) ----
+    var swayX = Math.sin(driftT*0.6) * (reduce?0:9);
+    var swayY = Math.cos(driftT*0.45) * (reduce?0:6);
+    for (var i=0;i<bgStars.length;i++){
+      var s = bgStars[i];
+      var px = s.x*W + swayX*s.z;
+      var py = s.y*H + swayY*s.z;
+      // wrap
+      if (px < -4) px += W+8; if (px > W+4) px -= W+8;
+      var tw = reduce ? 0.85 : (0.55 + 0.45*Math.sin(now*0.001*s.tws + s.tw));
+      var a = (0.10 + 0.42*tw) * (0.45 + s.z*0.3);
+      drawStar(px, py, s.r, Math.min(0.9,a), s.hue);
+    }
+
+    // ---- the figure: anchor stars zoom/fade in ----
+    var starP = reduce ? 1 : easeOutCubic(Math.min(1, el / STAR_IN));
+    for (var k=0;k<FIG.pts.length;k++){
+      var p = FIG.pts[k];
+      // staggered arrival, key stars first
+      var delay = (p.key ? 0 : 0.18) + (k/FIG.pts.length)*0.4;
+      var pp = reduce ? 1 : easeOutCubic(Math.max(0, Math.min(1, (el/STAR_IN - delay)/(1-delay))));
+      if (pp <= 0) continue;
+      var twk = reduce ? 1 : (0.8 + 0.2*Math.sin(now*0.002 + p._ph));
+      var baseR = p.key ? 1.9 : 1.25;
+      var kind = (FIG.glow.indexOf(k) >= 0) ? 'warm' : 'star';
+      drawStar(p.ax, p.ay, baseR*pp*twk, (0.55 + 0.4*pp)*twk, kind);
+    }
+
+    // ---- the lines draw themselves between stars ----
+    var lineEl = el - STAR_IN*0.55;     // begin while stars still arriving
+    var lineProg = reduce ? 1 : Math.max(0, Math.min(1, lineEl / LINE_IN));
+    // distribute progress across links so they appear to chain outward
+    var nL = FIG.links.length;
+    ctx.lineCap = 'round';
+    for (var L=0;L<nL;L++){
+      var seg = FIG.links[L];
+      var a = FIG.pts[seg[0]], b = FIG.pts[seg[1]];
+      var start = (L / nL) * 0.55;       // each link starts a bit later
+      var local = reduce ? 1 : easeOutCubic(Math.max(0, Math.min(1, (lineProg - start)/(1-start))));
+      if (local <= 0) continue;
+      var ex = a.ax + (b.ax-a.ax)*local;
+      var ey = a.ay + (b.ay-a.ay)*local;
+
+      // glowing line
+      ctx.strokeStyle = 'rgba(140,172,255,'+(0.22 + 0.28*local)+')';
+      ctx.lineWidth = 1.35;
+      ctx.shadowColor = 'rgba(125,162,255,0.55)';
+      ctx.shadowBlur = 7;
+      ctx.beginPath(); ctx.moveTo(a.ax, a.ay); ctx.lineTo(ex, ey); ctx.stroke();
+      ctx.shadowBlur = 0;
+
+      // a brighter "drawing head" comet at the growing tip
+      if (!reduce && local < 1){
+        drawStar(ex, ey, 1.45, 0.95, 'cyan');
+      }
+    }
+
+    // ---- settle: warm glow blooms from lamp + screen, scene "lit" ----
+    var settleEl = el - (STAR_IN + LINE_IN*0.78);
+    var settle = reduce ? 1 : Math.max(0, Math.min(1, settleEl / SETTLE));
+    if (settle > 0){
+      // the monitor screen fills with soft light, filling its rectangle (16..18)
+      var sTL = FIG.pts[16], sBR = FIG.pts[18];
+      var cx = (sTL.ax+sBR.ax)/2, cy=(sTL.ay+sBR.ay)/2;
+      var rw = Math.abs(sBR.ax - sTL.ax)*0.62;
+      var g = ctx.createRadialGradient(cx,cy,0, cx,cy, rw*2.2);
+      g.addColorStop(0, 'rgba(143,230,255,'+(0.20*settle)+')');
+      g.addColorStop(0.5, 'rgba(125,162,255,'+(0.09*settle)+')');
+      g.addColorStop(1, 'rgba(125,162,255,0)');
+      ctx.fillStyle = g;
+      ctx.beginPath(); ctx.arc(cx,cy, rw*2.2, 0, Math.PI*2); ctx.fill();
+
+      // the desk lamp head (24) throws a warm pool over the screen + desk
+      var lh = FIG.pts[24];
+      var lg = ctx.createRadialGradient(lh.ax,lh.ay,0, lh.ax,lh.ay, figT.s*0.20);
+      lg.addColorStop(0, 'rgba(255,207,134,'+(0.24*settle)+')');
+      lg.addColorStop(0.5, 'rgba(255,154,90,'+(0.08*settle)+')');
+      lg.addColorStop(1, 'rgba(255,154,90,0)');
+      ctx.fillStyle = lg;
+      ctx.beginPath(); ctx.arc(lh.ax, lh.ay, figT.s*0.20, 0, Math.PI*2); ctx.fill();
+
+      if (!sceneNamed && settle > 0.35){
+        sceneName.textContent = 'the night you fixed it';
+        sceneNamed = true;
+      }
+    }
+
+    if (reduce){
+      // draw the named scene immediately, hold static
+      if (!sceneNamed){ sceneName.textContent = 'the night you fixed it'; sceneNamed = true; }
+      return; // single static frame
+    }
+
+    // keep the field drifting forever; the figure stays lit once resolved.
+    rafId = requestAnimationFrame(frame);
+  }
+
+  var rafId = 0;
+  function start(){
+    cancelAnimationFrame(rafId);
+    resize();
+    T0 = 0; sceneNamed = false;
+    sceneName.textContent = reduce ? 'the night you fixed it' : 'resolving…';
+    if (reduce){
+      // static completed constellation-scene
+      frameStatic();
+    } else {
+      rafId = requestAnimationFrame(frame);
+    }
+  }
+
+  // render a single completed frame for reduced-motion
+  function frameStatic(){
+    // force timeline to fully-resolved state by faking a large elapsed time
+    var fakeNow = performance.now();
+    T0 = fakeNow - (TOTAL + 50);
+    frame(fakeNow);
+  }
+
+  replayBtn.addEventListener('click', function(){
+    reduce = window.matchMedia &&
+             window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (reduce){ start(); return; }
+    cancelAnimationFrame(rafId);
+    resize();
+    T0 = performance.now();
+    sceneNamed = false;
+    sceneName.textContent = 'resolving…';
+    rafId = requestAnimationFrame(frame);
+  });
+
+  var rT;
+  window.addEventListener('resize', function(){
+    clearTimeout(rT);
+    rT = setTimeout(function(){
+      var wasReduced = reduce;
+      resize();
+      if (reduce) frameStatic();
+    }, 160);
+  });
+
+  // honor live changes to the motion preference
+  if (window.matchMedia){
+    try {
+      window.matchMedia('(prefers-reduced-motion: reduce)')
+        .addEventListener('change', function(e){ reduce = e.matches; start(); });
+    } catch(_){}
+  }
+
+  start();
+})();
+</script>
+</body>
+</html>

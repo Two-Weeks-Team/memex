@@ -1,0 +1,884 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Memex — the dome remembers it for you</title>
+<meta name="description" content="Memex turns your Claude Code & Codex session history into a navigable associative memory backed by Qdrant. Lie back under a planetarium dome: the projector sweeps on its own, one star ignites, and a whole remembered coding moment blooms across the sky overhead — surfacing because right now called it up. LLM-free at runtime." />
+<style>
+  :root{
+    --ink:#e7ecff;
+    --dim:#9aa4cf;
+    --faint:#646e9c;
+    --star:#fbf7ea;
+    --warm:#ffd089;        /* projector lamp / scene warmth */
+    --warm-2:#ff9d57;
+    --cyan:#8fe6ff;
+    --violet:#b69cff;
+    --accent:#b3c4ff;
+    --bg0:#03040c;
+    --bg1:#070a18;
+    --dome:#0a0e22;
+    --panel:rgba(9,13,28,.56);
+    --hair:rgba(160,178,255,.18);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    background:
+      radial-gradient(1300px 900px at 50% -8%, #11183a 0%, transparent 58%),
+      radial-gradient(1100px 800px at 18% 96%, #090d22 0%, transparent 60%),
+      linear-gradient(180deg, var(--bg1), var(--bg0) 72%);
+    color:var(--ink);
+    font:16px/1.6 ui-sans-serif,-apple-system,"Segoe UI",Roboto,Inter,system-ui,sans-serif;
+    overflow-x:hidden;
+    -webkit-font-smoothing:antialiased;
+  }
+  a{color:var(--accent);text-decoration:none}
+  a:hover{text-decoration:underline}
+  code,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+
+  /* ---------- the dome stage: you are looking UP into a hemisphere ---------- */
+  .stage{position:relative;width:100%;height:100svh;min-height:640px;overflow:hidden}
+  #dome{position:absolute;inset:0;width:100%;height:100%;display:block}
+
+  /* a soft circular vignette so the dome reads as a curved hemisphere edge,
+     darkest at the rim and lifting toward the zenith */
+  .stage::after{
+    content:"";position:absolute;inset:0;pointer-events:none;
+    background:
+      radial-gradient(closest-side 78% 78% at 50% 46%, transparent 52%, rgba(3,4,12,.30) 74%, rgba(3,4,12,.86) 100%),
+      linear-gradient(180deg, rgba(3,4,12,.40) 0%, transparent 22%, transparent 58%, rgba(3,4,12,.90) 100%);
+    z-index:2;
+  }
+
+  /* ---------- overlaid copy ---------- */
+  .hud{position:absolute;inset:0;display:flex;flex-direction:column;pointer-events:none;z-index:4}
+  .hud > *{pointer-events:auto}
+
+  .topbar{display:flex;align-items:center;justify-content:space-between;gap:16px;
+    padding:22px clamp(18px,5vw,56px)}
+  .brand{display:flex;align-items:center;gap:11px;font-weight:700;letter-spacing:.16em;
+    text-transform:uppercase;font-size:13px;color:var(--ink)}
+  .brand .dot{width:9px;height:9px;border-radius:50%;background:var(--warm);
+    box-shadow:0 0 12px 2px rgba(255,208,137,.7)}
+  .topbar nav{display:flex;gap:clamp(10px,2.4vw,26px);font-size:13px;color:var(--dim);
+    letter-spacing:.02em}
+  .topbar nav a{color:var(--dim)}
+  .topbar nav a:hover{color:var(--ink)}
+
+  .hero{margin-top:auto;padding:0 clamp(18px,5vw,56px) clamp(26px,6vh,64px);max-width:780px}
+
+  /* the "current situation" the dome is responding to (NOT a search box) */
+  .moment{display:inline-flex;align-items:center;gap:10px;margin-bottom:20px;
+    padding:8px 14px;border:1px solid var(--hair);border-radius:999px;
+    background:var(--panel);backdrop-filter:blur(6px);
+    font-size:12.5px;letter-spacing:.02em;color:var(--dim)}
+  .moment .pulse{width:7px;height:7px;border-radius:50%;background:var(--cyan);
+    box-shadow:0 0 0 0 rgba(143,230,255,.6);animation:pulse 2.6s ease-out infinite}
+  .moment b{color:var(--ink);font-weight:600}
+  @keyframes pulse{
+    0%{box-shadow:0 0 0 0 rgba(143,230,255,.55)}
+    70%{box-shadow:0 0 0 9px rgba(143,230,255,0)}
+    100%{box-shadow:0 0 0 0 rgba(143,230,255,0)}
+  }
+
+  h1{margin:0;font-weight:680;font-size:clamp(33px,6vw,62px);line-height:1.04;
+    letter-spacing:-.018em;color:#fff;text-shadow:0 2px 44px rgba(5,8,22,.75)}
+  h1 .glow{color:var(--warm);text-shadow:0 0 30px rgba(255,208,137,.5)}
+  .lede{margin:18px 0 0;font-size:clamp(15px,2.1vw,18.5px);color:var(--dim);max-width:610px}
+  .lede b{color:var(--ink);font-weight:600}
+
+  .cta{display:flex;flex-wrap:wrap;gap:13px;margin-top:28px}
+  .btn{display:inline-flex;align-items:center;gap:9px;padding:12px 20px;border-radius:11px;
+    font-size:14.5px;font-weight:600;letter-spacing:.01em;border:1px solid transparent;
+    transition:transform .15s ease, box-shadow .25s ease, background .25s ease}
+  .btn:hover{text-decoration:none;transform:translateY(-1px)}
+  .btn-primary{background:linear-gradient(180deg,#ffe3b4,#ffd089);color:#2c1d04;
+    box-shadow:0 8px 30px rgba(255,208,137,.3)}
+  .btn-primary:hover{box-shadow:0 12px 36px rgba(255,208,137,.42)}
+  .btn-ghost{border-color:var(--hair);color:var(--ink);background:var(--panel);
+    backdrop-filter:blur(6px)}
+  .btn-ghost:hover{border-color:rgba(160,178,255,.42)}
+
+  .legend{margin-top:22px;font-size:12.5px;color:var(--faint);letter-spacing:.01em;
+    display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+  .legend .scene-label{color:var(--warm);font-weight:600;letter-spacing:.04em}
+
+  /* a quiet, honest readout of what the projector is doing (NOT a search field) */
+  .projector-status{position:absolute;right:clamp(16px,4vw,40px);bottom:clamp(20px,5vh,40px);
+    display:inline-flex;align-items:center;gap:9px;padding:9px 14px;border-radius:999px;
+    border:1px solid var(--hair);background:var(--panel);backdrop-filter:blur(6px);
+    color:var(--dim);font-size:12.5px;z-index:5}
+  .projector-status .dotlive{width:7px;height:7px;border-radius:50%;background:var(--warm);
+    box-shadow:0 0 8px 1px rgba(255,208,137,.7)}
+  .projector-status b{color:var(--ink);font-weight:600}
+  .replay{margin-left:6px;display:inline-flex;align-items:center;gap:7px;
+    border:0;background:transparent;color:var(--accent);font-size:12.5px;cursor:pointer;
+    font-family:inherit;padding:0}
+  .replay:hover{text-decoration:underline}
+  .replay svg{width:13px;height:13px;fill:currentColor}
+
+  /* ---------- ground-truth content below the dome ---------- */
+  .below{position:relative;z-index:3;max-width:1080px;margin:0 auto;
+    padding:clamp(56px,10vh,110px) clamp(18px,5vw,40px) 40px}
+  .kicker{font-size:12px;letter-spacing:.22em;text-transform:uppercase;color:var(--faint);
+    margin:0 0 14px}
+  .below h2{font-size:clamp(24px,4vw,38px);line-height:1.12;margin:0;color:#fff;
+    letter-spacing:-.01em;font-weight:660;max-width:780px}
+  .below p.sub{color:var(--dim);max-width:690px;margin:16px 0 0;font-size:16px}
+  .below p.sub b{color:var(--ink)}
+
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(238px,1fr));gap:16px;
+    margin-top:42px}
+  .card{border:1px solid var(--hair);border-radius:16px;padding:22px 22px 24px;
+    background:linear-gradient(180deg, rgba(15,20,42,.6), rgba(8,11,24,.45));
+    transition:border-color .2s ease, transform .2s ease}
+  .card:hover{border-color:rgba(160,178,255,.4);transform:translateY(-2px)}
+  .card h3{margin:0 0 8px;font-size:16px;color:#fff;letter-spacing:.01em;
+    display:flex;align-items:center;gap:9px}
+  .card h3 .gp{width:8px;height:8px;border-radius:50%;background:var(--warm);
+    box-shadow:0 0 8px 1px rgba(255,208,137,.6);flex:0 0 auto}
+  .card p{margin:0;font-size:14px;color:var(--dim);line-height:1.55}
+
+  .facts{margin-top:44px;border:1px solid var(--hair);border-radius:16px;overflow:hidden;
+    background:rgba(8,11,24,.5)}
+  .facts .row{display:grid;grid-template-columns:160px 1fr;gap:18px;padding:16px 22px;
+    border-top:1px solid rgba(160,178,255,.08);font-size:14.5px}
+  .facts .row:first-child{border-top:0}
+  .facts .row .lab{color:var(--faint);letter-spacing:.04em;font-size:12.5px;
+    text-transform:uppercase;padding-top:2px}
+  .facts .row .val{color:var(--ink)}
+  .facts .row .val .mono{color:var(--cyan);font-size:13.5px}
+  .facts .row .val b{color:var(--ink)}
+
+  .addline{margin-top:34px;border:1px solid var(--hair);border-radius:14px;
+    background:#06091a;padding:16px 18px;font-size:13.5px;color:var(--dim);overflow-x:auto}
+  .addline .mono{color:var(--ink)}
+  .addline .c{color:var(--warm)}
+
+  footer{position:relative;z-index:3;border-top:1px solid var(--hair);margin-top:60px}
+  .foot{max-width:1080px;margin:0 auto;padding:28px clamp(18px,5vw,40px) 60px;
+    display:flex;flex-wrap:wrap;gap:18px;justify-content:space-between;align-items:center;
+    color:var(--faint);font-size:13px}
+  .foot a{color:var(--dim)}
+  .foot .links{display:flex;flex-wrap:wrap;gap:18px}
+
+  .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;
+    clip:rect(0,0,0,0);white-space:nowrap;border:0}
+
+  /* ---------- reduced motion: dome holds ONE fully-lit scene, static ---------- */
+  @media (prefers-reduced-motion: reduce){
+    .moment .pulse{animation:none}
+  }
+
+  @media (max-width:640px){
+    .topbar nav{display:none}
+    .facts .row{grid-template-columns:1fr;gap:4px}
+    .projector-status{font-size:11.5px;padding:8px 12px}
+  }
+</style>
+</head>
+<body>
+
+<section class="stage" aria-label="A planetarium dome overhead: the projector sweeps on its own and a remembered coding moment blooms across the curved sky.">
+  <canvas id="dome" aria-hidden="true"></canvas>
+
+  <div class="hud">
+    <header class="topbar">
+      <div class="brand"><span class="dot" aria-hidden="true"></span> Memex</div>
+      <nav aria-label="Primary">
+        <a href="https://github.com/Two-Weeks-Team/memex">Repo</a>
+        <a href="https://two-weeks-team.github.io/memex/">Live</a>
+        <a href="#how">How it works</a>
+        <a href="#agent">For agents</a>
+      </nav>
+    </header>
+
+    <div class="hero">
+      <span class="moment">
+        <span class="pulse" aria-hidden="true"></span>
+        Right now you're <b>wiring up an OAuth token refresh</b> &mdash; and the dome turns overhead&hellip;
+      </span>
+
+      <h1>You worked this out months ago.<br>The dome <span class="glow">projects it back.</span></h1>
+
+      <p class="lede">
+        Lie back. The projector sweeps the night on its own, one star ignites, and a whole
+        past session blooms across the sky above you &mdash; <b>the scene of the evening you got
+        it working</b>, the desk and the lit screen, curving overhead &mdash; surfacing not because
+        you searched, but because right now called it up.
+      </p>
+
+      <div class="cta">
+        <a class="btn btn-primary" href="https://github.com/Two-Weeks-Team/memex">Get Memex on GitHub</a>
+        <a class="btn btn-ghost" href="https://two-weeks-team.github.io/memex/">See it live</a>
+      </div>
+
+      <p class="legend">
+        <span class="scene-label" id="sceneName">the projector is sweeping&hellip;</span>
+        <span aria-hidden="true">&middot;</span>
+        an associative trail across your own sky, not a search
+      </p>
+    </div>
+
+    <div class="projector-status" aria-hidden="true">
+      <span class="dotlive"></span>
+      <span>projector sweeping &middot; <b id="domeState">scanning the dark</b></span>
+      <button class="replay" id="replay" type="button" aria-label="Sweep to the next remembered moment">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5V1L7 6l5 5V7a5 5 0 1 1-5 5H5a7 7 0 1 0 7-7z"/></svg>
+        next moment
+      </button>
+    </div>
+  </div>
+
+  <p class="sr-only" id="srLive" role="status" aria-live="polite"></p>
+</section>
+
+<main class="below">
+  <section id="how">
+    <p class="kicker">What just happened</p>
+    <h2>People don't document every memory &mdash; yet when the moment arrives,
+      the relevant thought surfaces on its own.</h2>
+    <p class="sub">
+      Memex is a non-chatbot, <b>LLM-free-at-runtime</b> tool that reads your existing
+      Claude&nbsp;Code and Codex session history and turns it into a navigable
+      associative memory backed by <b>Qdrant</b>. Your past sessions sit scattered across
+      the dome like stars; you move through them by <i>similarity</i>, not keywords &mdash; and
+      the relevant moment can be projected back to you proactively.
+    </p>
+
+    <div class="grid">
+      <article class="card">
+        <h3><span class="gp" aria-hidden="true"></span>Time Machine</h3>
+        <p>Replay any past session as it happened &mdash; the whole scene projected, not a snippet.</p>
+      </article>
+      <article class="card">
+        <h3><span class="gp" aria-hidden="true"></span>Lens</h3>
+        <p>Named-vector weighted search to look through your history from one angle at a time.</p>
+      </article>
+      <article class="card">
+        <h3><span class="gp" aria-hidden="true"></span>Topology</h3>
+        <p>A distance-matrix &rarr; MST graph &mdash; the actual constellation of how your sessions connect.</p>
+      </article>
+      <article class="card">
+        <h3><span class="gp" aria-hidden="true"></span>Mix &amp; Discovery</h3>
+        <p>Positive / negative recommendation to draw related work toward you and push noise away.</p>
+      </article>
+      <article class="card">
+        <h3><span class="gp" aria-hidden="true"></span>Proactive Recall</h3>
+        <p>The piece that lit the dome above: a relevant past moment surfaces because the current one evoked it.</p>
+      </article>
+      <article class="card">
+        <h3><span class="gp" aria-hidden="true"></span>Companion · Wrapped · Loop&nbsp;Breaker</h3>
+        <p>An agent-memory layer over your corpus &mdash; recap what you've done, and catch yourself circling.</p>
+      </article>
+    </div>
+
+    <div class="facts" aria-label="What Memex is">
+      <div class="row"><div class="lab">Reads</div>
+        <div class="val"><span class="mono">~/.claude/projects/**/*.jsonl</span>, legacy transcripts, and <span class="mono">history.jsonl</span></div></div>
+      <div class="row"><div class="lab">Backed by</div>
+        <div class="val">Qdrant &mdash; navigate by vector similarity, with no runtime LLM</div></div>
+      <div class="row"><div class="lab">Why</div>
+        <div class="val">Claude&nbsp;Code silently migrates and deletes old sessions. Memex keeps a corpus <b>you own.</b></div></div>
+      <div class="row"><div class="lab">Built for</div>
+        <div class="val">Qdrant Vector Space Day 2026 &mdash; <i>"Think Outside the Bot."</i></div></div>
+    </div>
+  </section>
+
+  <section id="agent">
+    <p class="kicker" style="margin-top:56px">For your agent</p>
+    <h2 style="font-size:clamp(20px,3vw,28px)">11 MCP tools over stdio + HTTP &mdash;
+      works in Claude&nbsp;Code, Codex, and Cursor.</h2>
+    <p class="sub">A server / Docker variant runs Qdrant, the web UI, and the MCP server in one image.
+      The tools let an agent recall, replay, and connect across your own history.</p>
+    <div class="addline mono">
+      <span class="c">$</span> claude mcp add memex -- memex-mcp
+    </div>
+    <p style="margin-top:18px;font-size:14px">
+      <a href="https://github.com/Two-Weeks-Team/memex#server--docker">Server / Docker variant</a>
+      &nbsp;&middot;&nbsp;
+      <a href="https://github.com/Two-Weeks-Team/memex">MCP integration &amp; the 11 tools</a>
+    </p>
+  </section>
+</main>
+
+<footer>
+  <div class="foot">
+    <div>Memex &mdash; a memory you own, projected back by association.</div>
+    <div class="links">
+      <a href="https://github.com/Two-Weeks-Team/memex">GitHub</a>
+      <a href="https://two-weeks-team.github.io/memex/">Live landing</a>
+      <a href="https://github.com/Two-Weeks-Team/memex#server--docker">Docker</a>
+    </div>
+  </div>
+</footer>
+
+<script>
+(function(){
+  "use strict";
+
+  var canvas = document.getElementById('dome');
+  var ctx = canvas.getContext('2d');
+  var sceneName = document.getElementById('sceneName');
+  var domeState = document.getElementById('domeState');
+  var srLive = document.getElementById('srLive');
+  var replayBtn = document.getElementById('replay');
+
+  var DPR = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+  var W = 0, H = 0;
+  var reduce = window.matchMedia &&
+               window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  /* ===========================================================================
+     THE DOME
+     We are lying back, looking straight up into a hemisphere. The picture plane
+     is a FISHEYE projection of that hemisphere: the zenith (straight up) is the
+     centre of the screen, and the rim of the dome is a circle near the edges.
+     A "dome point" is authored as (azimuth, altitude):
+        az  : 0..2π around the compass
+        alt : 0 = horizon (rim), π/2 = zenith (centre)
+     project() maps that to the screen, warping radially so the whole scene
+     curves over us like a real dome surface.
+  =========================================================================== */
+  var dome = { cx:0, cy:0, R:0 };   // centre + rim radius in CSS px
+
+  function layoutDome(){
+    dome.cx = W * 0.5;
+    dome.cy = H * 0.46;                       // zenith sits a touch above centre
+    dome.R  = Math.min(W, H) * (W < 760 ? 0.62 : 0.56);
+  }
+
+  // map (azimuth, altitude) -> screen point on the warped dome.
+  // r = how far from centre: altitude π/2 -> 0 (zenith), 0 -> R (rim).
+  // A mild power curve gives the bulged, domed feel near the rim.
+  function project(az, alt){
+    var t = 1 - (alt / (Math.PI/2));          // 0 at zenith, 1 at rim
+    t = Math.max(0, Math.min(1, t));
+    var r = dome.R * Math.pow(t, 1.18);
+    return {
+      x: dome.cx + Math.cos(az) * r,
+      y: dome.cy + Math.sin(az) * r,
+      // foreshortening factor: things near the rim are squashed/dimmer,
+      // things overhead are full-size & bright (we're looking right at them)
+      fore: 0.42 + 0.58 * (1 - t)
+    };
+  }
+
+  /* ---- the dome's own backdrop: faint dome ribs + a wash of stars --------- */
+  var domeStars = [];
+  function buildStars(){
+    domeStars.length = 0;
+    var n = Math.round((W*H)/6400);
+    n = Math.max(120, Math.min(420, n));
+    for (var i=0;i<n;i++){
+      // distribute over the hemisphere by (az, alt)
+      var az = Math.random()*Math.PI*2;
+      // bias slightly toward the rim so the dome feels populated to its edge
+      var alt = (Math.acos(Math.random())) ;       // 0..π/2-ish, denser near horizon
+      domeStars.push({
+        az: az, alt: Math.min(Math.PI/2, alt),
+        r: 0.4 + Math.random()*1.25,
+        tw: Math.random()*Math.PI*2,
+        tws: 0.4 + Math.random()*1.3,
+        hue: Math.random() < 0.10 ? 'warm' : (Math.random()<0.09 ? 'cyan' : 'star')
+      });
+    }
+  }
+
+  function col(kind, a){
+    if (kind === 'warm')   return 'rgba(255,208,137,'+a+')';
+    if (kind === 'cyan')   return 'rgba(143,230,255,'+a+')';
+    if (kind === 'violet') return 'rgba(182,156,255,'+a+')';
+    return 'rgba(251,247,234,'+a+')';
+  }
+  function easeOutCubic(t){ return 1 - Math.pow(1-t, 3); }
+  function clamp01(t){ return t<0?0:(t>1?1:t); }
+
+  function softStar(x, y, r, alpha, kind){
+    var g = ctx.createRadialGradient(x,y,0, x,y, r*4.4);
+    g.addColorStop(0, col(kind, alpha));
+    g.addColorStop(0.4, col(kind, alpha*0.5));
+    g.addColorStop(1, col(kind, 0));
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(x,y, r*4.4, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = col(kind, Math.min(1, alpha*1.25));
+    ctx.beginPath(); ctx.arc(x,y, r*0.95, 0, Math.PI*2); ctx.fill();
+  }
+
+  /* ===========================================================================
+     THE MEMORY SCENES.
+     Each scene is a recognizable coding tableau, authored in a normalized
+     [0..1] box. It does NOT live flat on the screen — it is wrapped onto the
+     dome: the box is placed around a chosen (azimuth, altitude) patch of sky,
+     and every figure point is run through project() so the WHOLE depicted scene
+     curves overhead. A scene = a SCENE you can see, not a quote.
+  =========================================================================== */
+
+  // a "desk-at-night" tableau: person seated, monitor, desk lamp, mug.
+  // points in local [0..1] (x right, y down). links connect them into a figure.
+  var SCENE_DESK = {
+    pts:[
+      // person (head ring + body), facing the monitor on the right
+      {x:0.20,y:0.16,key:1},{x:0.245,y:0.185},{x:0.24,y:0.245},
+      {x:0.19,y:0.26},{x:0.155,y:0.215},{x:0.165,y:0.16},
+      {x:0.21,y:0.285},{x:0.185,y:0.45,key:1},{x:0.30,y:0.46},
+      {x:0.235,y:0.355},{x:0.355,y:0.43},{x:0.43,y:0.49},   // shoulder→arm→hand
+      {x:0.135,y:0.30},{x:0.145,y:0.55},                     // chair
+      // desk line
+      {x:0.07,y:0.55,key:1},{x:0.94,y:0.55,key:1},
+      // monitor (glowing rectangle) + stand
+      {x:0.55,y:0.18,key:1},{x:0.81,y:0.18,key:1},
+      {x:0.81,y:0.42,key:1},{x:0.55,y:0.42,key:1},
+      {x:0.68,y:0.49},{x:0.62,y:0.55},
+      // desk lamp arching over the screen
+      {x:0.89,y:0.55},{x:0.90,y:0.37},{x:0.765,y:0.235,key:1},
+      // mug
+      {x:0.46,y:0.51},{x:0.505,y:0.51},{x:0.46,y:0.55},{x:0.505,y:0.55}
+    ],
+    links:[
+      [0,1],[1,2],[2,3],[3,4],[4,5],[5,0],
+      [2,6],[6,7],[7,8],[12,7],[7,13],[6,9],[9,10],[10,11],
+      [14,15],
+      [16,17],[17,18],[18,19],[19,16],[18,20],[19,20],[20,21],
+      [22,23],[23,24],
+      [25,26],[25,27],[26,28],[27,28]
+    ],
+    glow:[24,16,17,18,19],           // lamp head + screen corners
+    screen:[16,18],                  // rectangle to fill with light
+    lamp:24,
+    label:'the night you got it working'
+  };
+
+  // a "tests finally pass" tableau: a terminal frame with a big check, two
+  // stacked log bars, and a small standing figure beside it (a moment of relief).
+  var SCENE_TESTS = {
+    pts:[
+      // terminal frame
+      {x:0.34,y:0.18,key:1},{x:0.86,y:0.18,key:1},
+      {x:0.86,y:0.52,key:1},{x:0.34,y:0.52,key:1},
+      // two log lines inside
+      {x:0.40,y:0.28},{x:0.74,y:0.28},
+      {x:0.40,y:0.36},{x:0.66,y:0.36},
+      // a big check mark (the pass)
+      {x:0.50,y:0.45,key:1},{x:0.555,y:0.50},{x:0.66,y:0.40,key:1},
+      // a small standing figure (you, arms a little up) to the left
+      {x:0.16,y:0.20,key:1},{x:0.20,y:0.24},{x:0.20,y:0.30},
+      {x:0.155,y:0.315},{x:0.12,y:0.27},{x:0.125,y:0.215},  // head ring
+      {x:0.165,y:0.35},{x:0.165,y:0.52,key:1},               // torso
+      {x:0.10,y:0.40},{x:0.235,y:0.40},                      // arms out
+      // floor line
+      {x:0.07,y:0.55,key:1},{x:0.93,y:0.55,key:1}
+    ],
+    links:[
+      // terminal box
+      [0,1],[1,2],[2,3],[3,0],
+      // log lines
+      [4,5],[6,7],
+      // check
+      [8,9],[9,10],
+      // head ring + body
+      [11,12],[12,13],[13,14],[14,15],[15,16],[16,11],
+      [13,17],[17,18],[17,19],[17,20],
+      // floor
+      [21,22]
+    ],
+    glow:[8,9,10,0,1,2,3],
+    screen:[0,2],
+    lamp:9,
+    label:'the run where every test went green'
+  };
+
+  // a "drew the architecture on the whiteboard" tableau: a board with boxes and
+  // arrows between them, and a figure with an outstretched arm (pointing).
+  var SCENE_BOARD = {
+    pts:[
+      // whiteboard frame
+      {x:0.30,y:0.15,key:1},{x:0.90,y:0.15,key:1},
+      {x:0.90,y:0.50,key:1},{x:0.30,y:0.50,key:1},
+      // three node boxes on the board
+      {x:0.40,y:0.24,key:1},{x:0.50,y:0.24},{x:0.50,y:0.32},{x:0.40,y:0.32},
+      {x:0.62,y:0.22,key:1},{x:0.72,y:0.22},{x:0.72,y:0.30},{x:0.62,y:0.30},
+      {x:0.55,y:0.38,key:1},{x:0.66,y:0.38},{x:0.66,y:0.45},{x:0.55,y:0.45},
+      // arrows between boxes (lines only)
+      {x:0.50,y:0.28},{x:0.62,y:0.26},          // box1 → box2
+      {x:0.67,y:0.30},{x:0.61,y:0.38},          // box2 → box3
+      // figure pointing at the board
+      {x:0.155,y:0.22,key:1},{x:0.195,y:0.245},{x:0.195,y:0.305},
+      {x:0.15,y:0.32},{x:0.115,y:0.275},{x:0.12,y:0.22},   // head ring
+      {x:0.165,y:0.36},{x:0.165,y:0.55,key:1},              // torso
+      {x:0.31,y:0.30},                                       // pointing hand → board
+      // floor
+      {x:0.07,y:0.55,key:1},{x:0.93,y:0.55,key:1}
+    ],
+    links:[
+      [0,1],[1,2],[2,3],[3,0],
+      [4,5],[5,6],[6,7],[7,4],
+      [8,9],[9,10],[10,11],[11,8],
+      [12,13],[13,14],[14,15],[15,12],
+      [16,17],[18,19],
+      [20,21],[21,22],[22,23],[23,24],[24,25],[25,20],
+      [22,26],[26,27],[26,28],
+      [29,30]
+    ],
+    glow:[4,8,12,0,1],
+    screen:[0,2],
+    lamp:12,
+    label:'the afternoon the design finally clicked'
+  };
+
+  var SCENES = [SCENE_DESK, SCENE_TESTS, SCENE_BOARD];
+
+  // precompute per-scene link lengths once (in local space ratios are fine)
+  SCENES.forEach(function(sc){
+    sc.links.forEach(function(L){
+      var a=sc.pts[L[0]], b=sc.pts[L[1]];
+      L._len = Math.hypot(b.x-a.x, b.y-a.y);
+    });
+    sc.pts.forEach(function(p){ p._ph = Math.random()*Math.PI*2; });
+  });
+
+  /* place a scene onto a dome patch around (azC, altC).
+     We lay the local [0..1] box across a small window of azimuth & altitude so
+     the scene wraps over the sky. project() then warps each point.            */
+  function sceneScreen(sc, azC, altC, spanAz, spanAlt){
+    var out = [];
+    for (var i=0;i<sc.pts.length;i++){
+      var p = sc.pts[i];
+      var az  = azC  + (p.x - 0.5) * spanAz;
+      var alt = altC - (p.y - 0.5) * spanAlt;   // y down → lower altitude
+      alt = Math.max(0.05, Math.min(Math.PI/2 - 0.02, alt));
+      var s = project(az, alt);
+      out.push(s);
+    }
+    return out;
+  }
+
+  /* ===========================================================================
+     ANIMATION STATE — the projector sweeps, a star ignites, the scene blooms,
+     holds, then fades as the dome rotates to the next.
+  =========================================================================== */
+  var sceneIdx = 0;
+  var phase = 'sweep';      // sweep → ignite → bloom → hold → fade
+  var phaseT0 = 0;
+  var sweepAz = -Math.PI/2; // projector beam current azimuth (starts pointing "up")
+  var igniteAz = 0, igniteAlt = 0;   // where the chosen star sits
+  var sceneAz = 0, sceneAlt = 0;     // centre the scene wraps around
+  var domeRot = 0;          // slow continuous rotation of the whole dome
+  var named = false;
+
+  // durations (ms)
+  var D_SWEEP = 2600, D_IGNITE = 700, D_BLOOM = 2600, D_HOLD = 3400, D_FADE = 1500;
+
+  function pickScene(idx){
+    sceneIdx = ((idx % SCENES.length) + SCENES.length) % SCENES.length;
+    // choose an ignite point somewhat off-zenith so the bloom reads as "overhead, curving"
+    igniteAz  = (-Math.PI/2) + (Math.random()*0.9 - 0.45);   // near top of dome
+    igniteAlt = (Math.PI/2) * (0.62 + Math.random()*0.12);   // high but not dead-centre
+    sceneAz   = igniteAz;
+    sceneAlt  = igniteAlt;
+  }
+
+  function setPhase(p, now){ phase = p; phaseT0 = now; }
+
+  function resize(){
+    var box = canvas.parentElement.getBoundingClientRect();
+    W = Math.max(1, Math.round(box.width));
+    H = Math.max(1, Math.round(box.height));
+    canvas.style.width = W + 'px';
+    canvas.style.height = H + 'px';
+    canvas.width = Math.round(W*DPR);
+    canvas.height = Math.round(H*DPR);
+    ctx.setTransform(DPR,0,0,DPR,0,0);
+    layoutDome();
+    buildStars();
+  }
+
+  /* ---- draw the faint dome structure: concentric altitude rings + meridians */
+  function drawDomeStructure(now, baseAlpha){
+    ctx.save();
+    ctx.lineWidth = 1;
+    // altitude rings (circles of constant altitude → concentric on screen)
+    var rings = [0.12, 0.30, 0.50, 0.72, 0.90];
+    for (var i=0;i<rings.length;i++){
+      var alt = (Math.PI/2) * rings[i];
+      var pr = project(0, alt);
+      var rr = Math.hypot(pr.x-dome.cx, pr.y-dome.cy);
+      ctx.strokeStyle = 'rgba(150,170,255,'+(baseAlpha*(0.10+0.04*i))+')';
+      ctx.beginPath(); ctx.arc(dome.cx, dome.cy, rr, 0, Math.PI*2); ctx.stroke();
+    }
+    // meridians (lines of constant azimuth → spokes from zenith to rim)
+    var spokes = 12;
+    for (var m=0;m<spokes;m++){
+      var az = domeRot + (m/spokes)*Math.PI*2;
+      var a = project(az, Math.PI/2*0.06);
+      var b = project(az, Math.PI/2*0.97);
+      ctx.strokeStyle = 'rgba(150,170,255,'+(baseAlpha*0.07)+')';
+      ctx.beginPath(); ctx.moveTo(dome.cx + (a.x-dome.cx), dome.cy + (a.y-dome.cy));
+      ctx.lineTo(b.x, b.y); ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  /* ---- the projector beam: a soft wedge sweeping from the centre outward ---- */
+  function drawBeam(az, intensity){
+    if (intensity <= 0) return;
+    ctx.save();
+    var tip = project(az, Math.PI/2*0.10);     // out near the rim
+    var half = 0.13;                            // wedge half-angle
+    var aL = project(az - half, Math.PI/2*0.10);
+    var aR = project(az + half, Math.PI/2*0.10);
+    var g = ctx.createRadialGradient(dome.cx,dome.cy,0, dome.cx,dome.cy, dome.R*1.05);
+    g.addColorStop(0, 'rgba(255,208,137,'+(0.16*intensity)+')');
+    g.addColorStop(0.55, 'rgba(255,208,137,'+(0.07*intensity)+')');
+    g.addColorStop(1, 'rgba(255,157,87,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.moveTo(dome.cx, dome.cy);
+    ctx.lineTo(aL.x, aL.y);
+    ctx.lineTo(tip.x, tip.y);
+    ctx.lineTo(aR.x, aR.y);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+    // tiny projector hub at the dome centre
+    softStar(dome.cx, dome.cy, 1.7, 0.5*intensity + 0.2, 'warm');
+  }
+
+  /* ---- render a memory scene wrapped on the dome, with reveal progress ----- */
+  function drawScene(sc, drawProg, lit, alpha){
+    // span the scene over a window of sky (radians). bigger span → more curve.
+    var spanAz = 1.18, spanAlt = 0.92;
+    var S = sceneScreen(sc, sceneAz, sceneAlt, spanAz, spanAlt);
+
+    // 1) the lines draw themselves (the scene assembling)
+    ctx.save();
+    ctx.lineCap = 'round';
+    var nL = sc.links.length;
+    for (var L=0; L<nL; L++){
+      var seg = sc.links[L];
+      var a = S[seg[0]], b = S[seg[1]];
+      var start = (L/nL) * 0.5;
+      var local = reduce ? 1 : easeOutCubic(clamp01((drawProg - start)/(1-start)));
+      if (local <= 0) continue;
+      var ex = a.x + (b.x-a.x)*local;
+      var ey = a.y + (b.y-a.y)*local;
+      var fore = (a.fore + b.fore)/2;
+      ctx.strokeStyle = 'rgba(150,178,255,'+((0.20 + 0.30*local) * fore * alpha)+')';
+      ctx.lineWidth = 1.3 * (0.7 + 0.6*fore);
+      ctx.shadowColor = 'rgba(143,170,255,'+(0.5*alpha)+')';
+      ctx.shadowBlur = 7;
+      ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(ex, ey); ctx.stroke();
+      ctx.shadowBlur = 0;
+      if (!reduce && local < 1 && local > 0){
+        softStar(ex, ey, 1.3*fore, 0.9*alpha, 'cyan');
+      }
+    }
+    ctx.restore();
+
+    // 2) the anchor stars of the scene
+    for (var k=0;k<sc.pts.length;k++){
+      var p = S[k];
+      var pp = reduce ? 1 : easeOutCubic(clamp01(drawProg*1.2 - (k/sc.pts.length)*0.25));
+      if (pp <= 0) continue;
+      var isKey = !!sc.pts[k].key;
+      var kind = (sc.glow.indexOf(k) >= 0) ? 'warm' : 'star';
+      var baseR = (isKey ? 1.8 : 1.2) * p.fore;
+      var twk = reduce ? 1 : (0.82 + 0.18*Math.sin((performance.now())*0.002 + sc.pts[k]._ph));
+      softStar(p.x, p.y, baseR*pp*twk, (0.5 + 0.45*pp)*p.fore*alpha, kind);
+    }
+
+    // 3) once "lit", the screen/board fills with light and a warm pool blooms
+    if (lit > 0){
+      var sc0 = S[sc.screen[0]], sc1 = S[sc.screen[1]];
+      var ccx = (sc0.x+sc1.x)/2, ccy = (sc0.y+sc1.y)/2;
+      var rw = Math.hypot(sc1.x-sc0.x, sc1.y-sc0.y) * 0.62;
+      var gs = ctx.createRadialGradient(ccx,ccy,0, ccx,ccy, rw*2.0);
+      gs.addColorStop(0, 'rgba(143,230,255,'+(0.22*lit*alpha)+')');
+      gs.addColorStop(0.5, 'rgba(150,170,255,'+(0.10*lit*alpha)+')');
+      gs.addColorStop(1, 'rgba(150,170,255,0)');
+      ctx.fillStyle = gs;
+      ctx.beginPath(); ctx.arc(ccx,ccy, rw*2.0, 0, Math.PI*2); ctx.fill();
+
+      var lh = S[sc.lamp];
+      var gl = ctx.createRadialGradient(lh.x,lh.y,0, lh.x,lh.y, dome.R*0.22);
+      gl.addColorStop(0, 'rgba(255,208,137,'+(0.26*lit*alpha)+')');
+      gl.addColorStop(0.5, 'rgba(255,157,87,'+(0.09*lit*alpha)+')');
+      gl.addColorStop(1, 'rgba(255,157,87,0)');
+      ctx.fillStyle = gl;
+      ctx.beginPath(); ctx.arc(lh.x,lh.y, dome.R*0.22, 0, Math.PI*2); ctx.fill();
+    }
+  }
+
+  /* ---- the igniting star, before it blooms into the scene ----------------- */
+  function drawIgnite(prog){
+    var p = project(igniteAz, igniteAlt);
+    var flare = easeOutCubic(prog);
+    // expanding warm ring
+    var rr = dome.R * 0.02 + dome.R * 0.16 * flare;
+    var g = ctx.createRadialGradient(p.x,p.y,0, p.x,p.y, rr);
+    g.addColorStop(0, 'rgba(255,243,214,'+(0.9*(1-flare*0.3))+')');
+    g.addColorStop(0.4, 'rgba(255,208,137,'+(0.5*(1-flare*0.4))+')');
+    g.addColorStop(1, 'rgba(255,157,87,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(p.x,p.y, rr, 0, Math.PI*2); ctx.fill();
+    softStar(p.x, p.y, 2.4, 1, 'warm');
+  }
+
+  function setReadout(state, scLabel){
+    if (domeState) domeState.textContent = state;
+    if (scLabel){
+      sceneName.textContent = scLabel;
+      if (srLive) srLive.textContent = 'A remembered moment surfaced on the dome: ' + scLabel + '.';
+    }
+  }
+
+  var rafId = 0, lastTs = 0;
+
+  function frame(now){
+    if (!lastTs) lastTs = now;
+    var dt = Math.min(50, now - lastTs); lastTs = now;
+    domeRot += (reduce ? 0 : 0.00006 * dt);
+
+    ctx.clearRect(0,0,W,H);
+
+    // -- backdrop dome stars (twinkling), warped onto the hemisphere --
+    for (var i=0;i<domeStars.length;i++){
+      var s = domeStars[i];
+      var sp = project(s.az + domeRot, s.alt);
+      var tw = reduce ? 0.85 : (0.55 + 0.45*Math.sin(now*0.001*s.tws + s.tw));
+      var a = (0.10 + 0.40*tw) * (0.4 + sp.fore*0.6);
+      softStar(sp.x, sp.y, s.r*sp.fore, Math.min(0.85,a), s.hue);
+    }
+
+    // -- faint dome ribs --
+    drawDomeStructure(now, 1);
+
+    var el = now - phaseT0;
+    var sc = SCENES[sceneIdx];
+
+    if (phase === 'sweep'){
+      // beam rotates toward the ignite azimuth, then triggers ignite
+      var prog = clamp01(el / D_SWEEP);
+      // ease the beam from its current angle toward the ignite angle
+      var startAz = sweepAz;
+      var target = igniteAz;
+      // sweep across (add a little extra travel so it reads as "scanning")
+      var swept = startAz + (target - startAz) * easeOutCubic(prog) + (1-prog)*Math.sin(prog*6)*0.05;
+      drawBeam(swept, 1);
+      // the ignite star glints faintly as the beam nears it
+      var near = 1 - Math.min(1, Math.abs(((target - swept)))/0.4);
+      if (near > 0){
+        var ip = project(igniteAz, igniteAlt);
+        softStar(ip.x, ip.y, 1.6, 0.3 + 0.5*near, 'warm');
+      }
+      setReadout('scanning the dark');
+      if (prog >= 1){ sweepAz = target; setPhase('ignite', now); named=false; }
+    }
+    else if (phase === 'ignite'){
+      var prog2 = clamp01(el / D_IGNITE);
+      drawBeam(igniteAz, 1 - prog2*0.6);
+      drawIgnite(prog2);
+      setReadout('a match caught the light');
+      if (prog2 >= 1) setPhase('bloom', now);
+    }
+    else if (phase === 'bloom'){
+      var prog3 = clamp01(el / D_BLOOM);
+      drawBeam(igniteAz, 0.4*(1-prog3));
+      drawScene(sc, easeOutCubic(prog3), clamp01((prog3-0.55)/0.45), 1);
+      setReadout('projecting a remembered moment');
+      if (prog3 > 0.62 && !named){ named = true; setReadout('projecting a remembered moment', sc.label); }
+      if (prog3 >= 1) setPhase('hold', now);
+    }
+    else if (phase === 'hold'){
+      drawScene(sc, 1, 1, 1);
+      setReadout('held overhead', sc.label);
+      if (el >= D_HOLD) setPhase('fade', now);
+    }
+    else if (phase === 'fade'){
+      var prog4 = clamp01(el / D_FADE);
+      drawScene(sc, 1, 1 - prog4, 1 - easeOutCubic(prog4));
+      setReadout('fading as the dome turns');
+      if (prog4 >= 1){
+        // dome rotates on to the next remembered moment
+        sweepAz = igniteAz;
+        pickScene(sceneIdx + 1);
+        setPhase('sweep', now);
+      }
+    }
+
+    if (reduce) return;   // single static frame is drawn separately
+    rafId = requestAnimationFrame(frame);
+  }
+
+  /* ---- reduced motion: hold ONE fully-bloomed, lit scene, no sweep -------- */
+  function staticFrame(){
+    ctx.clearRect(0,0,W,H);
+    for (var i=0;i<domeStars.length;i++){
+      var s = domeStars[i];
+      var sp = project(s.az, s.alt);
+      softStar(sp.x, sp.y, s.r*sp.fore, 0.45*(0.4+sp.fore*0.6), s.hue);
+    }
+    drawDomeStructure(0, 1);
+    var sc = SCENES[sceneIdx];
+    drawScene(sc, 1, 1, 1);
+    setReadout('held overhead', sc.label);
+    sceneName.textContent = sc.label;
+  }
+
+  function start(){
+    cancelAnimationFrame(rafId);
+    resize();
+    pickScene(sceneIdx);
+    if (reduce){
+      sceneAz = igniteAz; sceneAlt = igniteAlt;
+      staticFrame();
+    } else {
+      lastTs = 0; sweepAz = -Math.PI/2 - 0.6;
+      setPhase('sweep', performance.now());
+      named = false;
+      rafId = requestAnimationFrame(frame);
+    }
+  }
+
+  // "next moment" → sweep onward to a fresh remembered scene
+  replayBtn.addEventListener('click', function(){
+    reduce = window.matchMedia &&
+             window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (reduce){
+      pickScene(sceneIdx + 1);
+      sceneAz = igniteAz; sceneAlt = igniteAlt;
+      staticFrame();
+      return;
+    }
+    cancelAnimationFrame(rafId);
+    sweepAz = igniteAz;
+    pickScene(sceneIdx + 1);
+    lastTs = 0;
+    setPhase('sweep', performance.now());
+    named = false;
+    rafId = requestAnimationFrame(frame);
+  });
+
+  var rT;
+  window.addEventListener('resize', function(){
+    clearTimeout(rT);
+    rT = setTimeout(function(){
+      resize();
+      if (reduce) staticFrame();
+    }, 160);
+  });
+
+  if (window.matchMedia){
+    try {
+      window.matchMedia('(prefers-reduced-motion: reduce)')
+        .addEventListener('change', function(e){ reduce = e.matches; start(); });
+    } catch(_){}
+  }
+
+  start();
+})();
+</script>
+</body>
+</html>

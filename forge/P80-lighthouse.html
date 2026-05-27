@@ -1,0 +1,719 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Memex — the beam catches the memory</title>
+<meta name="description" content="Memex turns your Claude Code / Codex session history into a navigable spatial memory. Across a dark sea of past sessions, a lighthouse beam sweeps on its own — and when it crosses a forgotten moment, that whole coding scene is caught and lit. LLM-free at runtime, backed by Qdrant." />
+<style>
+  :root{
+    /* night seascape — deep cold dark, one warm sweeping light */
+    --sea-0:#04060c;     /* the void below the horizon */
+    --sea-1:#070c17;
+    --sea-2:#0b1426;
+    --sky-0:#060912;
+    --sky-1:#0a1020;
+    --horizon:#101b33;
+    --ink:#e9eefb;
+    --ink-soft:#aebbd6;
+    --ink-faint:#6f7e9e;
+    /* the warm beam */
+    --beam:#ffdca0;
+    --beam-hot:#fff3d6;
+    --beam-deep:#ffb36b;
+    --amber:#ffc879;
+    --amber-deep:#f0a24a;
+    --cool-rim:#86b9ff;
+    --line:rgba(134,160,210,.18);
+    --glass:rgba(12,20,38,.62);
+    --glass-edge:rgba(150,180,230,.16);
+    --focus:#ffd98a;
+    --maxw:1060px;
+  }
+
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0;
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    color:var(--ink);
+    background:var(--sea-0);
+    line-height:1.62;
+    overflow-x:hidden;
+    -webkit-font-smoothing:antialiased;
+  }
+  a{color:var(--amber);text-decoration:none}
+  a:hover{text-decoration:underline}
+  :focus-visible{outline:2px solid var(--focus);outline-offset:3px;border-radius:6px}
+  .wrap{max-width:var(--maxw);margin:0 auto;padding:0 24px}
+  h1,h2,h3{line-height:1.15;letter-spacing:-0.01em;margin:0}
+
+  /* ====================================================================
+     THE SEASCAPE STAGE — a vast dark ocean; a lighthouse beam rotates
+     on its own and catches scenes hidden in the dark.
+     ==================================================================== */
+  .stage{
+    position:relative;
+    min-height:100svh;
+    overflow:hidden;
+    isolation:isolate;
+    background:
+      /* sky → horizon → sea, so first paint is already a moody seascape */
+      linear-gradient(180deg, var(--sky-0) 0%, var(--sky-1) 34%, var(--horizon) 52%, var(--sea-2) 56%, var(--sea-1) 74%, var(--sea-0) 100%);
+  }
+
+  /* faint cold stars above the horizon */
+  .stars{position:absolute;inset:0 0 48% 0;z-index:0;pointer-events:none;opacity:.55}
+
+  /* the canvas carries the live volumetric beam + caught scenes + sea sheen */
+  #sea{position:absolute;inset:0;z-index:1;width:100%;height:100%;display:block}
+
+  /* a soft vignette to pull focus to the centre of the dark */
+  .vignette{
+    position:absolute;inset:0;z-index:3;pointer-events:none;
+    background:radial-gradient(120% 90% at 50% 46%, transparent 38%, rgba(2,4,9,.55) 100%);
+  }
+
+  /* ---- the lighthouse silhouette, anchored on the horizon (CSS, hand-drawn) ---- */
+  .lighthouse{
+    position:absolute;
+    left:50%;
+    /* sits ON the horizon line (~52% down) */
+    top:52%;
+    transform:translate(-50%,-100%);
+    z-index:2;
+    width:84px;
+    height:150px;
+    pointer-events:none;
+  }
+  .lh-tower{
+    position:absolute;left:50%;bottom:0;transform:translateX(-50%);
+    width:0;height:0;
+    border-left:21px solid transparent;
+    border-right:21px solid transparent;
+    border-bottom:118px solid #060a14;
+    filter:drop-shadow(0 0 1px rgba(0,0,0,.8));
+  }
+  /* the bands on the tower */
+  .lh-band{
+    position:absolute;left:50%;transform:translateX(-50%);
+    background:rgba(150,180,230,.10);
+  }
+  .lh-band.b1{bottom:30px;width:26px;height:7px}
+  .lh-band.b2{bottom:58px;width:22px;height:6px}
+  .lh-band.b3{bottom:84px;width:17px;height:6px}
+  /* the lamp room — the source of the beam */
+  .lh-lamp{
+    position:absolute;left:50%;bottom:108px;transform:translateX(-50%);
+    width:22px;height:18px;
+    background:linear-gradient(180deg,#0b1120,#070c16);
+    border:1px solid rgba(150,180,230,.18);
+    border-radius:3px 3px 1px 1px;
+  }
+  .lh-glow{
+    position:absolute;left:50%;bottom:110px;transform:translateX(-50%);
+    width:14px;height:14px;border-radius:50%;
+    background:var(--beam-hot);
+    box-shadow:0 0 14px 5px rgba(255,220,160,.85), 0 0 34px 14px rgba(255,200,120,.35);
+    animation:lamp 5.6s ease-in-out infinite;
+  }
+  .lh-cap{
+    position:absolute;left:50%;bottom:126px;transform:translateX(-50%);
+    width:0;height:0;border-left:14px solid transparent;border-right:14px solid transparent;
+    border-bottom:11px solid #070c16;
+  }
+  @keyframes lamp{0%,100%{opacity:.65}48%,52%{opacity:1}}
+
+  /* a small reflected smear of the lamp on the water, breathing */
+  .lh-reflect{
+    position:absolute;left:50%;top:52%;transform:translateX(-50%);
+    width:30px;height:90px;z-index:2;pointer-events:none;
+    background:linear-gradient(180deg, rgba(255,210,150,.30), rgba(255,200,130,.05) 70%, transparent);
+    filter:blur(3px);
+    animation:lamp 5.6s ease-in-out infinite;
+  }
+
+  /* ---- HERO copy: bottom-anchored, never blocks the dark sea ---- */
+  .hero{
+    position:relative;z-index:4;
+    min-height:100svh;
+    display:flex;flex-direction:column;justify-content:flex-end;
+    padding-bottom:6vh;
+    pointer-events:none;
+  }
+  .hero .wrap{pointer-events:auto}
+  .eyebrow{
+    display:inline-flex;align-items:center;gap:9px;
+    font-size:.72rem;letter-spacing:.22em;text-transform:uppercase;
+    color:var(--ink-faint);margin-bottom:18px;
+  }
+  .eyebrow .dot{
+    width:7px;height:7px;border-radius:50%;background:var(--beam-hot);
+    box-shadow:0 0 10px 3px rgba(255,215,150,.7);
+    animation:lamp 5.6s ease-in-out infinite;
+  }
+  .hero h1{
+    font-size:clamp(2.05rem,5.4vw,3.9rem);
+    font-weight:680;
+    max-width:18ch;
+    text-shadow:0 2px 30px rgba(0,0,0,.6);
+  }
+  .hero h1 .lit{
+    color:var(--beam-hot);
+    text-shadow:0 0 26px rgba(255,220,160,.55);
+  }
+  .hero .sub{
+    margin-top:18px;font-size:clamp(1rem,1.7vw,1.18rem);
+    color:var(--ink-soft);max-width:54ch;
+  }
+  .ctas{margin-top:28px;display:flex;flex-wrap:wrap;gap:14px;align-items:center}
+  .btn{
+    display:inline-flex;align-items:center;gap:9px;
+    font-size:.95rem;font-weight:560;padding:12px 20px;border-radius:11px;
+    border:1px solid transparent;transition:transform .15s ease, box-shadow .2s ease;
+  }
+  .btn:hover{text-decoration:none;transform:translateY(-1px)}
+  .btn-primary{
+    background:linear-gradient(180deg,var(--amber),var(--amber-deep));
+    color:#1d1305;box-shadow:0 0 0 1px rgba(255,210,150,.4),0 10px 30px -10px rgba(255,190,110,.6);
+  }
+  .btn-ghost{border-color:var(--glass-edge);color:var(--ink);background:var(--glass)}
+  .scroll-hint{
+    margin-top:26px;font-size:.78rem;color:var(--ink-faint);
+    display:flex;align-items:center;gap:9px;
+  }
+  .scroll-hint .bar{width:26px;height:1px;background:var(--ink-faint);opacity:.6}
+
+  /* a quiet live readout of what the beam is doing (honest, not a search box) */
+  .beacon-status{
+    position:absolute;z-index:4;right:24px;top:24px;
+    display:flex;align-items:center;gap:10px;
+    font:500 .72rem/1 ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+    letter-spacing:.06em;color:var(--ink-faint);
+    background:var(--glass);border:1px solid var(--glass-edge);
+    padding:8px 12px;border-radius:999px;backdrop-filter:blur(6px);
+  }
+  .beacon-status b{color:var(--beam-hot);font-weight:600}
+  .beacon-status .pulse{
+    width:7px;height:7px;border-radius:50%;background:var(--beam-hot);
+    box-shadow:0 0 9px 2px rgba(255,215,150,.7);animation:lamp 5.6s ease-in-out infinite;
+  }
+
+  /* ====================================================================
+     SECTIONS BELOW THE FOLD — honest explanation, real links
+     ==================================================================== */
+  section{position:relative;z-index:4}
+  .band{padding:84px 0;border-top:1px solid var(--line)}
+  .band.alt{background:linear-gradient(180deg,var(--sea-0),#050810)}
+  .lead{font-size:.74rem;letter-spacing:.2em;text-transform:uppercase;color:var(--amber);margin-bottom:14px}
+  .band h2{font-size:clamp(1.5rem,3vw,2.1rem);max-width:22ch}
+  .band p.intro{color:var(--ink-soft);max-width:62ch;margin-top:14px;font-size:1.04rem}
+
+  .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:40px}
+  .card{
+    background:var(--glass);border:1px solid var(--glass-edge);
+    border-radius:14px;padding:22px 20px;
+  }
+  .card .ico{
+    width:34px;height:34px;border-radius:9px;display:grid;place-items:center;
+    background:rgba(255,200,120,.1);border:1px solid rgba(255,200,120,.22);
+    margin-bottom:14px;
+  }
+  .card h3{font-size:1.06rem;margin-bottom:7px}
+  .card p{color:var(--ink-soft);font-size:.94rem;margin:0}
+
+  /* surfaces list */
+  .surfaces{display:grid;grid-template-columns:repeat(2,1fr);gap:14px 28px;margin-top:34px}
+  .surf{display:flex;gap:13px;align-items:flex-start}
+  .surf .k{
+    flex:0 0 auto;font:600 .7rem/1.4 ui-monospace,Menlo,monospace;letter-spacing:.04em;
+    color:var(--beam-hot);background:rgba(255,200,120,.08);
+    border:1px solid rgba(255,200,120,.2);border-radius:7px;padding:5px 9px;min-width:118px;text-align:center;
+  }
+  .surf .d{color:var(--ink-soft);font-size:.93rem}
+  .surf .d b{color:var(--ink);font-weight:600}
+
+  /* MCP / agent block */
+  .agent{display:grid;grid-template-columns:1.1fr .9fr;gap:34px;align-items:center}
+  .term{
+    background:#050810;border:1px solid var(--glass-edge);border-radius:13px;
+    font:500 .86rem/1.7 ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+    padding:20px 22px;color:var(--ink-soft);overflow:auto;
+  }
+  .term .p{color:var(--ink-faint)}
+  .term .c{color:var(--beam-hot)}
+  .term .o{color:var(--ink-faint)}
+  .term .ok{color:#7fd6a3}
+
+  footer{position:relative;z-index:4;border-top:1px solid var(--line);padding:44px 0 60px}
+  .foot{display:flex;flex-wrap:wrap;gap:18px 30px;align-items:center;justify-content:space-between}
+  .foot .links{display:flex;flex-wrap:wrap;gap:8px 22px}
+  .foot small{color:var(--ink-faint)}
+  .badge{
+    display:inline-flex;align-items:center;gap:8px;font-size:.78rem;color:var(--ink-faint);
+    border:1px solid var(--line);border-radius:999px;padding:7px 14px;
+  }
+
+  @media (max-width:760px){
+    .grid3{grid-template-columns:1fr}
+    .surfaces{grid-template-columns:1fr}
+    .agent{grid-template-columns:1fr}
+    .beacon-status{display:none}
+    .lighthouse{width:64px;height:120px}
+    .lh-tower{border-bottom-width:92px}
+  }
+
+  /* ====================================================================
+     REDUCED MOTION — no sweep. The beam HOLDS on one caught scene, lit.
+     ==================================================================== */
+  @media (prefers-reduced-motion: reduce){
+    .lh-glow,.lh-reflect,.eyebrow .dot,.beacon-status .pulse{animation:none}
+  }
+</style>
+</head>
+<body>
+
+<main class="stage" id="stage">
+  <!-- cold stars above the horizon -->
+  <svg class="stars" viewBox="0 0 1000 400" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+    <g fill="#c9d6f5">
+      <circle cx="80"  cy="60"  r="1.1" opacity=".7"/><circle cx="180" cy="120" r="0.8" opacity=".5"/>
+      <circle cx="300" cy="40"  r="1.3" opacity=".8"/><circle cx="420" cy="100" r="0.7" opacity=".4"/>
+      <circle cx="540" cy="70"  r="1"   opacity=".6"/><circle cx="640" cy="150" r="0.8" opacity=".5"/>
+      <circle cx="760" cy="50"  r="1.2" opacity=".7"/><circle cx="860" cy="130" r="0.7" opacity=".4"/>
+      <circle cx="940" cy="80"  r="1"   opacity=".6"/><circle cx="240" cy="200" r="0.7" opacity=".35"/>
+      <circle cx="700" cy="210" r="0.8" opacity=".4"/><circle cx="120" cy="250" r="0.7" opacity=".3"/>
+      <circle cx="500" cy="230" r="0.9" opacity=".45"/><circle cx="880" cy="240" r="0.7" opacity=".35"/>
+    </g>
+  </svg>
+
+  <!-- the live beam, caught scenes, and sea sheen are drawn here -->
+  <canvas id="sea" aria-hidden="true"></canvas>
+
+  <!-- the lighthouse, the source of the sweeping light -->
+  <div class="lighthouse" aria-hidden="true">
+    <div class="lh-cap"></div>
+    <div class="lh-lamp"></div>
+    <div class="lh-glow"></div>
+    <div class="lh-tower"></div>
+    <div class="lh-band b1"></div>
+    <div class="lh-band b2"></div>
+    <div class="lh-band b3"></div>
+  </div>
+  <div class="lh-reflect" aria-hidden="true"></div>
+
+  <div class="vignette" aria-hidden="true"></div>
+
+  <!-- live, honest readout of the beam state (announced for SR users) -->
+  <div class="beacon-status" id="beacon" role="status" aria-live="polite">
+    <span class="pulse" aria-hidden="true"></span>
+    <span>beam sweeping · <b id="caught">scanning the dark</b></span>
+  </div>
+
+  <div class="hero">
+    <div class="wrap">
+      <span class="eyebrow"><span class="dot" aria-hidden="true"></span> Memex · associative memory for coding agents</span>
+      <h1>You forgot you'd solved this before. The beam just <span class="lit">caught the night you did.</span></h1>
+      <p class="sub">A dark sea of past Claude&nbsp;Code &amp; Codex sessions. You're not searching it. A beam turns on its own — and when it crosses a forgotten moment, that whole scene is lit for you, then the dark closes back over it.</p>
+      <div class="ctas">
+        <a class="btn btn-primary" href="https://github.com/Two-Weeks-Team/memex">View the repo</a>
+        <a class="btn btn-ghost" href="https://two-weeks-team.github.io/memex/">See it live</a>
+      </div>
+      <div class="scroll-hint"><span class="bar" aria-hidden="true"></span> what the lighthouse actually is, below</div>
+    </div>
+  </div>
+</main>
+
+<!-- ===================== WHAT IT IS ===================== -->
+<section class="band">
+  <div class="wrap">
+    <p class="lead">Why a lighthouse</p>
+    <h2>You don't document every session. The relevant one still surfaces — on its own.</h2>
+    <p class="intro">
+      Memex is a <b style="color:var(--ink)">non-chatbot, LLM-free-at-runtime</b> tool that reads your
+      Claude&nbsp;Code / Codex history (<code>~/.claude/projects/**/*.jsonl</code>, legacy transcripts and
+      <code>history.jsonl</code>) and turns it into a navigable spatial memory backed by
+      <b style="color:var(--ink)">Qdrant</b>. Each past session sits somewhere out in the dark. The beam
+      sweeps by <em>similarity to what you're doing now</em> — so retrieval happens <em>to</em> you, not
+      because you went looking.
+    </p>
+    <div class="grid3">
+      <div class="card">
+        <div class="ico" aria-hidden="true">🌊</div>
+        <h3>A sea you own</h3>
+        <p>Claude&nbsp;Code silently migrates and deletes old sessions. Memex keeps the corpus on your machine, yours to move through by meaning — not by keyword.</p>
+      </div>
+      <div class="card">
+        <div class="ico" aria-hidden="true">🔦</div>
+        <h3>The beam, not your cursor</h3>
+        <p>There's no search box and nothing to hover. The light rotates by itself; when its angle crosses a relevant moment, that scene is caught and held — then released.</p>
+      </div>
+      <div class="card">
+        <div class="ico" aria-hidden="true">🧭</div>
+        <h3>Vannevar Bush's Memex</h3>
+        <p>The 1945 idea: follow <em>associative trails</em> through what you've already thought, instead of querying a database. Distance in the dark <em>is</em> the index.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== SURFACES ===================== -->
+<section class="band alt">
+  <div class="wrap">
+    <p class="lead">What the beam can catch</p>
+    <h2>One corpus, many ways the dark lights up.</h2>
+    <div class="surfaces">
+      <div class="surf"><span class="k">Time Machine</span><span class="d"><b>Replay</b> a session moment-by-moment, the way it actually unfolded.</span></div>
+      <div class="surf"><span class="k">Lens</span><span class="d"><b>Named-vector weighted search</b> — tune which kind of similarity the beam follows.</span></div>
+      <div class="surf"><span class="k">Topology</span><span class="d"><b>Distance-matrix → MST graph</b> of how your sessions relate.</span></div>
+      <div class="surf"><span class="k">Mix / Discovery</span><span class="d"><b>Positive / negative</b> recommendation across the corpus.</span></div>
+      <div class="surf"><span class="k">Recall</span><span class="d"><b>Proactive</b> surfacing — the past arrives unbidden as you work.</span></div>
+      <div class="surf"><span class="k">Companion</span><span class="d"><b>Wrapped / Loop&nbsp;Breaker</b> — the new agent-memory layer over your history.</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== AGENT / MCP ===================== -->
+<section class="band">
+  <div class="wrap">
+    <div class="agent">
+      <div>
+        <p class="lead">For your agent</p>
+        <h2>11 MCP tools your agent can reach into mid-task.</h2>
+        <p class="intro">
+          Memex exposes <b style="color:var(--ink)">11 MCP tools over stdio + HTTP</b> and works in
+          Claude&nbsp;Code, Codex, and Cursor. A <b style="color:var(--ink)">server / Docker variant</b>
+          runs Qdrant + the web UI + MCP in one image, so the same associative sea is reachable by you
+          and by the agent — the beam can be triggered by the moment your agent is in, not by a query.
+        </p>
+        <div class="ctas">
+          <a class="btn btn-ghost" href="https://github.com/Two-Weeks-Team/memex#server-variant">Server / Docker variant</a>
+        </div>
+      </div>
+      <div class="term" aria-label="Example: registering Memex as an MCP server">
+        <div><span class="p">$</span> <span class="c">claude mcp add memex -- memex serve --stdio</span></div>
+        <div class="o">added "memex" (stdio) · 11 tools available</div>
+        <div>&nbsp;</div>
+        <div><span class="p">›</span> <span class="o">agent, mid-task:</span></div>
+        <div class="o">&nbsp;&nbsp;"have we hit this auth-retry loop before?"</div>
+        <div><span class="ok">↳ recall</span> <span class="o">caught: session · 6 weeks ago · the fix</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap foot">
+    <div>
+      <div class="links">
+        <a href="https://github.com/Two-Weeks-Team/memex">github.com/Two-Weeks-Team/memex</a>
+        <a href="https://two-weeks-team.github.io/memex/">two-weeks-team.github.io/memex</a>
+        <a href="https://github.com/Two-Weeks-Team/memex#server-variant">Docker / server variant</a>
+      </div>
+      <small>A non-chatbot, LLM-free-at-runtime memory over your own session history.</small>
+    </div>
+    <span class="badge">Built for Qdrant Vector Space Day 2026 — “Think Outside the Bot.”</span>
+  </div>
+</footer>
+
+<script>
+(function(){
+  "use strict";
+
+  var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var canvas = document.getElementById('sea');
+  var ctx = canvas.getContext('2d');
+  var stage = document.getElementById('stage');
+  var caughtEl = document.getElementById('caught');
+
+  var W = 0, H = 0, DPR = 1, HORIZON = 0, LX = 0, LY = 0;
+
+  // ---- The hidden scenes out in the dark. Each is placed at an angle from
+  //      the lighthouse; when the beam's angle crosses one, it is "caught"
+  //      and a full tableau is painted, lit, in the beam — then released. ----
+  // angle: bearing in degrees measured from straight-down (toward viewer),
+  //        spread across the visible foreground sea.
+  var SCENES = [
+    { ang:-58, dist:0.92, label:"the off-by-one in the cursor sync",     code:["for (i = 0; i <= n; i++)","//        ^ one too far"], when:"3 days ago" },
+    { ang:-30, dist:0.74, label:"the env var that wasn't loaded",        code:["dotenv.config()","// it was. wrong path."],         when:"last week" },
+    { ang: -6, dist:0.62, label:"the auth-retry loop you broke once",    code:["if (401) retry()","// retry() → 401 → retry()…"],      when:"6 weeks ago" },
+    { ang: 22, dist:0.78, label:"the migration that ran twice",          code:["ALTER TABLE …","-- idempotent? no."],                when:"2 months ago" },
+    { ang: 50, dist:0.94, label:"the regex that ate the whole string",   code:["/.*?/g vs /.*/g","// greedy. of course."],            when:"last spring" }
+  ];
+
+  function resize(){
+    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    W = stage.clientWidth;
+    H = stage.clientHeight;
+    canvas.width = Math.floor(W * DPR);
+    canvas.height = Math.floor(H * DPR);
+    canvas.style.width = W + 'px';
+    canvas.style.height = H + 'px';
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    HORIZON = H * 0.52;
+    LX = W * 0.5;
+    LY = HORIZON - 2;     // the lamp room sits just above the horizon line
+  }
+  resize();
+  window.addEventListener('resize', resize);
+
+  // map a scene's (angle from straight-down, dist 0..1) to a sea point
+  function scenePoint(s){
+    var rad = (s.ang) * Math.PI / 180;
+    // straight-down is +y; spread horizontally with angle, push toward viewer with dist
+    var reach = (H - HORIZON);                 // sea band height
+    var py = HORIZON + reach * (0.18 + 0.80 * s.dist);
+    var px = LX + Math.tan(rad) * (py - LY) ;  // project along the bearing
+    // clamp into frame
+    px = Math.max(40, Math.min(W - 40, px));
+    return { x:px, y:py };
+  }
+
+  // current beam angle (degrees from straight-down). Sweeps left↔right and back.
+  var SWEEP_MIN = -68, SWEEP_MAX = 68;
+  var beamAng = SWEEP_MIN;
+  var dir = 1;
+  var period = 9000;                 // ms for a one-way sweep
+  var lastT = performance.now();
+
+  // reduced-motion: hold on the most "relevant" scene (the auth-retry loop),
+  // beam fixed on it, lit. No sweep at all.
+  var heldScene = SCENES[2];
+  if (reduce){ beamAng = heldScene.ang; }
+
+  // per-scene "caught" intensity 0..1 (eased) + a held timer
+  var caughtState = SCENES.map(function(){ return { v:0, target:0 }; });
+
+  function draw(now){
+    var dt = Math.min(now - lastT, 60);
+    lastT = now;
+
+    if (!reduce){
+      // advance the sweep with a gentle ease at the turn-arounds (irregular, lifelike)
+      var span = SWEEP_MAX - SWEEP_MIN;
+      beamAng += dir * (span / period) * dt;
+      if (beamAng >= SWEEP_MAX){ beamAng = SWEEP_MAX; dir = -1; }
+      if (beamAng <= SWEEP_MIN){ beamAng = SWEEP_MIN; dir = 1; }
+    }
+
+    ctx.clearRect(0,0,W,H);
+
+    // ---------- sea sheen (subtle moving glints so the dark reads as water) ----------
+    drawSeaGlints(now);
+
+    // ---------- the volumetric beam (two soft wedges + a bright core) ----------
+    var beamRad = beamAng * Math.PI/180;
+    drawBeam(beamRad, now);
+
+    // ---------- decide what is caught & paint each scene at its strength ----------
+    var anyCaught = -1, bestStrength = 0.18; // threshold to "announce"
+    for (var i=0;i<SCENES.length;i++){
+      var s = SCENES[i];
+      var diff = Math.abs(beamAng - s.ang);
+      // catch window: the closer the beam bearing to the scene bearing, the brighter
+      var strength = Math.max(0, 1 - diff/9);   // ±9° catch cone
+      caughtState[i].target = strength;
+      // ease toward target; hold a touch on the way out so it lingers ("held moment")
+      var k = strength > caughtState[i].v ? 0.18 : 0.06;
+      caughtState[i].v += (caughtState[i].target - caughtState[i].v) * k * (dt/16.67);
+      if (reduce){ caughtState[i].v = (s===heldScene)?1:0; }
+
+      if (caughtState[i].v > 0.02){
+        paintScene(s, caughtState[i].v, now);
+      }
+      if (caughtState[i].v > bestStrength){ bestStrength = caughtState[i].v; anyCaught = i; }
+    }
+
+    // update the honest live readout
+    if (anyCaught >= 0){
+      var s2 = SCENES[anyCaught];
+      var txt = '“' + s2.label + '” · ' + s2.when;
+      if (caughtEl.textContent !== txt){ caughtEl.textContent = txt; }
+    } else if (!reduce && caughtEl.textContent.indexOf('scanning') < 0){
+      caughtEl.textContent = 'scanning the dark';
+    } else if (reduce){
+      caughtEl.textContent = '“' + heldScene.label + '” · ' + heldScene.when;
+    }
+
+    if (!reduce) requestAnimationFrame(draw);
+  }
+
+  // --- soft drifting glints on the water so the dark is legibly a sea ---
+  var glints = [];
+  (function seedGlints(){
+    for (var i=0;i<26;i++){
+      glints.push({ x:Math.random(), y:Math.random(), s:0.6+Math.random()*1.4, ph:Math.random()*6.28 });
+    }
+  })();
+  function drawSeaGlints(now){
+    var t = now/1000;
+    ctx.save();
+    for (var i=0;i<glints.length;i++){
+      var g = glints[i];
+      var px = g.x * W;
+      var py = HORIZON + (H - HORIZON) * (0.06 + g.y*0.92);
+      var tw = 0.10 + 0.10 * (0.5 + 0.5*Math.sin(t*1.3 + g.ph));
+      // brighter near the horizon, fading toward the viewer
+      var depth = 1 - (py - HORIZON)/(H - HORIZON);
+      ctx.globalAlpha = tw * (0.25 + 0.6*depth);
+      ctx.fillStyle = 'rgba(150,180,225,0.9)';
+      ctx.fillRect(px, py, g.s*2.4, g.s*0.7);
+    }
+    ctx.restore();
+  }
+
+  // --- the rotating volumetric beam from the lamp ---
+  function drawBeam(rad, now){
+    var len = Math.hypot(W, H) * 1.15;
+    var half = 5.0 * Math.PI/180;            // beam half-angle (narrow, defined)
+    var soft = 11.0 * Math.PI/180;           // soft outer falloff
+    // straight-down direction is angle PI/2 in canvas terms; bearing 0 = down.
+    var base = Math.PI/2 + rad;
+
+    function wedge(a0, a1, grad){
+      ctx.beginPath();
+      ctx.moveTo(LX, LY);
+      ctx.arc(LX, LY, len, base + a0, base + a1, false);
+      ctx.closePath();
+      ctx.fillStyle = grad;
+      ctx.fill();
+    }
+
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+
+    // outer soft cone
+    var gOuter = ctx.createRadialGradient(LX, LY, 0, LX, LY, len);
+    gOuter.addColorStop(0,   'rgba(255,224,170,0.22)');
+    gOuter.addColorStop(0.35,'rgba(255,210,150,0.10)');
+    gOuter.addColorStop(0.7, 'rgba(255,200,130,0.03)');
+    gOuter.addColorStop(1,   'rgba(255,200,130,0)');
+    wedge(-soft, soft, gOuter);
+
+    // bright inner core
+    var gCore = ctx.createRadialGradient(LX, LY, 0, LX, LY, len);
+    gCore.addColorStop(0,   'rgba(255,247,222,0.55)');
+    gCore.addColorStop(0.3, 'rgba(255,232,185,0.22)');
+    gCore.addColorStop(0.75,'rgba(255,220,160,0.05)');
+    gCore.addColorStop(1,   'rgba(255,220,160,0)');
+    wedge(-half, half, gCore);
+
+    // a faint pulsing hot spine down the centre
+    var pulse = 0.6 + 0.4*Math.sin(now/520);
+    ctx.beginPath();
+    ctx.moveTo(LX, LY);
+    var tipx = LX + Math.cos(base)*len, tipy = LY + Math.sin(base)*len;
+    ctx.lineTo(tipx, tipy);
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = 'rgba(255,247,222,'+(0.10*pulse)+')';
+    ctx.stroke();
+
+    ctx.restore();
+
+    // the lamp source flare at the origin
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    var flare = ctx.createRadialGradient(LX, LY, 0, LX, LY, 38);
+    flare.addColorStop(0,'rgba(255,247,222,0.9)');
+    flare.addColorStop(1,'rgba(255,247,222,0)');
+    ctx.fillStyle = flare;
+    ctx.beginPath(); ctx.arc(LX, LY, 38, 0, 6.2832); ctx.fill();
+    ctx.restore();
+  }
+
+  // --- paint a CAUGHT scene as a small lit tableau on the water ---
+  // v: 0..1 how strongly it's caught. Below the beam it sits dark/invisible.
+  function paintScene(s, v, now){
+    var p = scenePoint(s);
+    var depth = (p.y - HORIZON)/(H - HORIZON);          // 0 near horizon → 1 near viewer
+    var scale = 0.62 + depth*0.9;                       // closer = larger
+    var w = 150*scale, h = 96*scale;
+    var x = p.x, y = p.y;
+
+    // keep the tableau inside the frame
+    if (x - w/2 < 12) x = 12 + w/2;
+    if (x + w/2 > W-12) x = W-12 - w/2;
+
+    var eased = v*v*(3-2*v);   // smoothstep so it "materializes"
+
+    ctx.save();
+    ctx.translate(x, y);
+
+    // the warm pool the beam casts where the scene sits
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    var pool = ctx.createRadialGradient(0,0,0, 0,0, w*0.95);
+    pool.addColorStop(0,'rgba(255,235,195,'+(0.42*eased)+')');
+    pool.addColorStop(0.5,'rgba(255,210,150,'+(0.16*eased)+')');
+    pool.addColorStop(1,'rgba(255,200,130,0)');
+    ctx.fillStyle = pool;
+    ctx.beginPath(); ctx.ellipse(0,0, w*0.95, h*0.85, 0, 0, 6.2832); ctx.fill();
+    ctx.restore();
+
+    // the scene "card" — a depicted coding moment (a frame + code lines + a marker)
+    ctx.globalAlpha = eased;
+
+    // frame
+    var fw = w, fh = h;
+    roundRect(-fw/2, -fh/2, fw, fh, 9*scale);
+    var grad = ctx.createLinearGradient(0,-fh/2,0,fh/2);
+    grad.addColorStop(0,'rgba(28,22,12,0.96)');
+    grad.addColorStop(1,'rgba(16,13,8,0.96)');
+    ctx.fillStyle = grad;
+    ctx.fill();
+    ctx.lineWidth = 1.2*scale;
+    ctx.strokeStyle = 'rgba(255,220,160,'+(0.5*eased)+')';
+    ctx.stroke();
+
+    // title bar dots
+    ctx.fillStyle = 'rgba(255,200,130,'+(0.55*eased)+')';
+    var dotR = 2.0*scale, dy = -fh/2 + 9*scale;
+    for (var d=0; d<3; d++){ ctx.beginPath(); ctx.arc(-fw/2+10*scale + d*7*scale, dy, dotR, 0, 6.2832); ctx.fill(); }
+
+    // the code lines (the depicted scene content)
+    ctx.font = (10*scale).toFixed(1)+'px ui-monospace, Menlo, Consolas, monospace';
+    ctx.textBaseline = 'top';
+    var ly = -fh/2 + 18*scale, lx = -fw/2 + 11*scale;
+    for (var i=0;i<s.code.length;i++){
+      var line = s.code[i];
+      ctx.fillStyle = (line.indexOf('//')===0 || line.indexOf('--')===0)
+        ? 'rgba(240,162,74,'+(0.9*eased)+')'
+        : 'rgba(255,243,214,'+(0.95*eased)+')';
+      ctx.fillText(line, lx, ly + i*13*scale);
+    }
+
+    // caption ribbon under the frame: what & when
+    ctx.font = '600 '+(9.5*scale).toFixed(1)+'px system-ui, sans-serif';
+    ctx.fillStyle = 'rgba(255,243,214,'+(0.95*eased)+')';
+    ctx.textAlign = 'center';
+    var cap = s.label;
+    ctx.fillText(cap, 0, fh/2 + 6*scale);
+    ctx.font = '500 '+(8.5*scale).toFixed(1)+'px ui-monospace, Menlo, monospace';
+    ctx.fillStyle = 'rgba(174,187,214,'+(0.8*eased)+')';
+    ctx.fillText(s.when, 0, fh/2 + 19*scale);
+    ctx.textAlign = 'left';
+
+    ctx.restore();
+  }
+
+  function roundRect(x,y,w,h,r){
+    ctx.beginPath();
+    ctx.moveTo(x+r,y);
+    ctx.arcTo(x+w,y,x+w,y+h,r);
+    ctx.arcTo(x+w,y+h,x,y+h,r);
+    ctx.arcTo(x,y+h,x,y,r);
+    ctx.arcTo(x,y,x+w,y,r);
+    ctx.closePath();
+  }
+
+  // kick off
+  if (reduce){
+    // single static frame, scene held lit, no animation loop
+    draw(performance.now());
+  } else {
+    requestAnimationFrame(draw);
+  }
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,559 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Memex — the memory layer your agent already has</title>
+<meta name="description" content="Memex is the SDK / MCP layer. Wire it into Claude Code or Codex once, and the relevant past session arrives at turn 0 — before you ask. 11 MCP tools, zero LLM at runtime, 100% local.">
+<style>
+  :root {
+    /* OKLCH palette — deep terminal dark, one warm "recall" accent */
+    --bg:        oklch(0.16 0.02 265);
+    --bg-raise:  oklch(0.21 0.025 265);
+    --bg-card:   oklch(0.24 0.03 265);
+    --line:      oklch(0.34 0.03 265);
+    --ink:       oklch(0.93 0.01 265);
+    --ink-soft:  oklch(0.74 0.02 265);
+    --ink-faint: oklch(0.58 0.02 265);
+    --accent:    oklch(0.78 0.15 75);   /* warm amber — the "unbidden" memory */
+    --accent-dim:oklch(0.55 0.10 75);
+    --green:     oklch(0.80 0.16 150);
+    --cyan:      oklch(0.80 0.10 215);
+    --mauve:     oklch(0.74 0.13 305);
+    --code-bg:   oklch(0.13 0.018 265);
+    --radius: 10px;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+  body {
+    margin: 0;
+    font-family: var(--sans);
+    background: var(--bg);
+    color: var(--ink);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--cyan); text-decoration: none; }
+  a:hover, a:focus-visible { text-decoration: underline; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
+  .wrap { max-width: 1020px; margin: 0 auto; padding: 0 24px; }
+  code, kbd, pre { font-family: var(--mono); }
+  kbd {
+    background: var(--bg-raise); border: 1px solid var(--line);
+    border-bottom-width: 2px; border-radius: 5px; padding: 1px 6px;
+    font-size: 0.82em; color: var(--ink-soft);
+  }
+  .skip {
+    position: absolute; left: -999px; top: 0; background: var(--accent);
+    color: oklch(0.16 0.02 265); padding: 10px 16px; border-radius: 0 0 8px 0; z-index: 50; font-weight: 600;
+  }
+  .skip:focus { left: 0; }
+
+  /* ---- top bar ---- */
+  header.bar {
+    position: sticky; top: 0; z-index: 30;
+    background: oklch(0.16 0.02 265 / 0.86);
+    backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--line);
+  }
+  .bar-in { display: flex; align-items: center; gap: 16px; height: 58px; }
+  .logo { display: flex; align-items: center; gap: 10px; font-weight: 650; letter-spacing: -0.01em; }
+  .logo svg { display: block; }
+  .bar nav { margin-left: auto; display: flex; gap: 20px; align-items: center; font-size: 0.92rem; }
+  .bar nav a { color: var(--ink-soft); }
+  .bar nav a:hover { color: var(--ink); }
+  .badge-mcp {
+    font-family: var(--mono); font-size: 0.72rem; color: var(--accent);
+    border: 1px solid var(--accent-dim); border-radius: 100px; padding: 3px 10px;
+  }
+  @media (max-width: 720px) { .bar nav .hide-sm { display: none; } }
+
+  /* ---- hero ---- */
+  .hero { padding: 64px 0 36px; }
+  .eyebrow {
+    font-family: var(--mono); font-size: 0.8rem; color: var(--accent);
+    text-transform: uppercase; letter-spacing: 0.13em; margin: 0 0 16px;
+  }
+  h1 {
+    font-size: clamp(2rem, 5.2vw, 3.3rem); line-height: 1.08; letter-spacing: -0.025em;
+    margin: 0 0 18px; font-weight: 700; max-width: 16ch;
+  }
+  h1 .glow { color: var(--accent); }
+  .lede { font-size: clamp(1.05rem, 2.3vw, 1.3rem); color: var(--ink-soft); max-width: 60ch; margin: 0 0 28px; }
+  .lede b { color: var(--ink); font-weight: 600; }
+  .cta-row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+  .btn {
+    font-family: var(--mono); font-size: 0.92rem; font-weight: 600;
+    padding: 11px 18px; border-radius: var(--radius); border: 1px solid var(--line);
+    background: var(--bg-card); color: var(--ink); cursor: pointer; display: inline-flex; gap: 9px; align-items: center;
+  }
+  .btn.primary { background: var(--accent); color: oklch(0.16 0.02 265); border-color: var(--accent); }
+  .btn.primary:hover, .btn.primary:focus-visible { background: oklch(0.83 0.15 75); }
+  .btn:hover { border-color: var(--ink-faint); }
+
+  /* ---- the agent terminal (the star) ---- */
+  .stage { margin: 40px 0 8px; }
+  .stage-cap {
+    font-family: var(--mono); font-size: 0.8rem; color: var(--ink-faint);
+    text-align: center; margin: 0 0 14px;
+  }
+  .terminal {
+    background: var(--code-bg); border: 1px solid var(--line); border-radius: 14px;
+    overflow: hidden; box-shadow: 0 24px 60px -30px oklch(0 0 0 / 0.8);
+  }
+  .term-head {
+    display: flex; align-items: center; gap: 8px; padding: 11px 16px;
+    background: var(--bg-raise); border-bottom: 1px solid var(--line);
+  }
+  .dot { width: 11px; height: 11px; border-radius: 50%; }
+  .dot.r { background: oklch(0.68 0.18 25); }
+  .dot.y { background: oklch(0.82 0.14 90); }
+  .dot.g { background: oklch(0.78 0.16 150); }
+  .term-title { margin-left: 10px; font-family: var(--mono); font-size: 0.8rem; color: var(--ink-faint); }
+  .term-flag {
+    margin-left: auto; font-family: var(--mono); font-size: 0.72rem; color: var(--green);
+    display: inline-flex; gap: 6px; align-items: center;
+  }
+  .term-flag .pulse { width: 7px; height: 7px; border-radius: 50%; background: var(--green); }
+  @media (prefers-reduced-motion: no-preference) {
+    .term-flag .pulse { animation: blink 2.2s ease-in-out infinite; }
+    @keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
+  }
+  .term-body {
+    padding: 20px 18px 22px; font-family: var(--mono); font-size: 0.86rem; line-height: 1.65;
+    min-height: 330px; white-space: pre-wrap; word-break: break-word;
+  }
+  .ln { display: block; }
+  .ln .prompt { color: var(--green); }
+  .ln .user { color: var(--ink); }
+  .ln .dim { color: var(--ink-faint); }
+  .caret { display: inline-block; width: 8px; background: var(--ink); margin-left: 1px; }
+  @media (prefers-reduced-motion: no-preference) {
+    .caret { animation: caret 1s step-end infinite; }
+    @keyframes caret { 50% { opacity: 0; } }
+  }
+
+  /* the memory primer card — arrives unbidden */
+  .primer {
+    margin: 14px 0; border: 1px solid var(--accent-dim); border-left: 3px solid var(--accent);
+    border-radius: 10px; background: oklch(0.20 0.03 75 / 0.35); padding: 14px 16px;
+    opacity: 0; transform: translateY(8px);
+  }
+  .primer.in { opacity: 1; transform: none; transition: opacity .5s ease, transform .5s ease; }
+  @media (prefers-reduced-motion: reduce) { .primer.in { transition: none; } }
+  .primer-head {
+    color: var(--accent); font-weight: 600; display: flex; gap: 8px; align-items: center;
+    font-size: 0.84rem; margin-bottom: 8px;
+  }
+  .primer-head .tool { color: var(--ink-faint); font-weight: 400; }
+  .primer ul { margin: 6px 0 0; padding-left: 0; list-style: none; }
+  .primer li { color: var(--ink-soft); padding: 2px 0; }
+  .primer li::before { content: "▸ "; color: var(--accent-dim); }
+  .primer .sid { color: var(--ink-faint); }
+  .agent-says { color: var(--ink-soft); }
+  .agent-says .ai { color: var(--mauve); }
+
+  .replay-note {
+    font-family: var(--sans); font-size: 0.88rem; color: var(--ink-faint);
+    text-align: center; margin: 16px auto 0; max-width: 64ch;
+  }
+  .replay-note button {
+    background: none; border: none; color: var(--cyan); cursor: pointer; font: inherit; text-decoration: underline; padding: 0;
+  }
+
+  /* ---- sections ---- */
+  section { padding: 56px 0; border-top: 1px solid var(--line); }
+  h2 { font-size: clamp(1.5rem, 3.4vw, 2rem); letter-spacing: -0.02em; margin: 0 0 10px; }
+  .sec-lede { color: var(--ink-soft); max-width: 64ch; margin: 0 0 28px; }
+
+  /* install steps */
+  .steps { display: grid; gap: 18px; }
+  .step { display: grid; grid-template-columns: 38px 1fr; gap: 16px; align-items: start; }
+  .step-n {
+    width: 38px; height: 38px; border-radius: 10px; border: 1px solid var(--line);
+    background: var(--bg-card); display: grid; place-items: center;
+    font-family: var(--mono); font-weight: 700; color: var(--accent);
+  }
+  .step h3 { margin: 4px 0 6px; font-size: 1.02rem; }
+  .step p { margin: 0 0 8px; color: var(--ink-soft); font-size: 0.95rem; }
+  pre.code {
+    background: var(--code-bg); border: 1px solid var(--line); border-radius: 8px;
+    padding: 13px 14px; overflow-x: auto; font-size: 0.84rem; color: var(--ink); margin: 0; position: relative;
+  }
+  pre.code .c { color: var(--ink-faint); }    /* comment */
+  pre.code .ok { color: var(--green); }
+  pre.code .kw { color: var(--accent); }
+  .copy {
+    position: absolute; top: 8px; right: 8px;
+    font-family: var(--mono); font-size: 0.72rem; color: var(--ink-soft);
+    background: var(--bg-raise); border: 1px solid var(--line); border-radius: 6px;
+    padding: 4px 9px; cursor: pointer;
+  }
+  .copy:hover { color: var(--ink); border-color: var(--ink-faint); }
+
+  /* tools table */
+  .tools { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1px; background: var(--line);
+    border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+  @media (max-width: 720px) { .tools { grid-template-columns: 1fr; } }
+  .tool-cell { background: var(--bg-card); padding: 15px 16px; }
+  .tool-cell code { color: var(--accent); font-size: 0.85rem; font-weight: 600; }
+  .tool-cell .new { font-family: var(--mono); font-size: 0.62rem; color: var(--bg); background: var(--accent);
+    border-radius: 4px; padding: 1px 5px; margin-left: 6px; vertical-align: middle; }
+  .tool-cell p { margin: 7px 0 0; color: var(--ink-soft); font-size: 0.88rem; line-height: 1.5; }
+
+  /* companion triggers */
+  .triggers { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  @media (max-width: 720px) { .triggers { grid-template-columns: 1fr; } }
+  .trig { background: var(--bg-card); border: 1px solid var(--line); border-radius: 12px; padding: 18px; }
+  .trig .icon { font-size: 1.4rem; }
+  .trig h3 { margin: 8px 0 4px; font-size: 1.02rem; }
+  .trig .when { font-family: var(--mono); font-size: 0.74rem; color: var(--accent); margin: 0 0 8px; }
+  .trig p { margin: 0; color: var(--ink-soft); font-size: 0.9rem; }
+
+  /* facts strip */
+  .facts { display: flex; flex-wrap: wrap; gap: 10px; }
+  .fact {
+    font-family: var(--mono); font-size: 0.8rem; color: var(--ink-soft);
+    border: 1px solid var(--line); border-radius: 100px; padding: 6px 14px; background: var(--bg-card);
+  }
+  .fact b { color: var(--green); }
+
+  footer { border-top: 1px solid var(--line); padding: 40px 0 64px; color: var(--ink-faint); font-size: 0.9rem; }
+  footer .f-links { display: flex; flex-wrap: wrap; gap: 22px; margin-bottom: 18px; }
+  footer .f-links a { color: var(--ink-soft); }
+  footer .small { font-size: 0.82rem; line-height: 1.7; }
+  .note { color: var(--ink-faint); font-size: 0.82rem; margin-top: 8px; }
+</style>
+</head>
+<body>
+<a class="skip" href="#install">Skip to install</a>
+
+<header class="bar">
+  <div class="wrap bar-in">
+    <span class="logo">
+      <svg width="26" height="26" viewBox="0 0 26 26" aria-hidden="true">
+        <circle cx="13" cy="13" r="11.5" fill="none" stroke="oklch(0.55 0.10 75)" stroke-width="1.2"/>
+        <circle cx="13" cy="13" r="3" fill="oklch(0.78 0.15 75)"/>
+        <circle cx="5" cy="8" r="1.6" fill="oklch(0.74 0.02 265)"/>
+        <circle cx="20" cy="7" r="1.6" fill="oklch(0.74 0.02 265)"/>
+        <circle cx="19" cy="19" r="1.6" fill="oklch(0.74 0.02 265)"/>
+        <path d="M13 13 L5 8 M13 13 L20 7 M13 13 L19 19" stroke="oklch(0.55 0.10 75)" stroke-width="0.9" opacity="0.7"/>
+      </svg>
+      Memex <span class="badge-mcp">MCP</span>
+    </span>
+    <nav>
+      <a class="hide-sm" href="#how">How it arrives</a>
+      <a class="hide-sm" href="#tools">11 tools</a>
+      <a href="#install">Install</a>
+      <a href="https://github.com/Two-Weeks-Team/memex">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+<section class="hero" style="border-top:none;">
+  <div class="wrap">
+    <p class="eyebrow">No UI. The memory layer lives inside your agent.</p>
+    <h1>The past session arrives <span class="glow">before you ask.</span></h1>
+    <p class="lede">
+      Memex isn't an app you open — it's a <b>Model Context Protocol server</b> you wire into
+      Claude Code or Codex <b>once</b>. After that, when a new session starts, the relevant
+      memory from your own history is <b>injected at turn 0</b> — you typed nothing, yet the
+      agent already knows the stack, the decisions, the pitfall you hit last month.
+    </p>
+    <div class="cta-row">
+      <a class="btn primary" href="#install">$ claude mcp add memex</a>
+      <a class="btn" href="https://github.com/Two-Weeks-Team/memex">View source</a>
+      <a class="btn" href="#tools">See the 11 tools</a>
+    </div>
+
+    <div class="stage">
+      <p class="stage-cap">— a fresh Claude Code session in a repo you've worked in before —</p>
+      <div class="terminal" aria-hidden="false">
+        <div class="term-head">
+          <span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
+          <span class="term-title">claude — ~/work/acme-saas</span>
+          <span class="term-flag"><span class="pulse"></span>memex MCP · connected</span>
+        </div>
+        <div class="term-body" id="term" role="img"
+             aria-label="A developer opens a fresh agent session and types 'Add login to this app.' Before they finish, Memex injects a memory primer at turn zero: the stack is Next.js 15 plus Drizzle plus Neon Postgres, auth was decided as NextAuth v5 with PKCE, DDL drivers must use session-mode pooling, and a known pitfall is WAL WouldBlock connection pool exhaustion. The agent then proceeds without asking any setup questions.">
+        </div>
+      </div>
+      <p class="replay-note">
+        Nothing was searched. No box, no query — the memory rose because the <em>situation</em>
+        called it up.
+        <button id="replay" type="button">↻ replay</button>
+      </p>
+    </div>
+  </div>
+</section>
+
+<section id="how">
+  <div class="wrap">
+    <h2>You didn't go looking. It came to you.</h2>
+    <p class="sec-lede">
+      Three moments fire on their own cadence — triggered by a <b>situation</b>, not by a
+      keystroke. Memex is the recipient-not-seeker model, baked into the agent loop. All three
+      are deterministic, sub-second on a ~70-session corpus, and run with <b>zero LLM at runtime</b>.
+    </p>
+    <div class="triggers">
+      <div class="trig">
+        <div class="icon" aria-hidden="true">🧠</div>
+        <h3>Cold Start Killer</h3>
+        <p class="when">fires when a new session opens</p>
+        <p>The agent boots with amnesia. Memex mines past sessions for this <code>cwd</code> and
+           hands the agent a ready-to-inject primer — decisions, pitfalls, stack fingerprint — at turn 0.</p>
+      </div>
+      <div class="trig">
+        <div class="icon" aria-hidden="true">🔁</div>
+        <h3>Loop Breaker</h3>
+        <p class="when">fires after ≥3 tool errors in 10 turns</p>
+        <p>A background watcher notices you're stuck and surfaces the past session where
+           past-you <em>broke a similar loop</em> — with a deep-link to the exact pivot turn.</p>
+      </div>
+      <div class="trig">
+        <div class="icon" aria-hidden="true">🔔</div>
+        <h3>Proactive Recall</h3>
+        <p class="when">fires on a fresh matching error</p>
+        <p>Hit a <code>tool_result.is_error</code> that matches a past <code>error</code>-vector
+           neighbor above threshold? The session that solved it surfaces, unprompted.</p>
+      </div>
+    </div>
+    <p class="note">
+      Backed by Qdrant primitives (named-vector neighbors, payload-filtered scroll, Discovery API),
+      all on <code>localhost:6334</code>. The MCP daemon never speaks to anything outside your machine.
+    </p>
+  </div>
+</section>
+
+<section id="install">
+  <div class="wrap">
+    <h2>Install &amp; go — three lines</h2>
+    <p class="sec-lede">
+      Point Claude Code at the same <code>memex</code> binary the desktop app already runs.
+      One wiring step; every future session inherits the memory layer.
+    </p>
+    <div class="steps">
+      <div class="step">
+        <div class="step-n">1</div>
+        <div>
+          <h3>Start the load-bearing Qdrant</h3>
+          <p>Memex stores your corpus as vectors in a local Qdrant. One command starts it.</p>
+          <pre class="code"><button class="copy" type="button">copy</button><span class="c"># from the memex repo root</span>
+bash scripts/start-qdrant.sh</pre>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-n">2</div>
+        <div>
+          <h3>Wire the MCP server into Claude Code</h3>
+          <p>One-time registration. Or run <code>memex install-mcp --run</code> to print &amp; execute the exact line for your machine.</p>
+          <pre class="code"><button class="copy" type="button">copy</button><span class="kw">claude mcp add</span> memex /path/to/memex/src-tauri/target/release/memex mcp
+
+<span class="c"># verify</span>
+<span class="kw">claude mcp list</span>
+<span class="c">#  memex: /…/memex mcp - </span><span class="ok">✓ Connected</span></pre>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-n">3</div>
+        <div>
+          <h3>Open a session — the memory arrives on its own</h3>
+          <p>No further wiring. Optionally pre-warm a primer into your prompt by hand:</p>
+          <pre class="code"><button class="copy" type="button">copy</button><span class="kw">memex memory</span> --cwd "$(pwd)" --limit 8 | pbcopy
+<span class="c"># → ~1.5 KB markdown primer, ready to paste at turn 0</span></pre>
+        </div>
+      </div>
+    </div>
+    <p class="note">
+      Prefer headless? The <a href="https://github.com/Two-Weeks-Team/memex/blob/main/deploy/web/README.md">server variant</a>
+      runs Qdrant + web + MCP-over-HTTP in a <b>single Docker image</b> (<code>POST /mcp</code>) — no macOS app required.
+    </p>
+  </div>
+</section>
+
+<section id="tools">
+  <div class="wrap">
+    <h2>11 MCP tools — typed handles on your own memory</h2>
+    <p class="sec-lede">
+      Each maps directly to a Qdrant primitive that powers the desktop UI. Your agent calls them
+      mid-conversation; the page below is just an example gallery — the product is the SDK surface.
+    </p>
+    <div class="tools">
+      <div class="tool-cell"><code>find_similar_sessions</code><p>Five-vector Lens search over past sessions, with per-vector contribution scores in the response.</p></div>
+      <div class="tool-cell"><code>find_similar_error</code><p>Neighbor search on the <code>error</code> named vector, filtered to <code>has_errors=true</code> — the sessions that resolved it.</p></div>
+      <div class="tool-cell"><code>predict_next_action</code><p>"What would past-you do next?" — neighbor pivot-walk + tool-call aggregation by <code>frequency × similarity</code>.</p></div>
+      <div class="tool-cell"><code>mix_similar_sessions</code><p>Qdrant Discovery API — sessions near your positives, away from your negatives. Recommendation, not retrieval.</p></div>
+      <div class="tool-cell"><code>get_session_summary</code><p>Metadata payload: project, branch, ai_title, start/end, turn counts, <code>has_errors</code>.</p></div>
+      <div class="tool-cell"><code>get_session_turn</code><p>A single turn re-parsed from source jsonl — full text + tool calls + tool results.</p></div>
+      <div class="tool-cell"><code>list_recent_sessions</code><p>Most-recent-first walk of <code>~/.claude/projects</code> — works even before Qdrant is warm.</p></div>
+      <div class="tool-cell"><code>analyze_corpus_topology</code><p>MST of session content vectors, per-project auto-labels, cross-project bridges, gap insights.</p></div>
+      <div class="tool-cell"><code>snapshot_export</code><p>Server-side snapshot of the entire collection to a portable <code>.snapshot</code> file.</p></div>
+      <div class="tool-cell"><code>get_project_memory</code><span class="new">NEW</span><p>The Cold Start Killer. Returns a ready-to-inject memory primer (decisions, pitfalls, stack) as markdown for turn 0.</p></div>
+      <div class="tool-cell"><code>generate_wrapped_report</code><span class="new">NEW</span><p>Engineering Wrapped — a corpus-wide digest for the last N days, screenshot-friendly markdown.</p></div>
+      <div class="tool-cell" style="display:grid;place-items:center;">
+        <a href="https://github.com/Two-Weeks-Team/memex#-mcp-integration--memex-as-a-memory-layer-for-any-ai-agent" style="font-family:var(--mono);font-size:0.85rem;">full MCP docs →</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>Why this is a layer, not an app</h2>
+    <p class="sec-lede">
+      Claude Code rewrites its session storage every few months and silently deletes old files.
+      Memex preserves a corpus <b>you own</b> in Qdrant — and exposes it through MCP so it follows
+      your agent across every session, every client.
+    </p>
+    <div class="facts">
+      <span class="fact"><b>0</b> LLM calls at runtime</span>
+      <span class="fact"><b>0</b> telemetry · <b>0</b> network after build</span>
+      <span class="fact"><b>11</b> MCP tools over stdio + HTTP</span>
+      <span class="fact">Claude Code · Codex · Cursor</span>
+      <span class="fact">localhost:6334 only</span>
+      <span class="fact">140–490ms primer on 69 real sessions</span>
+    </div>
+    <p class="note">
+      Built for <a href="https://qdrant.tech">Qdrant Vector Space Day 2026</a> — <em>"Think Outside the Bot."</em>
+      Qdrant is load-bearing, not a sidecar. Empirical timing measured on a 69-session real corpus; your numbers will vary.
+    </p>
+  </div>
+</section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="f-links">
+      <a href="https://github.com/Two-Weeks-Team/memex">Repository</a>
+      <a href="https://two-weeks-team.github.io/memex/">Live landing</a>
+      <a href="https://github.com/Two-Weeks-Team/memex/blob/main/deploy/web/README.md">Server / Docker variant</a>
+      <a href="https://github.com/Two-Weeks-Team/memex#-mcp-integration--memex-as-a-memory-layer-for-any-ai-agent">MCP integration</a>
+      <a href="https://modelcontextprotocol.io">Model Context Protocol</a>
+    </div>
+    <p class="small">
+      Memex turns your <code>~/.claude/projects/**/*.jsonl</code> history into a navigable, associative
+      memory backed by Qdrant — surfaced through 11 MCP tools so it lives inside your agent, not in a window.
+      Apache-2.0 · Two-Weeks-Team. The interactive terminal above is an illustrative reconstruction of a
+      <code>get_project_memory</code> response, not a live session.
+    </p>
+  </div>
+</footer>
+
+<script>
+(function () {
+  "use strict";
+  var term = document.getElementById("term");
+  var replayBtn = document.getElementById("replay");
+  var reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  // The script of the scene. Each step appends content to the terminal.
+  // The KEY north-star move: the memory primer arrives UNBIDDEN at turn 0 —
+  // it is driven by the page's timeline (the "situation"), never by the visitor.
+  function el(html) { var d = document.createElement("div"); d.innerHTML = html; return d.firstChild; }
+
+  function typeInto(node, text, speed, done) {
+    if (reduce) { node.textContent = text; done && done(); return; }
+    var i = 0;
+    var caret = document.createElement("span");
+    caret.className = "caret"; caret.innerHTML = "&nbsp;";
+    node.appendChild(caret);
+    (function step() {
+      if (i < text.length) {
+        caret.insertAdjacentText("beforebegin", text.charAt(i));
+        i++;
+        setTimeout(step, speed);
+      } else {
+        caret.remove();
+        done && done();
+      }
+    })();
+  }
+
+  function clearTerm() { term.innerHTML = ""; }
+
+  function run() {
+    clearTerm();
+
+    // 1. The prompt line + the developer typing something MUNDANE.
+    var line = el('<span class="ln"><span class="prompt">&gt; </span><span class="user"></span></span>');
+    term.appendChild(line);
+    var userSpan = line.querySelector(".user");
+
+    typeInto(userSpan, "Add login to this app.", 55, function () {
+      // 2. BEFORE the agent answers, the memory arrives on its own.
+      var wait = reduce ? 0 : 650;
+      setTimeout(function () {
+        var primer = el(
+          '<div class="primer" role="note">' +
+            '<div class="primer-head">📚 Memory Primer arrived ' +
+              '<span class="tool">— memex · get_project_memory (auto, turn 0)</span></div>' +
+            '<div style="color:var(--ink-soft);margin-bottom:6px;">Loaded from 5 past session(s) in this codebase (<code>acme-saas</code>).</div>' +
+            '<div style="color:var(--ink);">Decisions you already made:</div>' +
+            '<ul>' +
+              '<li>Stack: Next.js 15 + Drizzle + Neon Postgres <span class="sid">(acme0001)</span></li>' +
+              '<li>Auth: NextAuth v5 + PKCE — JWT-only rejected <span class="sid">(acme0002)</span></li>' +
+              '<li>DDL drivers MUST use session-mode pooling <span class="sid">(acme0003)</span></li>' +
+              '<li>Wrap with lib/err.ts — never bare Response.json <span class="sid">(acme0004)</span></li>' +
+            '</ul>' +
+            '<div style="color:var(--ink);margin-top:8px;">Known pitfalls:</div>' +
+            '<ul><li>WAL Kind(WouldBlock) — connection pool exhausted</li></ul>' +
+          '</div>'
+        );
+        term.appendChild(primer);
+        // force reflow then animate in
+        void primer.offsetWidth;
+        primer.classList.add("in");
+
+        // 3. The agent proceeds, NEVER having asked a setup question.
+        setTimeout(function () {
+          var reply = el(
+            '<div class="ln agent-says"><span class="ai">⏺</span> ' +
+            'Based on your prior decisions, I\'ll wire <span style="color:var(--ink)">NextAuth v5 with PKCE</span> ' +
+            'using the existing Drizzle adapter, and wrap the new <code>/api/auth</code> route with <code>withErr()</code>.' +
+            '<br><span class="dim">No setup questions — past-you already decided.</span></div>'
+          );
+          term.appendChild(reply);
+          if (replayBtn) replayBtn.disabled = false;
+        }, reduce ? 0 : 700);
+      }, wait);
+    });
+  }
+
+  // Run once it scrolls into view (or immediately if reduced motion / no IO support).
+  var started = false;
+  function start() { if (started) return; started = true; run(); }
+
+  if (reduce || !("IntersectionObserver" in window)) {
+    start();
+  } else {
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) { if (e.isIntersecting) { start(); io.disconnect(); } });
+    }, { threshold: 0.4 });
+    io.observe(term);
+  }
+
+  if (replayBtn) {
+    replayBtn.addEventListener("click", function () { replayBtn.disabled = true; run(); });
+  }
+
+  // Copy buttons for the install snippets.
+  document.querySelectorAll(".copy").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var pre = btn.closest("pre");
+      var text = pre.innerText.replace(/^copy\n?/, "").trim();
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(function () {
+          var old = btn.textContent; btn.textContent = "copied";
+          setTimeout(function () { btn.textContent = old; }, 1400);
+        }).catch(function () {});
+      }
+    });
+  });
+})();
+</script>
+</body>
+</html>

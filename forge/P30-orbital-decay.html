@@ -1,0 +1,973 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Memex — a memory's orbit decays until it blooms before you</title>
+<meta name="description" content="Memex turns your Claude Code & Codex session history into a navigable associative memory backed by Qdrant. Memories orbit a quiet core in concentric rings; the one the moment calls up lets its orbit decay inward, spirals to the foreground, and blooms into the full scene of a remembered coding moment — surfaced by similarity, not search. LLM-free at runtime." />
+<style>
+  :root{
+    --ink:#eaeefc;
+    --dim:#9aa1c8;
+    --faint:#646a92;
+    --bg0:#03040c;
+    --bg1:#070a1c;
+    --bg2:#0b0f26;
+    --gold:#ffd285;        /* the quiet core / gravity */
+    --gold-2:#ffab5c;
+    --teal:#7fe9d6;
+    --violet:#b39bff;
+    --accent:#a9b8ff;
+    --panel:rgba(11,15,38,.56);
+    --hair:rgba(160,176,255,.15);
+    --maxw:1080px;
+    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,"JetBrains Mono",monospace;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  html,body{margin:0;height:100%}
+  body{
+    background:
+      radial-gradient(1200px 900px at 50% 46%, #0e1336 0%, transparent 60%),
+      radial-gradient(1100px 800px at 82% 112%, #0a0f2a 0%, transparent 55%),
+      linear-gradient(180deg, var(--bg1), var(--bg0) 74%);
+    color:var(--ink);
+    font:16px/1.62 ui-sans-serif,-apple-system,"Segoe UI",Roboto,Inter,system-ui,sans-serif;
+    overflow-x:hidden;
+    -webkit-font-smoothing:antialiased;
+  }
+  a{color:var(--accent);text-decoration:none}
+  a:hover{text-decoration:underline;text-underline-offset:3px}
+  code,.mono{font-family:var(--mono)}
+  :focus-visible{outline:2px solid var(--teal);outline-offset:3px;border-radius:8px}
+  .skip{position:absolute;left:-999px;top:0;z-index:120;background:var(--bg2);
+    color:var(--ink);padding:10px 16px;border-radius:8px}
+  .skip:focus{left:16px;top:16px}
+
+  /* ============ THE ORBIT — full-bleed celestial stage ============ */
+  .stage{position:relative;width:100%;height:100svh;min-height:640px;overflow:hidden;
+    isolation:isolate}
+  #orbit{position:absolute;inset:0;width:100%;height:100%;display:block;z-index:0}
+
+  /* vignette so rings frame the center and copy stays legible */
+  .stage::after{
+    content:"";position:absolute;inset:0;pointer-events:none;z-index:3;
+    background:
+      radial-gradient(120% 84% at 50% 48%, transparent 28%, rgba(3,4,12,.5) 100%),
+      linear-gradient(180deg, rgba(3,4,12,.5) 0%, transparent 20%, transparent 56%, rgba(3,4,12,.93) 100%);
+  }
+
+  /* ---- HUD / overlaid copy ---- */
+  .hud{position:absolute;inset:0;display:flex;flex-direction:column;pointer-events:none;z-index:5}
+  .hud > *{pointer-events:auto}
+
+  .topbar{display:flex;align-items:center;justify-content:space-between;gap:16px;
+    padding:22px clamp(18px,5vw,56px)}
+  .brand{display:flex;align-items:center;gap:11px;font-weight:700;letter-spacing:.17em;
+    text-transform:uppercase;font-size:13px;color:var(--ink)}
+  .brand .dot{width:9px;height:9px;border-radius:50%;background:var(--gold);
+    box-shadow:0 0 12px 2px rgba(255,210,133,.7)}
+  .topbar nav{display:flex;gap:clamp(10px,2.4vw,26px);font-size:13px;color:var(--dim)}
+  .topbar nav a{color:var(--dim)}
+  .topbar nav a:hover{color:var(--ink)}
+
+  /* the present-moment cue, top-center: the situation that perturbs an orbit */
+  .context-cue{position:absolute;top:clamp(76px,12.5vh,124px);left:50%;
+    transform:translateX(-50%);width:min(640px,88vw);text-align:center;
+    z-index:6;pointer-events:none}
+  .context-label{font-family:var(--mono);font-size:.7rem;letter-spacing:.22em;
+    text-transform:uppercase;color:var(--faint);margin-bottom:9px}
+  .context-line{font-size:clamp(.96rem,2.3vw,1.18rem);color:var(--dim);font-weight:500;
+    min-height:1.5em;text-shadow:0 2px 24px rgba(3,4,12,.8)}
+  .context-line .cur{display:inline-block;width:.55ch;margin-left:1px;color:var(--gold);
+    animation:blink 1.05s steps(1) infinite}
+  @keyframes blink{50%{opacity:0}}
+
+  /* caption that fades in once the orbit decays and the scene blooms */
+  .scene-caption{position:absolute;z-index:6;left:50%;top:clamp(150px,23vh,244px);
+    transform:translateX(-50%);width:min(560px,86vw);text-align:center;
+    opacity:0;transition:opacity .9s ease;pointer-events:none}
+  .scene-caption.show{opacity:1}
+  .scene-caption .tag{font-family:var(--mono);font-size:.72rem;letter-spacing:.06em;
+    color:var(--gold);text-shadow:0 0 16px rgba(255,210,133,.5)}
+  .scene-caption .title{font-size:clamp(1.05rem,2.6vw,1.45rem);font-weight:600;color:#fff;
+    margin:7px 0 0;letter-spacing:-.01em;text-shadow:0 2px 28px rgba(3,4,12,.9)}
+  .scene-caption .why{font-size:.82rem;color:var(--dim);margin-top:9px}
+  .scene-caption .why b{color:var(--ink);font-weight:600}
+
+  .hero{margin-top:auto;padding:0 clamp(18px,5vw,56px) clamp(28px,7vh,72px);max-width:760px}
+  h1{margin:0;font-weight:680;font-size:clamp(33px,6vw,62px);line-height:1.04;
+    letter-spacing:-.02em;color:#fff;text-shadow:0 2px 44px rgba(3,4,12,.75)}
+  h1 .glow{color:var(--gold);text-shadow:0 0 30px rgba(255,210,133,.45)}
+  .lede{margin:18px 0 0;font-size:clamp(15px,2.1vw,18.5px);color:var(--dim);max-width:614px;
+    text-shadow:0 1px 20px rgba(3,4,12,.6)}
+  .lede b{color:var(--ink);font-weight:600}
+  .cta{display:flex;flex-wrap:wrap;gap:13px;margin-top:28px}
+  .btn{display:inline-flex;align-items:center;gap:9px;padding:13px 21px;border-radius:12px;
+    font-size:14.5px;font-weight:600;border:1px solid transparent;cursor:pointer;
+    transition:transform .15s ease,box-shadow .25s ease,background .25s ease}
+  .btn:hover{text-decoration:none;transform:translateY(-1px)}
+  .btn-primary{background:linear-gradient(135deg,#ffd285,#ffab5c);color:#241405;
+    box-shadow:0 10px 36px -6px rgba(255,171,92,.45)}
+  .btn-primary:hover{box-shadow:0 14px 44px -4px rgba(255,171,92,.62);color:#241405}
+  .btn-ghost{border-color:var(--hair);color:var(--ink);background:var(--panel);
+    backdrop-filter:blur(6px)}
+  .btn-ghost:hover{border-color:rgba(160,176,255,.42);color:var(--ink)}
+
+  .legend{margin-top:22px;font-size:12.5px;color:var(--faint);letter-spacing:.01em;
+    display:flex;align-items:center;gap:9px}
+  .legend .scene-label{color:var(--gold);font-weight:600;letter-spacing:.03em}
+
+  /* replay / pause control, lower-right */
+  .controls{position:absolute;right:clamp(16px,4vw,40px);bottom:clamp(20px,5vh,40px);
+    display:flex;gap:10px;z-index:7}
+  .chip{display:inline-flex;align-items:center;gap:8px;padding:9px 14px;border-radius:999px;
+    border:1px solid var(--hair);background:var(--panel);backdrop-filter:blur(6px);
+    color:var(--dim);font-size:12.5px;cursor:pointer}
+  .chip:hover{color:var(--ink);border-color:rgba(160,176,255,.4)}
+  .chip svg{width:13px;height:13px;fill:currentColor}
+
+  /* ============ ground-truth content below the orbit ============ */
+  .below{position:relative;z-index:2;max-width:var(--maxw);margin:0 auto;
+    padding:clamp(60px,11vh,120px) clamp(18px,5vw,40px) 40px}
+  .kicker{font-size:12px;letter-spacing:.22em;text-transform:uppercase;color:var(--faint);
+    margin:0 0 14px}
+  .below h2{font-size:clamp(24px,4vw,38px);line-height:1.13;margin:0;color:#fff;
+    letter-spacing:-.012em;font-weight:660;max-width:790px}
+  .below p.sub{color:var(--dim);max-width:700px;margin:16px 0 0;font-size:16px}
+  .below p.sub b{color:var(--ink)}
+
+  /* three orbital phases as the "how it works" metaphor */
+  .rings{display:grid;gap:18px;grid-template-columns:repeat(3,1fr);margin-top:42px}
+  .ring{position:relative;border:1px solid var(--hair);border-radius:16px;padding:24px 22px;
+    background:linear-gradient(180deg,rgba(14,18,42,.6),rgba(8,10,26,.45));overflow:hidden}
+  .ring::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;
+    background:linear-gradient(to bottom,var(--gold),transparent)}
+  .ring .phase-num{font-family:var(--mono);font-size:.72rem;letter-spacing:.08em;
+    color:var(--gold);margin-bottom:12px}
+  .ring h3{margin:0 0 9px;font-size:1.08rem;color:#fff;letter-spacing:-.01em}
+  .ring p{margin:0;font-size:.94rem;color:var(--dim);line-height:1.56}
+
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(238px,1fr));gap:16px;
+    margin-top:42px}
+  .card{border:1px solid var(--hair);border-radius:16px;padding:22px 22px 24px;
+    background:linear-gradient(180deg,rgba(14,18,42,.6),rgba(8,10,26,.45));
+    transition:border-color .2s ease,transform .2s ease}
+  .card:hover{border-color:rgba(160,176,255,.4);transform:translateY(-2px)}
+  .card h3{margin:0 0 8px;font-size:16px;color:#fff;display:flex;align-items:center;gap:9px}
+  .card h3 .gp{width:8px;height:8px;border-radius:50%;background:var(--teal);
+    box-shadow:0 0 8px 1px rgba(127,233,214,.7);flex:0 0 auto}
+  .card p{margin:0;font-size:14px;color:var(--dim);line-height:1.55}
+
+  .facts{margin-top:44px;border:1px solid var(--hair);border-radius:16px;overflow:hidden;
+    background:rgba(8,10,26,.5)}
+  .facts .row{display:grid;grid-template-columns:160px 1fr;gap:18px;padding:16px 22px;
+    border-top:1px solid rgba(160,176,255,.08);font-size:14.5px}
+  .facts .row:first-child{border-top:0}
+  .facts .row .lab{color:var(--faint);letter-spacing:.04em;font-size:12.5px;
+    text-transform:uppercase;padding-top:2px}
+  .facts .row .val{color:var(--ink)}
+  .facts .row .val .mono{color:var(--gold)}
+  .facts .row .val b{color:var(--ink)}
+
+  .addline{margin-top:34px;border:1px solid var(--hair);border-radius:14px;
+    background:#05060f;padding:16px 18px;font-size:13.5px;color:var(--dim);overflow-x:auto}
+  .addline .mono{color:var(--ink)}
+  .addline .c{color:var(--gold)}
+
+  footer{position:relative;z-index:2;border-top:1px solid var(--hair);margin-top:60px}
+  .foot{max-width:var(--maxw);margin:0 auto;padding:28px clamp(18px,5vw,40px) 60px;
+    display:flex;flex-wrap:wrap;gap:18px;justify-content:space-between;align-items:center;
+    color:var(--faint);font-size:13px}
+  .foot a{color:var(--dim)}
+  .foot .links{display:flex;flex-wrap:wrap;gap:18px}
+
+  @media (max-width:860px){
+    .rings{grid-template-columns:1fr}
+  }
+  @media (max-width:640px){
+    .topbar nav{display:none}
+    .facts .row{grid-template-columns:1fr;gap:4px}
+    .controls{right:14px;bottom:16px}
+    .scene-caption{top:clamp(120px,20vh,200px)}
+  }
+
+  /* ============ reduced motion: show the bloomed scene, static, no orbit ============ */
+  @media (prefers-reduced-motion: reduce){
+    .context-line .cur{display:none}
+    .scene-caption{opacity:1}
+  }
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<!-- ============ THE ORBIT — full-bleed celestial mechanics ============ -->
+<header class="stage" aria-label="Memories orbit a quiet core in concentric rings; the one the present moment calls up spirals inward and blooms into the full scene of a remembered coding moment, then is flung back to its ring">
+  <canvas id="orbit" aria-hidden="true"></canvas>
+
+  <div class="hud">
+    <div class="topbar">
+      <div class="brand"><span class="dot" aria-hidden="true"></span> Memex</div>
+      <nav aria-label="Primary">
+        <a href="https://github.com/Two-Weeks-Team/memex">Repo</a>
+        <a href="https://two-weeks-team.github.io/memex/">Live</a>
+        <a href="#how">How it works</a>
+        <a href="#agent">For agents</a>
+      </nav>
+    </div>
+
+    <!-- the present situation that perturbs the relevant orbit -->
+    <div class="context-cue" aria-hidden="true">
+      <div class="context-label">right now you're working on</div>
+      <div class="context-line" id="contextLine"></div>
+    </div>
+
+    <!-- caption appears once the orbit decays and the scene blooms -->
+    <div class="scene-caption" id="caption" aria-live="polite">
+      <div class="tag" id="capTag"></div>
+      <div class="title" id="capTitle"></div>
+      <div class="why">surfaced because <b id="capWhy"></b></div>
+    </div>
+
+    <div class="hero">
+      <h1>The relevant memory<br><span class="glow">spirals into view on its own.</span></h1>
+      <p class="lede">
+        Your past sessions circle quietly in their rings. You never go looking — but the
+        moment you're in now tugs at one of them, and <b>its orbit decays inward</b>,
+        spiraling closer until it swings to the front and <b>blooms into the whole scene
+        of when you worked it out</b>, then is flung back. Recall happens <b>to</b> you,
+        found by similarity, not search.
+      </p>
+      <div class="cta">
+        <a class="btn btn-primary" href="https://github.com/Two-Weeks-Team/memex">Get Memex on GitHub</a>
+        <a class="btn btn-ghost" href="https://two-weeks-team.github.io/memex/">See it live</a>
+      </div>
+      <p class="legend">
+        <span class="scene-label" id="sceneState">orbiting&hellip;</span>
+        <span aria-hidden="true">&middot;</span>
+        an associative trail, not a query
+      </p>
+    </div>
+  </div>
+
+  <div class="controls">
+    <button class="chip" id="pauseBtn" type="button" aria-label="Pause the orbit">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg>
+      <span id="pauseLabel">Pause</span>
+    </button>
+    <button class="chip" id="replayBtn" type="button" aria-label="Let another memory's orbit decay">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5V1L7 6l5 5V7a5 5 0 1 1-5 5H5a7 7 0 1 0 7-7z"/></svg>
+      Recall again
+    </button>
+  </div>
+</header>
+
+<main id="main">
+  <section class="below" id="how">
+    <p class="kicker">What just happened</p>
+    <h2>People don't document every memory &mdash; yet when the moment arrives,
+      the relevant thought surfaces on its own.</h2>
+    <p class="sub">
+      Memex is a non-chatbot, LLM-free-at-runtime tool that reads your existing
+      Claude&nbsp;Code and Codex session history and turns it into a navigable
+      associative memory backed by <b>Qdrant</b>. You move through your own past by
+      <i>similarity</i>, not keywords &mdash; and the relevant moment can decay out of its
+      orbit toward you proactively, the way a forgotten fact returns mid-task.
+    </p>
+
+    <div class="rings" aria-label="How recall works, in three orbital phases">
+      <div class="ring">
+        <div class="phase-num">— in its ring —</div>
+        <h3>Your history quietly orbits</h3>
+        <p>Every Claude&nbsp;Code &amp; Codex session becomes a body circling a quiet core &mdash;
+          a corpus you own, embedded and indexed in Qdrant. Nothing is hunted; everything waits.</p>
+      </div>
+      <div class="ring">
+        <div class="phase-num">— the orbit decays —</div>
+        <h3>The moment tugs one inward</h3>
+        <p>What you're debugging or deciding right now is matched by similarity. The closest
+          past body loses altitude and spirals toward the front &mdash; no query typed.</p>
+      </div>
+      <div class="ring">
+        <div class="phase-num">— it blooms, then returns —</div>
+        <h3>The scene swings to the front</h3>
+        <p>At its nearest pass it blooms into the full scene of that moment, holds, then is
+          flung back to its ring &mdash; you're the recipient, not the seeker.</p>
+      </div>
+    </div>
+
+    <div class="grid">
+      <article class="card"><h3><span class="gp" aria-hidden="true"></span>Time Machine</h3>
+        <p>Replay any past session as it happened &mdash; the whole scene, not a snippet.</p></article>
+      <article class="card"><h3><span class="gp" aria-hidden="true"></span>Lens</h3>
+        <p>Named-vector weighted search to look through your history from one angle at a time.</p></article>
+      <article class="card"><h3><span class="gp" aria-hidden="true"></span>Topology</h3>
+        <p>A distance-matrix &rarr; MST graph of how your sessions actually connect.</p></article>
+      <article class="card"><h3><span class="gp" aria-hidden="true"></span>Mix &amp; Discovery</h3>
+        <p>Positive / negative recommendation to pull related work toward you and push noise away.</p></article>
+      <article class="card"><h3><span class="gp" aria-hidden="true"></span>Proactive Recall</h3>
+        <p>The piece that lit the orbit above: a relevant past moment surfaces because the current one evoked it.</p></article>
+      <article class="card"><h3><span class="gp" aria-hidden="true"></span>Companion &middot; Wrapped &middot; Loop&nbsp;Breaker</h3>
+        <p>An agent-memory layer over your corpus &mdash; recap what you've done, and catch yourself circling.</p></article>
+    </div>
+
+    <div class="facts" aria-label="What Memex is">
+      <div class="row"><div class="lab">Reads</div>
+        <div class="val"><span class="mono">~/.claude/projects/**/*.jsonl</span>, legacy transcripts, and <span class="mono">history.jsonl</span></div></div>
+      <div class="row"><div class="lab">Backed by</div>
+        <div class="val">Qdrant &mdash; navigate by vector similarity, <b>no runtime LLM</b></div></div>
+      <div class="row"><div class="lab">Why</div>
+        <div class="val">Claude&nbsp;Code silently migrates and deletes old sessions. Memex keeps a corpus <b>you own.</b></div></div>
+      <div class="row"><div class="lab">Built for</div>
+        <div class="val">Qdrant Vector Space Day 2026 &mdash; <i>"Think Outside the Bot."</i></div></div>
+    </div>
+  </section>
+
+  <section class="below" id="agent" style="padding-top:0">
+    <p class="kicker">For your agent</p>
+    <h2 style="font-size:clamp(20px,3vw,28px)">11 MCP tools over stdio + HTTP &mdash;
+      works in Claude&nbsp;Code, Codex, and Cursor.</h2>
+    <p class="sub">A server / Docker variant runs Qdrant, the web UI, and the MCP server in one image.
+      The tools let an agent recall, replay, and connect across your own history.</p>
+    <div class="addline mono">
+      <span class="c">$</span> claude mcp add memex -- memex serve --stdio
+    </div>
+    <p style="margin-top:18px;font-size:14px">
+      <a href="https://github.com/Two-Weeks-Team/memex#server--docker">Server / Docker variant</a>
+      &nbsp;&middot;&nbsp;
+      <a href="https://github.com/Two-Weeks-Team/memex">MCP integration &amp; the 11 tools</a>
+    </p>
+  </section>
+</main>
+
+<footer>
+  <div class="foot">
+    <div>Memex &mdash; a memory you own, surfaced by association.</div>
+    <div class="links">
+      <a href="https://github.com/Two-Weeks-Team/memex">GitHub</a>
+      <a href="https://two-weeks-team.github.io/memex/">Live landing</a>
+      <a href="https://github.com/Two-Weeks-Team/memex#server--docker">Docker</a>
+    </div>
+  </div>
+</footer>
+
+<script>
+(function(){
+  "use strict";
+
+  var canvas = document.getElementById('orbit');
+  var ctx = canvas.getContext('2d');
+  var reduce = window.matchMedia &&
+               window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  var contextLine = document.getElementById('contextLine');
+  var sceneState  = document.getElementById('sceneState');
+  var caption     = document.getElementById('caption');
+  var capTag      = document.getElementById('capTag');
+  var capTitle    = document.getElementById('capTitle');
+  var capWhy      = document.getElementById('capWhy');
+  var pauseBtn    = document.getElementById('pauseBtn');
+  var pauseLabel  = document.getElementById('pauseLabel');
+  var replayBtn   = document.getElementById('replayBtn');
+
+  var DPR = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+  var W = 0, H = 0;
+
+  /* -------------------------------------------------------------------------
+     THE MEMORIES — each is a depicted SCENE (a small illustrated tableau),
+     plus the present context that calls it up. The scene is *painted* on the
+     foreground when the orbit decays and the body swings to its nearest pass:
+     a recognizable picture (desk, glowing monitor, lamp, seated person, mug),
+     tinted to its mood — not a text card, not a chat log.
+     `ring` = which concentric ring the body lives in (0 = innermost).
+  ------------------------------------------------------------------------- */
+  var MEMORIES = [
+    {
+      ctx: "an auth retry that loops on a 401…",
+      tag: "session · oauth-service · 6 weeks ago",
+      title: "The 1 a.m. desk where you caught the silent token-refresh loop",
+      why: "you're chasing the same retry shape again",
+      hue: 38,                         // warm amber — late night
+      sky: ['#1c1430','#0d0a22'],
+      monitor: '#ffd285',
+      kind: 'gold', ring: 2
+    },
+    {
+      ctx: "a migration that won't roll back cleanly…",
+      tag: "session · db-migrations · 3 months ago",
+      title: "The standup where you wrote the down() at the last minute",
+      why: "the situation rhymes with this rollback",
+      hue: 280,                        // violet — focus
+      sky: ['#1a1340','#0a0a26'],
+      monitor: '#b39bff',
+      kind: 'violet', ring: 3
+    },
+    {
+      ctx: "a flaky test that only fails in CI…",
+      tag: "session · e2e-suite · 5 weeks ago",
+      title: "The morning the flake turned out to be a timezone, not a race",
+      why: "this failure looks identical to that one",
+      hue: 160,                        // teal-green — relief
+      sky: ['#0e2230','#08161f'],
+      monitor: '#7fe9d6',
+      kind: 'teal', ring: 1
+    },
+    {
+      ctx: "deciding how to shape this vector query…",
+      tag: "session · search-relevance · 2 months ago",
+      title: "The whiteboard where you chose named vectors over one big embedding",
+      why: "you're weighing the same trade-off now",
+      hue: 200,                        // cyan — the Memex moment
+      sky: ['#0a1a32','#08111f'],
+      monitor: '#8fe6ff',
+      kind: 'cyan', ring: 4
+    }
+  ];
+
+  /* -------------------------------------------------------------------------
+     ORBITAL SYSTEM
+     A quiet gravity core at center. Several concentric RINGS are drawn as
+     faint ellipses (tilted, for a 3D system feel). Many small memory-bodies
+     orbit on those rings at steady angular speed. One body — the "called"
+     memory — has its orbit DECAY: its radius shrinks and it spirals inward,
+     swings to the foreground (nearest pass, bottom of the tilt), blooms into
+     the full scene, holds, then its orbit is restored (flung back to its ring).
+  ------------------------------------------------------------------------- */
+  var TILT = 0.42;                 // ellipse flattening (cos of view angle)
+  var bodies = [];                 // ambient orbiting memory-bodies
+  var ringR  = [];                 // base radius per ring index (in px-ish units)
+  var unit   = 1;                  // scale unit (set on resize)
+
+  function buildSystem(){
+    unit = Math.min(W, H);
+    // five concentric rings spanning the core's neighborhood
+    ringR = [0.13, 0.20, 0.28, 0.37, 0.47].map(function(f){ return f*unit; });
+    bodies.length = 0;
+    // populate each ring with a few quiet bodies
+    for (var r=0; r<ringR.length; r++){
+      var count = 3 + r;            // outer rings hold more
+      for (var k=0; k<count; k++){
+        bodies.push({
+          ring: r,
+          ang: Math.random()*Math.PI*2,
+          spd: (0.10 + Math.random()*0.05) / (1 + r*0.55), // outer = slower (Kepler-ish)
+          r: 1.1 + Math.random()*1.3,
+          hue: Math.random()<0.16 ? 'gold' : (Math.random()<0.14 ? 'teal':'dim'),
+          tw: Math.random()*Math.PI*2
+        });
+      }
+    }
+  }
+
+  /* the "called" body — its own orbit + decay state */
+  var called = null;               // {ring, ang, baseR, r, prog}
+  var current = 0;                 // index into MEMORIES
+
+  // decay timeline
+  var ORBIT_MS  = 2600;            // settling in its ring before the tug
+  var DECAY_MS  = 5000;            // orbit decays inward + scene materializes
+  var HOLD_MS   = 4200;            // hold the bloomed scene at the front
+  var FLUNG_MS  = 2400;            // scene dissolves, body flung back to ring
+  var phase = 'idle';              // 'orbit' | 'decay' | 'hold' | 'flung'
+  var phaseT0 = 0;
+  var running = true;
+
+  /* present-context typewriter */
+  var typing = null;
+  function typeContext(text, done){
+    if (typing) clearTimeout(typing);
+    contextLine.innerHTML = '';
+    var span = document.createElement('span');
+    var cur = document.createElement('span');
+    cur.className = 'cur'; cur.textContent = '▍';
+    contextLine.appendChild(span); contextLine.appendChild(cur);
+    var i = 0;
+    (function step(){
+      if (i <= text.length){
+        span.textContent = text.slice(0,i); i++;
+        typing = setTimeout(step, 32 + Math.random()*34);
+      } else if (done){ typing = setTimeout(done, 480); }
+    })();
+  }
+  function setContextStatic(text){ contextLine.textContent = text; }
+
+  function col(kind, a){
+    if (kind === 'gold')   return 'rgba(255,210,133,'+a+')';
+    if (kind === 'teal')   return 'rgba(127,233,214,'+a+')';
+    if (kind === 'violet') return 'rgba(179,155,255,'+a+')';
+    if (kind === 'cyan')   return 'rgba(143,230,255,'+a+')';
+    return 'rgba(200,208,240,'+a+')';   // 'dim'
+  }
+  function easeInOut(t){ return t<.5 ? 2*t*t : 1-Math.pow(-2*t+2,2)/2; }
+  function easeOut(t){ return 1-Math.pow(1-t,3); }
+  function easeIn(t){ return t*t; }
+  function clamp01(t){ return t<0?0:t>1?1:t; }
+
+  function resize(){
+    var box = canvas.parentElement.getBoundingClientRect();
+    W = Math.max(1, Math.round(box.width));
+    H = Math.max(1, Math.round(box.height));
+    canvas.style.width = W+'px'; canvas.style.height = H+'px';
+    canvas.width = Math.round(W*DPR); canvas.height = Math.round(H*DPR);
+    ctx.setTransform(DPR,0,0,DPR,0,0);
+    buildSystem();
+  }
+
+  // center of the system — slightly above middle so the bloomed scene has room
+  function cx(){ return W/2; }
+  function cy(){ return H*0.47; }
+
+  /* project an orbital position (radius, angle) onto the tilted ellipse.
+     Returns {x,y,depth} where depth in [0..1]: 1 = nearest pass (front/bottom),
+     0 = farthest (back/top). Depth drives size, brightness, z-order. */
+  function orbitPoint(radius, ang){
+    var x = cx() + Math.cos(ang) * radius;
+    var y = cy() + Math.sin(ang) * radius * TILT;
+    var depth = (Math.sin(ang) + 1) / 2;   // bottom of ellipse = nearest
+    return { x:x, y:y, depth:depth };
+  }
+
+  /* ----- draw a soft orbiting body ----- */
+  function drawBody(x, y, r, a, kind){
+    var g = ctx.createRadialGradient(x,y,0,x,y,r*4.2);
+    g.addColorStop(0, col(kind, a));
+    g.addColorStop(0.4, col(kind, a*0.45));
+    g.addColorStop(1, col(kind, 0));
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(x,y,r*4.2,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle = col(kind, Math.min(1,a*1.15));
+    ctx.beginPath(); ctx.arc(x,y,r*0.85,0,Math.PI*2); ctx.fill();
+  }
+
+  /* ----- draw a faint concentric ring (the tilted ellipse) ----- */
+  function drawRing(radius, a){
+    ctx.save();
+    ctx.strokeStyle = 'rgba(160,176,255,'+a+')';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.ellipse(cx(), cy(), radius, radius*TILT, 0, 0, Math.PI*2);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  /* ----- the quiet gravity core at center ----- */
+  function drawCore(now){
+    var pulse = reduce ? 1 : (0.92 + 0.08*Math.sin(now*0.0015));
+    var cr = unit*0.018 * pulse;
+    var x = cx(), y = cy();
+    var halo = ctx.createRadialGradient(x,y,0,x,y,cr*9);
+    halo.addColorStop(0, 'rgba(255,210,133,0.32)');
+    halo.addColorStop(0.5, 'rgba(255,171,92,0.10)');
+    halo.addColorStop(1, 'rgba(255,171,92,0)');
+    ctx.fillStyle = halo;
+    ctx.beginPath(); ctx.arc(x,y,cr*9,0,Math.PI*2); ctx.fill();
+    var core = ctx.createRadialGradient(x,y,0,x,y,cr);
+    core.addColorStop(0, 'rgba(255,238,205,0.95)');
+    core.addColorStop(1, 'rgba(255,196,120,0.35)');
+    ctx.fillStyle = core;
+    ctx.beginPath(); ctx.arc(x,y,cr,0,Math.PI*2); ctx.fill();
+  }
+
+  /* =========================================================================
+     THE FOREGROUND SCENE — a depicted coding-moment tableau, drawn at scale
+     `s` (0..1) centered on screen. Recognizable picture: a desk on a horizon,
+     a glowing monitor, a desk lamp, a seated person, a mug — tinted to the
+     memory's mood. Painted, not a text card; this is the WOW payload.
+  ========================================================================= */
+  function drawScene(mem, s, alpha){
+    if (alpha <= 0) return;
+    var SW = Math.min(W*0.92, H*1.25) * (0.60 + s*0.44);
+    var SH = SW*0.62;
+    var cX = W/2, cY = H*0.50;
+    var x0 = cX - SW/2, y0 = cY - SH/2;
+    function px(u){ return x0 + u*SW; }
+    function py(v){ return y0 + v*SH; }
+
+    ctx.save();
+    ctx.globalAlpha = alpha;
+
+    // -- atmospheric tint behind the scene (the room glow) --
+    var bg = ctx.createRadialGradient(cX, cY+SH*0.05, SW*0.05, cX, cY, SW*0.78);
+    bg.addColorStop(0, 'hsla('+mem.hue+',70%,16%,0.92)');
+    bg.addColorStop(0.6, 'hsla('+mem.hue+',60%,9%,0.7)');
+    bg.addColorStop(1, 'hsla('+mem.hue+',55%,5%,0)');
+    ctx.fillStyle = bg;
+    ctx.beginPath(); ctx.arc(cX, cY, SW*0.78, 0, Math.PI*2); ctx.fill();
+
+    // -- back wall gradient (full scene plate) --
+    var wall = ctx.createLinearGradient(0, py(0), 0, py(1));
+    wall.addColorStop(0, mem.sky[0]);
+    wall.addColorStop(1, mem.sky[1]);
+    ctx.fillStyle = wall;
+    roundRect(px(0.02), py(0.04), SW*0.96, SH*0.92, SW*0.03); ctx.fill();
+
+    // -- desk (the horizon the scene sits on) --
+    ctx.fillStyle = 'rgba(0,0,0,0.42)';
+    ctx.fillRect(px(0.04), py(0.74), SW*0.92, SH*0.04);
+    ctx.fillStyle = 'rgba(255,255,255,0.05)';
+    ctx.fillRect(px(0.04), py(0.74), SW*0.92, SH*0.012);
+
+    // -- desk lamp (right): arm + warm pool over the desk --
+    ctx.strokeStyle = 'rgba(220,228,255,0.55)';
+    ctx.lineWidth = Math.max(2, SW*0.006); ctx.lineCap='round';
+    ctx.beginPath();
+    ctx.moveTo(px(0.86), py(0.74));
+    ctx.lineTo(px(0.865), py(0.40));
+    ctx.lineTo(px(0.74), py(0.27));
+    ctx.stroke();
+    var lamp = ctx.createRadialGradient(px(0.73), py(0.27), 0, px(0.73), py(0.27), SW*0.20);
+    lamp.addColorStop(0, hueA(mem.hue, 0.55, alpha));
+    lamp.addColorStop(0.5, hueA(mem.hue, 0.16, alpha));
+    lamp.addColorStop(1, hueA(mem.hue, 0, alpha));
+    ctx.fillStyle = lamp;
+    ctx.beginPath(); ctx.arc(px(0.73), py(0.30), SW*0.20, 0, Math.PI*2); ctx.fill();
+
+    // -- monitor (center-right): screen lit with the memory's color --
+    var mx=px(0.50), my=py(0.20), mw=SW*0.30, mh=SH*0.40;
+    ctx.fillStyle='rgba(180,190,225,0.5)';
+    ctx.fillRect(mx+mw*0.42, my+mh, mw*0.16, SH*0.14);
+    ctx.fillRect(mx+mw*0.28, py(0.74)-2, mw*0.44, SH*0.02);
+    ctx.fillStyle='#05060f';
+    roundRect(mx-mw*0.05, my-mh*0.05, mw*1.1, mh*1.1, SW*0.012); ctx.fill();
+    var scr = ctx.createLinearGradient(mx, my, mx, my+mh);
+    scr.addColorStop(0, mem.monitor);
+    scr.addColorStop(1, 'hsla('+mem.hue+',80%,42%,1)');
+    ctx.fillStyle = scr;
+    roundRect(mx, my, mw, mh, SW*0.006); ctx.fill();
+    // faint "code lines" on the screen (depicted work, not real text)
+    ctx.fillStyle='rgba(5,8,18,0.32)';
+    for (var li=0; li<6; li++){
+      var ly = my + mh*0.16 + li*(mh*0.12);
+      var lw = mw*(0.32 + ((li*37)%50)/100);
+      ctx.fillRect(mx+mw*0.10, ly, lw, Math.max(2, mh*0.035));
+    }
+    var spill = ctx.createRadialGradient(mx+mw/2, my+mh, 0, mx+mw/2, my+mh, mw*0.9);
+    spill.addColorStop(0, hueA(mem.hue, 0.30, alpha));
+    spill.addColorStop(1, hueA(mem.hue, 0, alpha));
+    ctx.fillStyle = spill;
+    ctx.beginPath(); ctx.arc(mx+mw/2, my+mh, mw*0.9, 0, Math.PI*2); ctx.fill();
+
+    // -- seated person (left), facing the screen --
+    ctx.strokeStyle='rgba(225,231,255,0.82)';
+    ctx.fillStyle='rgba(225,231,255,0.82)';
+    ctx.lineWidth=Math.max(2.5, SW*0.009); ctx.lineCap='round'; ctx.lineJoin='round';
+    var hx=px(0.235), hy=py(0.30), hr=SW*0.045;
+    ctx.beginPath(); ctx.arc(hx, hy, hr, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(hx, hy+hr);
+    ctx.lineTo(px(0.225), py(0.62));
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(px(0.175), py(0.40));
+    ctx.lineTo(px(0.205), py(0.50));
+    ctx.lineTo(px(0.20), py(0.74));
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(px(0.245), py(0.40));
+    ctx.lineTo(px(0.34), py(0.55));
+    ctx.lineTo(px(0.44), py(0.68));
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(px(0.225), py(0.62));
+    ctx.lineTo(px(0.34), py(0.66));
+    ctx.stroke();
+
+    // -- keyboard suggestion + mug --
+    ctx.fillStyle='rgba(150,160,200,0.45)';
+    roundRect(px(0.40), py(0.70), SW*0.16, SH*0.045, SW*0.006); ctx.fill();
+    ctx.strokeStyle='rgba(210,218,250,0.7)';
+    ctx.lineWidth=Math.max(2, SW*0.006);
+    ctx.beginPath();
+    roundRectPath(px(0.585), py(0.655), SW*0.045, SH*0.075, SW*0.006);
+    ctx.stroke();
+    if (s > 0.85 && !reduce){
+      ctx.strokeStyle = hueA(mem.hue, 0.4*alpha, 1);
+      ctx.lineWidth = Math.max(1.5, SW*0.004);
+      var t = performance.now()*0.002;
+      ctx.beginPath();
+      var sx = px(0.607);
+      ctx.moveTo(sx, py(0.65));
+      ctx.bezierCurveTo(sx+Math.sin(t)*6, py(0.58), sx-Math.sin(t)*6, py(0.55), sx, py(0.50));
+      ctx.stroke();
+    }
+
+    // -- gentle full-scene vignette so it reads as a framed picture --
+    var vg = ctx.createRadialGradient(cX, cY, SW*0.22, cX, cY, SW*0.62);
+    vg.addColorStop(0, 'rgba(0,0,0,0)');
+    vg.addColorStop(1, 'rgba(3,4,12,0.5)');
+    ctx.fillStyle = vg;
+    roundRect(px(0.02), py(0.04), SW*0.96, SH*0.92, SW*0.03); ctx.fill();
+
+    ctx.restore();
+  }
+
+  function hueA(h, a, mult){ return 'hsla('+h+',85%,62%,'+(a*mult)+')'; }
+
+  function roundRectPath(x,y,w,h,r){
+    ctx.moveTo(x+r,y);
+    ctx.arcTo(x+w,y,x+w,y+h,r);
+    ctx.arcTo(x+w,y+h,x,y+h,r);
+    ctx.arcTo(x,y+h,x,y,r);
+    ctx.arcTo(x,y,x+w,y,r);
+  }
+  function roundRect(x,y,w,h,r){ ctx.beginPath(); roundRectPath(x,y,w,h,r); }
+
+  /* =========================== main frame =========================== */
+  var lastNow = 0;
+
+  function frame(now){
+    if (!running && !reduce){ pausedAt = now; rafId = 0; return; }
+    if (!lastNow) lastNow = now;
+    var dt = Math.min(50, now - lastNow); lastNow = now;
+    ctx.clearRect(0,0,W,H);
+
+    var mem = MEMORIES[current];
+
+    if (reduce){
+      // static bloomed scene over a quiet ringed system — no orbit motion
+      for (var ri=0; ri<ringR.length; ri++){ drawRing(ringR[ri], 0.05); }
+      drawCore(now);
+      drawScene(mem, 1, 1);
+      rafId = 0;
+      return;
+    }
+
+    // --- draw the concentric rings (faint) ---
+    for (var rr=0; rr<ringR.length; rr++){ drawRing(ringR[rr], 0.06); }
+
+    // --- the quiet gravity core ---
+    drawCore(now);
+
+    // --- advance + draw ambient orbiting bodies ---
+    // collect for z-sort so near bodies overlap far ones correctly
+    var draws = [];
+    for (var i=0;i<bodies.length;i++){
+      var b = bodies[i];
+      b.ang += b.spd * (dt*0.001) * Math.PI;     // steady angular motion
+      var pj = orbitPoint(ringR[b.ring], b.ang);
+      var tw = 0.6 + 0.4*Math.sin(now*0.001 + b.tw);
+      var dA = 0.30 + 0.55*pj.depth;             // nearer = brighter
+      var size = b.r * (0.62 + pj.depth*0.6);
+      draws.push({ z:pj.depth, x:pj.x, y:pj.y, r:size, a:Math.min(0.9, dA*tw), hue:b.hue });
+    }
+
+    var el = now - phaseT0;
+
+    // --- the called body: its orbit decays inward, then is flung back ---
+    var sceneIn = 0, sceneAlpha = 0;
+    if (called){
+      if (phase === 'decay'){
+        var p = clamp01(el / DECAY_MS);
+        called.prog = p;
+        // radius spirals from its ring inward toward the core neighborhood,
+        // while the angle keeps advancing (so it visibly spirals, not falls straight)
+        var rad = called.baseR * (1 - easeIn(p)*0.96);
+        called.ang += called.spd * (dt*0.001) * Math.PI * (1 + p*2.2); // speeds up as it nears
+        var cp = orbitPoint(Math.max(rad, unit*0.02), called.ang);
+        // brightening, growing body as it decays inward
+        var ba = 0.55 + 0.45*easeOut(p);
+        var br = called.r * (1 + p*7);
+        // trailing spiral arc (the decaying path) — a short luminous tail
+        drawDecayTrail(called, rad, p);
+        draws.push({ z:1.0, x:cp.x, y:cp.y, r:br, a:Math.min(1,ba), hue:mem.kind, glow:true, mem:mem });
+        // the scene blooms over the last stretch of the decay
+        sceneIn = clamp01((p - 0.60)/0.40);
+        sceneAlpha = easeOut(sceneIn);
+        if (sceneIn > 0.5 && !captionShown){ showCaption(mem); }
+        if (p >= 1){ enter('hold'); }
+      }
+      else if (phase === 'hold'){
+        sceneIn = 1; sceneAlpha = 1;
+        if (el >= HOLD_MS){ enter('flung'); }
+      }
+      else if (phase === 'flung'){
+        // scene dissolves; the body is flung back out to its ring
+        var fp = clamp01(el / FLUNG_MS);
+        sceneIn = 1 - easeInOut(fp)*0.5;
+        sceneAlpha = 1 - easeInOut(fp);
+        var radB = called.baseR * (0.04 + easeOut(fp)*0.96);
+        called.ang += called.spd * (dt*0.001) * Math.PI * (1 + (1-fp)*2.0);
+        var fpj = orbitPoint(radB, called.ang);
+        var fa = (1-fp)*0.8 + 0.2;
+        draws.push({ z:0.99, x:fpj.x, y:fpj.y, r:called.r*(1 + (1-fp)*4), a:fa, hue:mem.kind, glow:true });
+        if (fp > 0.25 && captionShown){ hideCaption(); }
+        if (fp >= 1){
+          called = null;
+          current = (current+1) % MEMORIES.length;
+          sceneState.textContent = 'orbiting…';
+          beginContext();
+        }
+      }
+    } else if (phase === 'orbit'){
+      // a quiet pre-decay pass: the called memory rides its ring before the tug
+      if (el >= ORBIT_MS){ startDecay(mem); }
+    }
+
+    // z-sort: far (low depth) first, near (high depth) last → correct overlap
+    draws.sort(function(a,b){ return a.z - b.z; });
+    for (var d=0; d<draws.length; d++){
+      var o = draws[d];
+      if (o.glow){
+        var halo = ctx.createRadialGradient(o.x,o.y,0,o.x,o.y,o.r*6);
+        halo.addColorStop(0, col(o.hue, 0.4*o.a));
+        halo.addColorStop(1, col(o.hue, 0));
+        ctx.fillStyle = halo;
+        ctx.beginPath(); ctx.arc(o.x,o.y,o.r*6,0,Math.PI*2); ctx.fill();
+      }
+      drawBody(o.x, o.y, o.r, o.a, o.hue);
+    }
+
+    // --- the bloomed foreground scene on top of everything ---
+    if (sceneAlpha > 0){ drawScene(mem, sceneIn, sceneAlpha); }
+
+    rafId = requestAnimationFrame(frame);
+  }
+
+  /* a short luminous trail tracing the inward spiral the called body just took */
+  function drawDecayTrail(c, curRad, p){
+    if (p < 0.04) return;
+    ctx.save();
+    ctx.lineCap = 'round';
+    var steps = 22;
+    ctx.beginPath();
+    for (var i=0;i<=steps;i++){
+      var tt = i/steps;
+      // sample the spiral a little behind the body
+      var pp = Math.max(0, p - tt*0.30);
+      var rad = c.baseR * (1 - easeIn(pp)*0.96);
+      var ang = c.ang - tt*1.4;            // arc back along the path
+      var pt = orbitPoint(Math.max(rad, unit*0.02), ang);
+      if (i===0) ctx.moveTo(pt.x, pt.y); else ctx.lineTo(pt.x, pt.y);
+    }
+    var grad = col(MEMORIES[current].kind, 0.28*(1-p*0.4));
+    ctx.strokeStyle = grad;
+    ctx.lineWidth = 1.6;
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  /* ---------------- phase machine ---------------- */
+  var captionShown = false;
+  function showCaption(mem){
+    capTag.textContent = mem.tag;
+    capTitle.textContent = mem.title;
+    capWhy.textContent = mem.why;
+    caption.classList.add('show');
+    captionShown = true;
+    sceneState.textContent = 'bloomed';
+  }
+  function hideCaption(){ caption.classList.remove('show'); captionShown = false; }
+
+  function enter(p){
+    phase = p; phaseT0 = performance.now();
+    if (p === 'orbit'){ sceneState.textContent = 'orbiting…'; }
+    if (p === 'decay'){ sceneState.textContent = 'orbit decaying…'; }
+  }
+
+  // set up the called body on its ring, then start the inward decay
+  function startDecay(mem){
+    var ringIdx = Math.min(mem.ring, ringR.length-1);
+    called = {
+      ring: ringIdx,
+      ang: -Math.PI/2 + (Math.random()-0.5)*0.6, // start near the top/back of the ellipse
+      baseR: ringR[ringIdx],
+      spd: 0.12,
+      r: 1.6,
+      prog: 0
+    };
+    enter('decay');
+  }
+
+  // type the present context, then begin the orbit→decay sequence
+  function beginContext(){
+    var mem = MEMORIES[current];
+    captionShown = false; caption.classList.remove('show');
+    if (reduce){ setContextStatic(mem.ctx); return; }
+    typeContext(mem.ctx, function(){ enter('orbit'); });
+  }
+
+  /* ---------------- controls ---------------- */
+  var pausedAt = 0;
+  function resume(){
+    if (reduce) return;
+    var gap = pausedAt ? (performance.now() - pausedAt) : 0;
+    if (gap > 0){ phaseT0 += gap; }
+    pausedAt = 0; lastNow = 0;
+    if (!rafId) rafId = requestAnimationFrame(frame);
+  }
+  pauseBtn.addEventListener('click', function(){
+    running = !running;
+    pauseLabel.textContent = running ? 'Pause' : 'Play';
+    pauseBtn.querySelector('svg').innerHTML = running
+      ? '<path d="M6 5h4v14H6zM14 5h4v14h-4z"/>'
+      : '<path d="M8 5v14l11-7z"/>';
+    if (running && !reduce){ resume(); }
+    else { pausedAt = performance.now(); }
+  });
+
+  replayBtn.addEventListener('click', function(){
+    reduce = window.matchMedia &&
+             window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (reduce){ start(); return; }
+    // immediately let the next memory's orbit decay
+    called = null;
+    current = (current+1) % MEMORIES.length;
+    hideCaption();
+    if (typing) clearTimeout(typing);
+    if (!running){ running = true; pauseLabel.textContent='Pause';
+      pauseBtn.querySelector('svg').innerHTML='<path d="M6 5h4v14H6zM14 5h4v14h-4z"/>'; }
+    beginContext();
+    if (!rafId){ lastNow = 0; rafId = requestAnimationFrame(frame); }
+  });
+
+  // pause when tab hidden (battery-honest); resume only if the user hadn't paused
+  document.addEventListener('visibilitychange', function(){
+    if (document.hidden){
+      if (running){ running = false; pausedAt = performance.now(); }
+    } else if (!reduce && pauseLabel.textContent==='Pause' && !running){
+      running = true; resume();
+    }
+  });
+
+  var rafId = 0;
+  function start(){
+    if (rafId) cancelAnimationFrame(rafId); rafId = 0;
+    reduce = window.matchMedia &&
+             window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    resize();
+    current = 0; lastNow = 0; called = null;
+    captionShown = false; caption.classList.remove('show');
+    if (reduce){
+      var mem = MEMORIES[0];
+      setContextStatic(mem.ctx);
+      showCaption(mem);
+      sceneState.textContent = 'the scene, surfaced';
+      frame(performance.now());     // single static frame
+    } else {
+      beginContext();
+      rafId = requestAnimationFrame(frame);
+    }
+  }
+
+  var rT;
+  window.addEventListener('resize', function(){
+    clearTimeout(rT);
+    rT = setTimeout(function(){
+      resize();
+      if (reduce) frame(performance.now());
+    }, 160);
+  });
+
+  if (window.matchMedia){
+    try{
+      window.matchMedia('(prefers-reduced-motion: reduce)')
+        .addEventListener('change', function(e){ reduce = e.matches; start(); });
+    }catch(_){}
+  }
+
+  start();
+})();
+</script>
+</body>
+</html>

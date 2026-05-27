@@ -1,0 +1,740 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Memex — Liquid Chrome</title>
+<style>
+  :root {
+    --ink: #0a0c10;
+    --steel: #c9d1da;
+    --steel-deep: #7f8a99;
+    --chrome-hi: #ffffff;
+    --chrome-lo: #2a313c;
+    --mercury: #aeb8c4;
+    --warm: #ffd9a0;        /* warm reflection inside the scene */
+    --warm-deep: #b5733a;
+    --sky: #6fa8d6;         /* cool reflection */
+    --accent: #e7eef6;
+    --hairline: rgba(255,255,255,0.10);
+    --bg-0: #06080b;
+    --bg-1: #0d1118;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body { margin: 0; padding: 0; }
+
+  body {
+    background: radial-gradient(140% 120% at 50% -10%, #11161f 0%, var(--bg-1) 38%, var(--bg-0) 100%);
+    color: var(--steel);
+    font-family: "Helvetica Neue", Helvetica, Arial, "Segoe UI", system-ui, sans-serif;
+    min-height: 100vh;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+  }
+
+  a { color: inherit; }
+
+  .skip {
+    position: absolute; left: -9999px; top: 0;
+    background: #fff; color: #000; padding: 10px 16px; z-index: 999;
+    border-radius: 0 0 8px 0; font-weight: 700; text-decoration: none;
+  }
+  .skip:focus { left: 0; }
+
+  /* ============ STAGE ============ */
+  .stage {
+    position: relative;
+    width: 100%;
+    height: 100svh;
+    min-height: 620px;
+    overflow: hidden;
+    isolation: isolate;
+  }
+
+  /* The molten pool — full-bleed liquid-chrome surface.
+     A stack of conic + radial gradients piped through an SVG
+     turbulence/displacement filter so it reads as rippling mercury. */
+  .pool {
+    position: absolute;
+    inset: -8%;
+    background:
+      radial-gradient(60% 40% at 22% 18%, rgba(255,255,255,0.85), rgba(255,255,255,0) 55%),
+      radial-gradient(50% 55% at 80% 30%, rgba(155,196,236,0.55), rgba(0,0,0,0) 60%),
+      radial-gradient(70% 60% at 60% 95%, rgba(20,24,32,0.95), rgba(0,0,0,0) 60%),
+      conic-gradient(from 210deg at 50% 45%,
+        #e8eef6 0deg, #9aa6b4 38deg, #4a525f 90deg, #1d222b 140deg,
+        #6c7886 200deg, #c6d0db 255deg, #8b97a6 300deg, #e8eef6 360deg);
+    background-blend-mode: screen, screen, multiply, normal;
+    filter: url(#molten) contrast(1.18) brightness(1.02) saturate(1.05);
+    transform: scale(1.06);
+    will-change: transform, filter;
+  }
+  /* fix typo-safe fallback layer in case conic parse fails on old engines */
+  .pool::after {
+    content: ""; position: absolute; inset: 0;
+    background: conic-gradient(from 210deg at 50% 45%,
+      #e8eef6 0deg, #9aa6b4 38deg, #4a525f 90deg, #1d222b 140deg,
+      #6c7886 200deg, #c6d0db 255deg, #8b97a6 300deg, #e8eef6 360deg);
+    mix-blend-mode: screen; opacity: 0;
+  }
+
+  /* Specular sheen that drifts across the chrome */
+  .sheen {
+    position: absolute; inset: -20%;
+    background: linear-gradient(115deg,
+      rgba(255,255,255,0) 30%,
+      rgba(255,255,255,0.55) 47%,
+      rgba(255,255,255,0.9) 50%,
+      rgba(255,255,255,0.55) 53%,
+      rgba(255,255,255,0) 70%);
+    mix-blend-mode: screen;
+    transform: translateX(-30%) rotate(2deg);
+    will-change: transform, opacity;
+    opacity: 0.7;
+  }
+
+  /* Vignette to seat the pool cinematically */
+  .vignette {
+    position: absolute; inset: 0;
+    background:
+      radial-gradient(120% 90% at 50% 40%, rgba(0,0,0,0) 45%, rgba(0,0,0,0.62) 100%),
+      linear-gradient(180deg, rgba(0,0,0,0.25) 0%, rgba(0,0,0,0) 22%, rgba(0,0,0,0) 70%, rgba(0,0,0,0.55) 100%);
+    pointer-events: none;
+  }
+
+  /* ============ THE SCENE that coalesces out of the metal ============ */
+  /* A remembered coding moment rendered as a chrome bas-relief tableau:
+     a window-lit desk at 02:14, a failing auth-retry, the moment it went green. */
+  .scene {
+    position: absolute;
+    left: 50%; top: 50%;
+    width: min(760px, 86vw);
+    transform: translate(-50%, -50%) scale(0.92);
+    opacity: 0;
+    filter: url(#molten-soft);
+    will-change: opacity, transform, filter;
+    pointer-events: none;
+  }
+  .scene.live { pointer-events: auto; }
+
+  /* the tableau frame — a molten mirror that hardens into a scene */
+  .tableau {
+    position: relative;
+    aspect-ratio: 16 / 9;
+    border-radius: 18px;
+    overflow: hidden;
+    background:
+      linear-gradient(180deg, rgba(30,36,46,0.0), rgba(8,10,14,0.55)),
+      radial-gradient(90% 70% at 30% 10%, rgba(255,255,255,0.18), rgba(0,0,0,0) 60%);
+    box-shadow:
+      0 1px 0 rgba(255,255,255,0.6) inset,
+      0 -30px 60px rgba(0,0,0,0.55) inset,
+      0 40px 90px rgba(0,0,0,0.55),
+      0 0 0 1px rgba(255,255,255,0.10);
+  }
+
+  /* layered SVG tableau fills the frame; chrome lighting from gradients */
+  .tableau svg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+
+  /* the moment's terminal-line is part of the SCENE as engraved chrome type,
+     NOT a console UI — it's a remembered glint on a screen reflection */
+  .moment-tag {
+    position: absolute;
+    left: 22px; bottom: 18px;
+    right: 22px;
+    display: flex; align-items: baseline; gap: 14px;
+    font-size: clamp(13px, 1.5vw, 16px);
+    letter-spacing: 0.04em;
+    text-shadow: 0 1px 0 rgba(255,255,255,0.35), 0 -1px 2px rgba(0,0,0,0.6);
+    color: #eef3f9;
+  }
+  .moment-tag .when {
+    font-variant-numeric: tabular-nums;
+    color: #cfe0f1;
+    opacity: 0.9;
+  }
+  .moment-tag .what { color: #fff; font-weight: 600; }
+  .moment-tag .glow {
+    color: #b8f0c2;
+    text-shadow: 0 0 14px rgba(120,240,160,0.55);
+  }
+
+  /* caption that arrives with the scene — the recognition line */
+  .recall {
+    margin-top: 22px;
+    text-align: center;
+  }
+  .recall .lede {
+    font-size: clamp(15px, 2vw, 19px);
+    color: #dfe7f0;
+    line-height: 1.5;
+    max-width: 620px;
+    margin: 0 auto;
+    text-shadow: 0 1px 12px rgba(0,0,0,0.6);
+  }
+  .recall .lede b { color: #fff; font-weight: 700; }
+  .recall .src {
+    margin-top: 10px;
+    font-size: 12px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--steel-deep);
+  }
+
+  /* ============ CURRENT CONTEXT — what calls the memory up ============ */
+  /* a quiet line at the top that states the *situation* (not a prompt box) */
+  .context {
+    position: absolute;
+    top: clamp(22px, 5vh, 54px);
+    left: 50%;
+    transform: translateX(-50%);
+    text-align: center;
+    width: min(720px, 90vw);
+    z-index: 5;
+  }
+  .context .eyebrow {
+    font-size: 11px; letter-spacing: 0.34em; text-transform: uppercase;
+    color: var(--steel-deep);
+  }
+  .context .now {
+    margin-top: 8px;
+    font-size: clamp(16px, 2.4vw, 22px);
+    color: #e8eef6;
+    line-height: 1.4;
+    text-shadow: 0 1px 18px rgba(0,0,0,0.7);
+  }
+  .context .now .cursor {
+    display: inline-block; width: 2px; height: 1em;
+    background: #cfe0f1; margin-left: 2px; transform: translateY(2px);
+    animation: blink 1.1s steps(2) infinite;
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  /* ============ MASTHEAD (over the chrome) ============ */
+  .mast {
+    position: absolute;
+    bottom: clamp(22px, 5vh, 46px);
+    left: 50%; transform: translateX(-50%);
+    width: min(880px, 92vw);
+    text-align: center;
+    z-index: 6;
+  }
+  .wordmark {
+    font-size: clamp(13px, 1.6vw, 15px);
+    letter-spacing: 0.42em; text-transform: uppercase;
+    color: #fff;
+    text-shadow: 0 0 1px rgba(255,255,255,0.8), 0 2px 14px rgba(0,0,0,0.7);
+  }
+  .mast h1 {
+    margin: 12px 0 0;
+    font-size: clamp(26px, 5vw, 52px);
+    line-height: 1.04;
+    font-weight: 800;
+    letter-spacing: -0.01em;
+    /* chrome type */
+    background: linear-gradient(180deg, #ffffff 0%, #cdd6e0 38%, #6b7686 55%, #aeb8c4 70%, #ffffff 100%);
+    -webkit-background-clip: text; background-clip: text;
+    color: transparent;
+    text-shadow: 0 2px 30px rgba(0,0,0,0.5);
+    filter: drop-shadow(0 1px 0 rgba(255,255,255,0.4));
+  }
+  .mast p {
+    margin: 14px auto 0;
+    max-width: 560px;
+    color: #c7d0db;
+    font-size: clamp(14px, 1.7vw, 17px);
+    line-height: 1.55;
+    text-shadow: 0 1px 12px rgba(0,0,0,0.7);
+  }
+  .cta {
+    margin-top: 22px;
+    display: flex; gap: 12px; justify-content: center; flex-wrap: wrap;
+  }
+  .btn {
+    display: inline-block;
+    padding: 12px 22px;
+    border-radius: 999px;
+    font-size: 14px; font-weight: 700; letter-spacing: 0.02em;
+    text-decoration: none;
+    border: 1px solid rgba(255,255,255,0.22);
+    color: #0a0c10;
+    background: linear-gradient(180deg, #ffffff 0%, #d4dce6 48%, #aab4c1 100%);
+    box-shadow: 0 1px 0 rgba(255,255,255,0.9) inset, 0 10px 24px rgba(0,0,0,0.45);
+    transition: transform 0.18s ease, box-shadow 0.18s ease;
+  }
+  .btn:hover { transform: translateY(-1px); box-shadow: 0 1px 0 rgba(255,255,255,0.9) inset, 0 14px 30px rgba(0,0,0,0.55); }
+  .btn.ghost {
+    color: #eaf0f7;
+    background: rgba(255,255,255,0.06);
+    backdrop-filter: blur(4px);
+    box-shadow: 0 0 0 1px rgba(255,255,255,0.10) inset;
+  }
+  .btn:focus-visible, a:focus-visible, .scene:focus-visible {
+    outline: 2px solid #9fd1ff; outline-offset: 3px;
+  }
+
+  /* a tiny status whisper that the scene is settling, for honesty */
+  .settle {
+    position: absolute;
+    top: clamp(16px, 4vh, 34px); right: clamp(16px, 4vw, 34px);
+    font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase;
+    color: var(--steel-deep);
+    z-index: 6;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .settle .dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: radial-gradient(circle at 30% 30%, #fff, #8aa4c4 60%, #3a4658);
+    box-shadow: 0 0 10px rgba(180,210,245,0.6);
+    animation: pulse 2.4s ease-in-out infinite;
+  }
+  @keyframes pulse { 0%,100% { opacity: 0.4; } 50% { opacity: 1; } }
+
+  /* ============ BELOW THE FOLD — honest facts ============ */
+  .below {
+    position: relative;
+    max-width: 1040px;
+    margin: 0 auto;
+    padding: 88px 24px 40px;
+  }
+  .below h2 {
+    font-size: clamp(22px, 3vw, 30px);
+    margin: 0 0 8px;
+    color: #eef3f9;
+    letter-spacing: -0.01em;
+  }
+  .below .sub { color: var(--steel-deep); margin: 0 0 40px; max-width: 620px; line-height: 1.6; }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 18px;
+  }
+  .card {
+    padding: 22px 20px;
+    border-radius: 14px;
+    background: linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.015));
+    border: 1px solid var(--hairline);
+    box-shadow: 0 1px 0 rgba(255,255,255,0.08) inset;
+  }
+  .card h3 { margin: 0 0 8px; font-size: 16px; color: #e8eef6; letter-spacing: 0.01em; }
+  .card p { margin: 0; font-size: 14px; line-height: 1.6; color: #aeb8c4; }
+
+  .mcp {
+    margin-top: 44px;
+    padding: 24px 22px;
+    border-radius: 16px;
+    background:
+      radial-gradient(80% 120% at 100% 0%, rgba(155,196,236,0.10), rgba(0,0,0,0) 60%),
+      linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.015));
+    border: 1px solid var(--hairline);
+  }
+  .mcp h3 { margin: 0 0 10px; color: #eef3f9; font-size: 17px; }
+  .mcp p { color: #aeb8c4; line-height: 1.6; font-size: 14px; margin: 0 0 14px; }
+  .codeline {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 13.5px;
+    background: #06080b;
+    border: 1px solid var(--hairline);
+    border-radius: 10px;
+    padding: 12px 14px;
+    color: #cfe0f1;
+    overflow-x: auto;
+  }
+  .codeline .k { color: #9fd1ff; }
+  .codeline .c { color: var(--steel-deep); }
+
+  footer {
+    max-width: 1040px;
+    margin: 0 auto;
+    padding: 30px 24px 60px;
+    border-top: 1px solid var(--hairline);
+    display: flex; flex-wrap: wrap; gap: 18px 26px; align-items: center;
+  }
+  footer a {
+    color: #c7d0db; text-decoration: none; font-size: 14px;
+    border-bottom: 1px solid transparent; padding-bottom: 1px;
+  }
+  footer a:hover { border-bottom-color: #c7d0db; }
+  footer .tag { color: var(--steel-deep); font-size: 12.5px; margin-left: auto; }
+
+  /* keep SVG filter source off-canvas */
+  .filters { position: absolute; width: 0; height: 0; overflow: hidden; }
+
+  /* ============ REDUCED MOTION — settled chrome scene, static ============ */
+  @media (prefers-reduced-motion: reduce) {
+    .pool, .sheen, .scene, .moment-tag, .settle .dot, .context .now .cursor {
+      animation: none !important;
+      transition: none !important;
+    }
+    .pool { filter: contrast(1.12) brightness(1.0); transform: none; }
+    .sheen { opacity: 0.35; transform: rotate(2deg); }
+    .scene { opacity: 1 !important; transform: translate(-50%, -50%) scale(1) !important; filter: none !important; }
+    .settle { display: none; }
+  }
+
+  @media (max-width: 560px) {
+    .context .now { font-size: 16px; }
+    .mast h1 { font-size: 28px; }
+  }
+</style>
+</head>
+<body>
+<a class="skip" href="#facts">Skip to product details</a>
+
+<!-- Off-canvas SVG filters: turbulence + displacement = liquid mercury ripple -->
+<svg class="filters" aria-hidden="true" focusable="false">
+  <defs>
+    <filter id="molten" x="-20%" y="-20%" width="140%" height="140%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.006 0.011" numOctaves="2" seed="7" result="noise">
+        <animate attributeName="baseFrequency" dur="26s"
+                 values="0.006 0.011; 0.010 0.016; 0.006 0.011"
+                 repeatCount="indefinite" id="molten-anim" />
+      </feTurbulence>
+      <feDisplacementMap in="SourceGraphic" in2="noise" scale="34"
+                         xChannelSelector="R" yChannelSelector="G" />
+    </filter>
+    <filter id="molten-soft" x="-20%" y="-20%" width="140%" height="140%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.009 0.013" numOctaves="2" seed="3" result="n2" />
+      <feDisplacementMap in="SourceGraphic" in2="n2" scale="0"
+                         xChannelSelector="R" yChannelSelector="G" id="soft-disp" />
+    </filter>
+  </defs>
+</svg>
+
+<main>
+  <section class="stage" aria-label="A remembered coding moment coalescing out of liquid chrome">
+    <div class="pool" aria-hidden="true"></div>
+    <div class="sheen" aria-hidden="true"></div>
+
+    <!-- the current situation that calls the memory up (not a prompt box) -->
+    <div class="context" aria-hidden="false">
+      <div class="eyebrow">Right now, in your editor</div>
+      <div class="now" id="nowLine">You're staring at an auth-retry that keeps 401-ing<span class="cursor" aria-hidden="true"></span></div>
+    </div>
+
+    <div class="settle" aria-hidden="true"><span class="dot"></span><span id="settleLabel">coalescing</span></div>
+
+    <!-- the SCENE that forms unbidden out of the metal -->
+    <div class="scene" id="scene" tabindex="-1" role="img"
+         aria-label="A remembered scene: it is 02:14, lamp-lit desk, an editor's reflection in dark glass. The same auth-retry — last March — the night the token-refresh finally went green.">
+      <div class="tableau" aria-hidden="true">
+        <svg viewBox="0 0 800 450" preserveAspectRatio="xMidYMid slice" role="presentation">
+          <defs>
+            <linearGradient id="gWall" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stop-color="#1b212b"/>
+              <stop offset="1" stop-color="#0a0d12"/>
+            </linearGradient>
+            <radialGradient id="gLamp" cx="0.74" cy="0.28" r="0.55">
+              <stop offset="0" stop-color="#ffe2ad" stop-opacity="0.95"/>
+              <stop offset="0.4" stop-color="#e9a85a" stop-opacity="0.45"/>
+              <stop offset="1" stop-color="#e9a85a" stop-opacity="0"/>
+            </radialGradient>
+            <linearGradient id="gDesk" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stop-color="#2c333d"/>
+              <stop offset="1" stop-color="#10141a"/>
+            </linearGradient>
+            <linearGradient id="gGlass" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stop-color="#0c1622"/>
+              <stop offset="0.55" stop-color="#13202e"/>
+              <stop offset="1" stop-color="#0a0f15"/>
+            </linearGradient>
+            <linearGradient id="gChrome" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stop-color="#ffffff"/>
+              <stop offset="0.5" stop-color="#9aa6b4"/>
+              <stop offset="1" stop-color="#3a4350"/>
+            </linearGradient>
+          </defs>
+
+          <!-- room / wall -->
+          <rect x="0" y="0" width="800" height="450" fill="url(#gWall)"/>
+          <!-- warm desk-lamp pool of light -->
+          <rect x="0" y="0" width="800" height="450" fill="url(#gLamp)"/>
+
+          <!-- window with night sky reflected (cool counter-light) -->
+          <rect x="40" y="40" width="210" height="150" rx="6" fill="#0b1420"/>
+          <rect x="40" y="40" width="210" height="150" rx="6" fill="none" stroke="#3a4756" stroke-width="2"/>
+          <line x1="145" y1="40" x2="145" y2="190" stroke="#3a4756" stroke-width="1.5"/>
+          <line x1="40" y1="115" x2="250" y2="115" stroke="#3a4756" stroke-width="1.5"/>
+          <circle cx="92" cy="78" r="1.4" fill="#cfe0f1"/>
+          <circle cx="180" cy="96" r="1.1" fill="#cfe0f1"/>
+          <circle cx="210" cy="150" r="1.5" fill="#cfe0f1"/>
+          <circle cx="70" cy="160" r="1" fill="#9fb6cf"/>
+
+          <!-- the desk -->
+          <rect x="0" y="330" width="800" height="120" fill="url(#gDesk)"/>
+          <rect x="0" y="330" width="800" height="3" fill="rgba(255,255,255,0.12)"/>
+
+          <!-- monitor: dark glass reflecting the room — the screen is a mirror,
+               not a console. A single green glint marks the moment it passed. -->
+          <g>
+            <rect x="300" y="120" width="360" height="210" rx="10" fill="url(#gGlass)"
+                  stroke="rgba(255,255,255,0.18)" stroke-width="2"/>
+            <!-- soft window reflection on the glass -->
+            <rect x="322" y="138" width="120" height="78" rx="4" fill="#16283a" opacity="0.7"/>
+            <!-- the lamp's warm streak across the glass -->
+            <path d="M300 300 L660 150 L660 210 L300 330 Z" fill="#ffd9a0" opacity="0.06"/>
+            <!-- faint engraved lines (the remembered code, as reflected glints) -->
+            <rect x="330" y="160" width="150" height="6" rx="3" fill="#6f7d8c" opacity="0.55"/>
+            <rect x="330" y="178" width="220" height="6" rx="3" fill="#6f7d8c" opacity="0.45"/>
+            <rect x="350" y="196" width="120" height="6" rx="3" fill="#6f7d8c" opacity="0.4"/>
+            <rect x="350" y="214" width="180" height="6" rx="3" fill="#6f7d8c" opacity="0.35"/>
+            <!-- the line that finally passed — warm-to-green glint -->
+            <rect x="330" y="248" width="240" height="8" rx="4" fill="#86f0a2" opacity="0.9"/>
+            <circle cx="586" cy="252" r="6" fill="#86f0a2"/>
+            <circle cx="586" cy="252" r="14" fill="#86f0a2" opacity="0.25"/>
+            <!-- monitor stand -->
+            <rect x="468" y="330" width="24" height="22" fill="#222932"/>
+            <rect x="436" y="350" width="88" height="6" rx="3" fill="#2c333d"/>
+          </g>
+
+          <!-- a chrome coffee cup catching the lamp — the small true detail -->
+          <g>
+            <ellipse cx="208" cy="332" rx="34" ry="10" fill="#0a0d12"/>
+            <path d="M178 332 q0 40 30 42 q30 -2 30 -42 Z" fill="url(#gChrome)"/>
+            <ellipse cx="208" cy="332" rx="30" ry="8" fill="#1a2029"/>
+            <ellipse cx="200" cy="330" rx="14" ry="4" fill="#ffe2ad" opacity="0.5"/>
+            <path d="M238 340 q26 4 22 26 q-2 14 -20 14" fill="none" stroke="url(#gChrome)" stroke-width="6"/>
+          </g>
+
+          <!-- keyboard glint -->
+          <rect x="380" y="372" width="200" height="40" rx="6" fill="#161b22"/>
+          <rect x="380" y="372" width="200" height="4" rx="2" fill="rgba(255,255,255,0.10)"/>
+        </svg>
+
+        <!-- the moment, engraved as a glint on the scene (part of the tableau, not a UI) -->
+        <div class="moment-tag" aria-hidden="true">
+          <span class="when">02:14 · last March</span>
+          <span class="what">token refresh, attempt&nbsp;7</span>
+          <span class="glow">— it went green</span>
+        </div>
+      </div>
+
+      <div class="recall">
+        <p class="lede">Oh&mdash;<b>right</b>. You solved this exact 401 once before. The retry was firing
+          <b>before</b> the refreshed token had landed. You didn't go looking for that night;
+          it just <b>surfaced</b>.</p>
+        <p class="src">Recalled from your own Claude Code session history</p>
+      </div>
+    </div>
+
+    <!-- masthead over the chrome -->
+    <div class="mast">
+      <div class="wordmark">Memex</div>
+      <h1>The thought you needed,<br/>before you went looking.</h1>
+      <p>A pool of your past sessions, still and reflective &mdash; until a moment in your
+        editor calls one up, and it coalesces into the scene you'd forgotten you lived.</p>
+      <div class="cta">
+        <a class="btn" href="https://github.com/Two-Weeks-Team/memex">View the repository</a>
+        <a class="btn ghost" href="https://two-weeks-team.github.io/memex/">Open the live landing</a>
+      </div>
+    </div>
+
+    <div class="vignette" aria-hidden="true"></div>
+  </section>
+
+  <!-- ============ honest facts below the fold ============ -->
+  <section class="below" id="facts">
+    <h2>What's actually happening</h2>
+    <p class="sub">Memex is a non-chatbot tool that runs over your Claude Code and Codex session
+      history. No LLM at runtime &mdash; it turns the transcripts you already own into a navigable,
+      associative memory you can move through by similarity, not keywords.</p>
+
+    <div class="grid">
+      <div class="card">
+        <h3>Your corpus, preserved</h3>
+        <p>Reads <code>~/.claude/projects/**/*.jsonl</code>, legacy transcripts, and
+          <code>history.jsonl</code> &mdash; a corpus you keep, even when old sessions get
+          silently migrated or removed.</p>
+      </div>
+      <div class="card">
+        <h3>Backed by Qdrant</h3>
+        <p>Embeddings live in a Qdrant vector space, so recall is by closeness of meaning.
+          A server / Docker variant runs Qdrant, the web UI, and MCP together in one image.</p>
+      </div>
+      <div class="card">
+        <h3>Surfaces, not searches</h3>
+        <p>Time Machine replay, Lens weighted vectors, Topology graphs, Mix/Discovery, and a
+          proactive Recall that brings a past moment forward when the current one rhymes with it.</p>
+      </div>
+      <div class="card">
+        <h3>Agent-memory layer</h3>
+        <p>A Companion / Wrapped / Loop-Breaker layer reflects on patterns across your sessions
+          &mdash; what you keep circling back to, and where you've been before.</p>
+      </div>
+    </div>
+
+    <div class="mcp">
+      <h3>Plug it into your agent</h3>
+      <p>11 MCP tools over stdio + HTTP &mdash; works in Claude Code, Codex, and Cursor. Your
+        agent can recall, replay, and connect across your own history.</p>
+      <div class="codeline"><span class="k">claude mcp add</span> memex -- memex-mcp <span class="c"># 11 tools, runs locally over your sessions</span></div>
+    </div>
+  </section>
+
+  <footer>
+    <a href="https://github.com/Two-Weeks-Team/memex">Repository</a>
+    <a href="https://two-weeks-team.github.io/memex/">Live landing</a>
+    <a href="https://github.com/Two-Weeks-Team/memex">Server / Docker variant</a>
+    <a href="https://github.com/Two-Weeks-Team/memex">MCP integration · 11 tools</a>
+    <span class="tag">Built for Qdrant Vector Space Day 2026 — "Think Outside the Bot."</span>
+  </footer>
+</main>
+
+<script>
+(function () {
+  "use strict";
+
+  var reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  var scene = document.getElementById("scene");
+  var settleLabel = document.getElementById("settleLabel");
+  var nowLine = document.getElementById("nowLine");
+  var pool = document.querySelector(".pool");
+  var sheen = document.querySelector(".sheen");
+  var softDisp = document.getElementById("soft-disp");
+
+  // Reduced motion: leave the settled chrome scene in place, fully formed & static.
+  if (reduce) {
+    scene.style.opacity = "1";
+    return;
+  }
+
+  // Different remembered moments the situation can call up — each is a SCENE,
+  // expressed through the same liquid-chrome tableau but with its own line.
+  var moments = [
+    {
+      now: "You're staring at an auth-retry that keeps 401-ing",
+      aria: "A remembered scene: 02:14 last March, lamp-lit desk, the same auth-retry — the night the token refresh finally went green.",
+      tag: ["02:14 · last March", "token refresh, attempt 7", "— it went green"],
+      lede: "Oh&mdash;<b>right</b>. You solved this exact 401 once before. The retry was firing <b>before</b> the refreshed token had landed. You didn't go looking for that night; it just <b>surfaced</b>."
+    },
+    {
+      now: "You're untangling why the migration drops a foreign key",
+      aria: "A remembered scene: a winter afternoon, two windows side by side, the schema diff that revealed a rename masquerading as a drop.",
+      tag: ["16:40 · February", "schema diff, the rename", "— not a drop"],
+      lede: "Wait&mdash;you've <b>been here</b>. It wasn't a dropped key; it was a column rename the diff read as drop-then-add. That afternoon comes back on its own."
+    },
+    {
+      now: "You're chasing a race in the websocket reconnect",
+      aria: "A remembered scene: late, the editor's glow in dark glass, the reconnect backoff you'd already tuned once before.",
+      tag: ["23:51 · April", "reconnect backoff", "— stop the thundering herd"],
+      lede: "There it is. You'd <b>already</b> tamed this reconnect storm with jittered backoff. The fix rises before you finish re-reading the stack trace."
+    }
+  ];
+
+  var tagWhen = scene.querySelector(".moment-tag .when");
+  var tagWhat = scene.querySelector(".moment-tag .what");
+  var tagGlow = scene.querySelector(".moment-tag .glow");
+  var lede = scene.querySelector(".recall .lede");
+
+  var idx = 0;
+  var settleStrength = 30; // displacement applied to the scene while it's still molten
+
+  function applyMoment(m) {
+    nowLine.firstChild.nodeValue = m.now + " ";
+    scene.setAttribute("aria-label", m.aria);
+    tagWhen.textContent = m.tag[0];
+    tagWhat.textContent = m.tag[1];
+    tagGlow.textContent = m.tag[2];
+    lede.innerHTML = m.lede;
+  }
+
+  // Animate the soft displacement on the SCENE from molten -> hardened.
+  function settleScene(duration, cb) {
+    var start = performance.now();
+    function frame(t) {
+      var p = Math.min(1, (t - start) / duration);
+      // ease-out cubic
+      var e = 1 - Math.pow(1 - p, 3);
+      var disp = settleStrength * (1 - e);
+      if (softDisp) softDisp.setAttribute("scale", disp.toFixed(2));
+      if (p < 1) requestAnimationFrame(frame);
+      else if (cb) cb();
+    }
+    requestAnimationFrame(frame);
+  }
+
+  function meltScene(duration, cb) {
+    var start = performance.now();
+    function frame(t) {
+      var p = Math.min(1, (t - start) / duration);
+      var e = p * p;
+      var disp = settleStrength * e;
+      if (softDisp) softDisp.setAttribute("scale", disp.toFixed(2));
+      if (p < 1) requestAnimationFrame(frame);
+      else if (cb) cb();
+    }
+    requestAnimationFrame(frame);
+  }
+
+  // ONE full cycle: the metal coalesces unbidden -> a scene settles -> holds -> melts back.
+  function cycle() {
+    var m = moments[idx % moments.length];
+    applyMoment(m);
+
+    // 1) coalesce: scene fades up out of the molten pool while displacement hardens
+    settleLabel.textContent = "coalescing";
+    if (softDisp) softDisp.setAttribute("scale", settleStrength);
+    scene.classList.add("live");
+    scene.style.transition = "opacity 1.6s ease, transform 1.8s cubic-bezier(.22,.61,.36,1)";
+    scene.style.opacity = "1";
+    scene.style.transform = "translate(-50%, -50%) scale(1)";
+
+    settleScene(1900, function () {
+      settleLabel.textContent = "settled";
+      if (softDisp) softDisp.setAttribute("scale", "0");
+    });
+
+    // 2) hold the formed scene, then 3) dissolve back into the pool
+    var hold = 6200;
+    setTimeout(function () {
+      settleLabel.textContent = "dissolving";
+      scene.style.transition = "opacity 1.4s ease, transform 1.6s ease";
+      scene.style.opacity = "0";
+      scene.style.transform = "translate(-50%, -50%) scale(0.94)";
+      meltScene(1400, function () {
+        scene.classList.remove("live");
+        idx++;
+        // irregular, lifelike pause before the next memory arises unbidden
+        var gap = 2600 + Math.random() * 2200;
+        setTimeout(cycle, gap);
+      });
+    }, hold);
+  }
+
+  // Drifting sheen across the chrome (independent of the scene cycle)
+  var sheenStart = performance.now();
+  function sheenLoop(t) {
+    var period = 9000;
+    var phase = ((t - sheenStart) % period) / period; // 0..1
+    var x = -40 + phase * 120; // sweep across
+    var op = 0.35 + 0.45 * Math.sin(phase * Math.PI);
+    sheen.style.transform = "translateX(" + x + "%) rotate(2deg)";
+    sheen.style.opacity = op.toFixed(2);
+    requestAnimationFrame(sheenLoop);
+  }
+  requestAnimationFrame(sheenLoop);
+
+  // Subtle parallax of the pool with pointer (reflection follows you) — purely decorative.
+  window.addEventListener("pointermove", function (ev) {
+    var cx = (ev.clientX / window.innerWidth - 0.5);
+    var cy = (ev.clientY / window.innerHeight - 0.5);
+    pool.style.transform = "scale(1.06) translate(" + (cx * -10).toFixed(1) + "px," + (cy * -8).toFixed(1) + "px)";
+  }, { passive: true });
+
+  // Begin the first coalescence shortly after load (unbidden — no user action).
+  setTimeout(cycle, 900);
+
+  // Pause the cycle when the tab is hidden so it doesn't burn cycles in the background.
+  document.addEventListener("visibilitychange", function () {
+    var anim = document.getElementById("molten-anim");
+    if (!anim) return;
+    if (document.hidden) { if (anim.pauseAnimations) anim.pauseAnimations(); }
+    else { if (anim.unpauseAnimations) anim.unpauseAnimations(); }
+  });
+})();
+</script>
+</body>
+</html>

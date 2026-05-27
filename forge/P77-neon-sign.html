@@ -1,0 +1,582 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Memex — the wall lights up with what you forgot</title>
+<meta name="description" content="Memex turns your Claude Code & Codex session history into a navigable associative memory backed by Qdrant. When the moment calls, a past coding night buzzes alight on its own — like a neon sign flickering on against a rain-slick wall." />
+<style>
+  :root{
+    --ink:#eaf2ff;
+    --dim:#93a0c4;
+    --faint:#5c668c;
+    --bg0:#05060c;
+    --bg1:#0a0c18;
+    --wall:#0c0e18;
+    --hair:rgba(160,178,255,.16);
+    --panel:rgba(10,13,26,.62);
+
+    /* neon palette */
+    --neon-pink:#ff4fa3;
+    --neon-cyan:#4fe3ff;
+    --neon-amber:#ffc24f;
+    --neon-violet:#b07bff;
+    --neon-mint:#5dffb0;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    background:
+      radial-gradient(1100px 720px at 70% 16%, #11142a 0%, transparent 62%),
+      radial-gradient(1300px 900px at 16% 96%, #0a0c1c 0%, transparent 55%),
+      linear-gradient(180deg, var(--bg1), var(--bg0) 72%);
+    color:var(--ink);
+    font:16px/1.6 ui-sans-serif,-apple-system,"Segoe UI",Roboto,Inter,system-ui,sans-serif;
+    overflow-x:hidden;
+    -webkit-font-smoothing:antialiased;
+  }
+  a{color:#bcd0ff;text-decoration:none}
+  a:hover{text-decoration:underline}
+  code,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+
+  /* ============ the alley wall stage ============ */
+  .stage{position:relative;width:100%;height:100svh;min-height:660px;overflow:hidden}
+
+  /* rain-slick brick wall, lit low and cold */
+  .wall{position:absolute;inset:0;
+    background:
+      /* brick mortar grid */
+      repeating-linear-gradient(0deg, rgba(255,255,255,.018) 0 1px, transparent 1px 38px),
+      repeating-linear-gradient(90deg, rgba(255,255,255,.015) 0 1px, transparent 1px 84px),
+      /* damp light pooling */
+      radial-gradient(120% 70% at 60% 8%, rgba(60,70,120,.18) 0%, transparent 60%),
+      linear-gradient(180deg, #0e1120 0%, #0a0c18 56%, #070812 100%);
+  }
+  /* offset alternate brick rows for realism */
+  .wall::before{
+    content:"";position:absolute;inset:0;
+    background:repeating-linear-gradient(0deg, transparent 0 38px,
+      rgba(0,0,0,.0) 38px 76px);
+    background-position:42px 0;
+    opacity:.5;
+  }
+  /* the wet-ground band where the sign reflects */
+  .ground{position:absolute;left:0;right:0;bottom:0;height:34%;
+    background:linear-gradient(180deg,
+      rgba(6,7,14,0) 0%, rgba(5,6,12,.55) 22%, #05060c 78%);}
+  .ground::after{ /* faint puddle sheen streaks */
+    content:"";position:absolute;inset:0;
+    background:
+      radial-gradient(60% 40% at 38% 30%, rgba(120,140,200,.06), transparent 70%),
+      radial-gradient(50% 36% at 72% 50%, rgba(120,140,200,.05), transparent 70%);
+    mix-blend-mode:screen;
+  }
+
+  /* the SVG neon scene + its reflection sit centered, upper area */
+  .signwrap{position:absolute;left:50%;top:7%;transform:translateX(-50%);
+    width:min(82vw, 760px);z-index:2;pointer-events:none}
+  .sign{display:block;width:100%;height:auto;overflow:visible}
+  .sign.reflect{transform:scaleY(-1);opacity:.42;
+    filter:blur(1.1px) saturate(.9);margin-top:-4%}
+  /* the reflection wavers like a puddle */
+  .reflect-mask{position:relative}
+  .reflect-mask::after{ /* ripple darkening bands over the reflection */
+    content:"";position:absolute;inset:0;pointer-events:none;
+    background:repeating-linear-gradient(0deg,
+      rgba(5,6,12,0) 0 6px, rgba(5,6,12,.45) 6px 9px);
+    animation:ripple 5.5s linear infinite;
+  }
+  @keyframes ripple{0%{background-position:0 0}100%{background-position:0 30px}}
+
+  /* drifting rain streaks in front of the wall */
+  .rain{position:absolute;inset:0;z-index:1;pointer-events:none;opacity:.5;
+    background-image:repeating-linear-gradient(102deg,
+      rgba(180,200,255,.05) 0 1px, transparent 1px 9px);
+    background-size:auto 240px;
+    animation:rainfall 0.9s linear infinite;}
+  @keyframes rainfall{0%{background-position:0 0}100%{background-position:-40px 240px}}
+
+  /* vignette so the overlaid copy stays legible */
+  .stage::after{
+    content:"";position:absolute;inset:0;pointer-events:none;z-index:3;
+    background:
+      radial-gradient(120% 84% at 50% 36%, transparent 40%, rgba(5,6,12,.6) 100%),
+      linear-gradient(180deg, rgba(5,6,12,.5) 0%, transparent 24%, transparent 60%, rgba(5,6,12,.9) 100%);
+  }
+
+  /* ============ overlaid copy (HUD) ============ */
+  .hud{position:absolute;inset:0;display:flex;flex-direction:column;z-index:4;pointer-events:none}
+  .hud > *{pointer-events:auto}
+
+  .topbar{display:flex;align-items:center;justify-content:space-between;gap:16px;
+    padding:22px clamp(18px,5vw,56px)}
+  .brand{display:flex;align-items:center;gap:11px;font-weight:700;letter-spacing:.18em;
+    text-transform:uppercase;font-size:13px;color:var(--ink)}
+  .brand .dot{width:9px;height:9px;border-radius:50%;background:var(--neon-pink);
+    box-shadow:0 0 10px 2px rgba(255,79,163,.8),0 0 22px 4px rgba(255,79,163,.4)}
+  .topbar nav{display:flex;gap:clamp(10px,2.4vw,26px);font-size:13px;color:var(--dim);letter-spacing:.02em}
+  .topbar nav a{color:var(--dim)}
+  .topbar nav a:hover{color:var(--ink)}
+
+  .hero{margin-top:auto;padding:0 clamp(18px,5vw,56px) clamp(26px,6vh,64px);max-width:780px}
+
+  /* the "current situation" line that calls the memory up */
+  .moment{display:inline-flex;align-items:center;gap:10px;margin-bottom:20px;
+    padding:8px 14px;border:1px solid var(--hair);border-radius:999px;
+    background:var(--panel);backdrop-filter:blur(6px);
+    font-size:12.5px;letter-spacing:.02em;color:var(--dim)}
+  .moment .pulse{width:7px;height:7px;border-radius:50%;background:var(--neon-cyan);
+    box-shadow:0 0 0 0 rgba(79,227,255,.6);animation:pulse 2.6s ease-out infinite}
+  .moment b{color:var(--ink);font-weight:600}
+  @keyframes pulse{
+    0%{box-shadow:0 0 0 0 rgba(79,227,255,.55)}
+    70%{box-shadow:0 0 0 9px rgba(79,227,255,0)}
+    100%{box-shadow:0 0 0 0 rgba(79,227,255,0)}
+  }
+
+  h1{margin:0;font-weight:680;font-size:clamp(33px,6vw,62px);line-height:1.04;
+    letter-spacing:-.018em;color:#fff;text-shadow:0 2px 40px rgba(5,6,12,.8)}
+  h1 .glow{color:var(--neon-pink);
+    text-shadow:0 0 10px rgba(255,79,163,.6),0 0 30px rgba(255,79,163,.4),0 0 60px rgba(255,79,163,.25)}
+  .lede{margin:18px 0 0;font-size:clamp(15px,2.1vw,18.5px);color:var(--dim);max-width:610px}
+  .lede b{color:var(--ink);font-weight:600}
+
+  .cta{display:flex;flex-wrap:wrap;gap:13px;margin-top:28px}
+  .btn{display:inline-flex;align-items:center;gap:9px;padding:12px 20px;border-radius:11px;
+    font-size:14.5px;font-weight:600;letter-spacing:.01em;border:1px solid transparent;
+    transition:transform .15s ease, box-shadow .25s ease, background .25s ease}
+  .btn:hover{text-decoration:none;transform:translateY(-1px)}
+  .btn-primary{background:linear-gradient(180deg,#ff77bd,#ff4fa3);color:#2a0717;
+    box-shadow:0 8px 30px rgba(255,79,163,.32)}
+  .btn-primary:hover{box-shadow:0 12px 38px rgba(255,79,163,.46)}
+  .btn-ghost{border-color:var(--hair);color:var(--ink);background:var(--panel);backdrop-filter:blur(6px)}
+  .btn-ghost:hover{border-color:rgba(160,178,255,.42)}
+
+  .legend{margin-top:22px;font-size:12.5px;color:var(--faint);letter-spacing:.01em;
+    display:flex;align-items:center;gap:9px}
+  .legend .scene-label{color:var(--neon-cyan);font-weight:600;letter-spacing:.04em;
+    text-shadow:0 0 12px rgba(79,227,255,.5)}
+
+  /* small replay control */
+  .replay{position:absolute;right:clamp(16px,4vw,40px);bottom:clamp(20px,5vh,40px);
+    display:inline-flex;align-items:center;gap:8px;padding:9px 14px;border-radius:999px;
+    border:1px solid var(--hair);background:var(--panel);backdrop-filter:blur(6px);
+    color:var(--dim);font-size:12.5px;cursor:pointer;z-index:5}
+  .replay:hover{color:var(--ink);border-color:rgba(160,178,255,.4)}
+  .replay svg{width:13px;height:13px;fill:currentColor}
+
+  /* ============ below the fold — ground truth ============ */
+  .below{position:relative;z-index:2;max-width:1080px;margin:0 auto;
+    padding:clamp(56px,10vh,110px) clamp(18px,5vw,40px) 40px}
+  .kicker{font-size:12px;letter-spacing:.22em;text-transform:uppercase;color:var(--faint);margin:0 0 14px}
+  .below h2{font-size:clamp(24px,4vw,38px);line-height:1.12;margin:0;color:#fff;
+    letter-spacing:-.01em;font-weight:660;max-width:780px}
+  .below p.sub{color:var(--dim);max-width:680px;margin:16px 0 0;font-size:16px}
+
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(238px,1fr));gap:16px;margin-top:42px}
+  .card{border:1px solid var(--hair);border-radius:16px;padding:22px 22px 24px;
+    background:linear-gradient(180deg, rgba(14,17,34,.62), rgba(8,10,20,.45));
+    transition:border-color .2s ease, transform .2s ease}
+  .card:hover{border-color:rgba(160,178,255,.4);transform:translateY(-2px)}
+  .card h3{margin:0 0 8px;font-size:16px;color:#fff;letter-spacing:.01em;display:flex;align-items:center;gap:9px}
+  .card h3 .gp{width:8px;height:8px;border-radius:50%;background:var(--neon-cyan);
+    box-shadow:0 0 8px 1px rgba(79,227,255,.7);flex:0 0 auto}
+  .card p{margin:0;font-size:14px;color:var(--dim);line-height:1.55}
+
+  .facts{margin-top:44px;border:1px solid var(--hair);border-radius:16px;overflow:hidden;background:rgba(8,10,20,.5)}
+  .facts .row{display:grid;grid-template-columns:160px 1fr;gap:18px;padding:16px 22px;
+    border-top:1px solid rgba(160,178,255,.08);font-size:14.5px}
+  .facts .row:first-child{border-top:0}
+  .facts .row .lab{color:var(--faint);letter-spacing:.04em;font-size:12.5px;text-transform:uppercase;padding-top:2px}
+  .facts .row .val{color:var(--ink)}
+  .facts .row .val .mono{color:var(--neon-cyan);font-size:13.5px}
+
+  .addline{margin-top:34px;border:1px solid var(--hair);border-radius:14px;background:#070812;
+    padding:16px 18px;font-size:13.5px;color:var(--dim);overflow-x:auto}
+  .addline .mono{color:var(--ink)}
+  .addline .c{color:var(--neon-pink)}
+
+  footer{position:relative;z-index:2;border-top:1px solid var(--hair);margin-top:60px}
+  .foot{max-width:1080px;margin:0 auto;padding:28px clamp(18px,5vw,40px) 60px;
+    display:flex;flex-wrap:wrap;gap:18px;justify-content:space-between;align-items:center;
+    color:var(--faint);font-size:13px}
+  .foot a{color:var(--dim)}
+  .foot .links{display:flex;flex-wrap:wrap;gap:18px}
+
+  /* ============ neon stroke states (JS toggles .lit / .flicker) ============ */
+  /* tubes start dim/unlit. Their glow comes from SVG filters + this stroke opacity. */
+  .tube{
+    stroke-linecap:round;stroke-linejoin:round;fill:none;
+    opacity:.10;                                   /* dim, unlit gas */
+    transition:opacity .25s ease;
+  }
+  .sign.lit .tube{opacity:1}
+  /* tube core color classes */
+  .t-pink{stroke:#ff8fc4}   .glow-pink{color:var(--neon-pink)}
+  .t-cyan{stroke:#9cf0ff}
+  .t-amber{stroke:#ffe0a3}
+  .t-violet{stroke:#d3b6ff}
+  .t-mint{stroke:#aeffd6}
+
+  /* the buzzing flicker, applied to the whole sign group while igniting */
+  .sign.flicker{animation:buzz 1.45s steps(1,end) 1 both}
+  @keyframes buzz{
+    0%   {opacity:.12}
+    6%   {opacity:1}
+    9%   {opacity:.18}
+    12%  {opacity:.9}
+    16%  {opacity:.2}
+    19%  {opacity:1}
+    23%  {opacity:.35}
+    28%  {opacity:1}
+    33%  {opacity:.5}
+    38%  {opacity:1}
+    44%  {opacity:.7}
+    52%  {opacity:1}
+    63%  {opacity:.85}
+    100% {opacity:1}
+  }
+  /* once lit, the gas hums with a tiny steady brightness wobble */
+  .sign.lit.hum{animation:hum 3.6s ease-in-out infinite}
+  @keyframes hum{
+    0%,100%{filter:brightness(1)}
+    47%{filter:brightness(1.05)}
+    52%{filter:brightness(.94)}
+    55%{filter:brightness(1.04)}
+  }
+
+  /* reduced motion: no flicker, no hum, no rain animation — steady lit scene */
+  @media (prefers-reduced-motion: reduce){
+    .moment .pulse{animation:none}
+    .rain{animation:none}
+    .reflect-mask::after{animation:none}
+    .sign.flicker{animation:none}
+    .sign.lit.hum{animation:none}
+    .sign .tube{transition:none}
+  }
+
+  @media (max-width:640px){
+    .topbar nav{display:none}
+    .facts .row{grid-template-columns:1fr;gap:4px}
+    .replay{display:none}
+    .signwrap{width:90vw;top:9%}
+  }
+</style>
+</head>
+<body>
+
+<section class="stage" aria-label="A dim neon tube on a rain-slick wall flickers, then buzzes alight to draw a remembered late-night coding scene">
+  <div class="wall" aria-hidden="true"></div>
+  <div class="rain" aria-hidden="true"></div>
+
+  <div class="signwrap" aria-hidden="true">
+    <!-- ====== THE NEON SCENE ====== -->
+    <!-- One hand-authored SVG tableau, drawn entirely in neon tube strokes:
+         a person at a desk, a glowing monitor, an angled desk lamp, a coffee mug,
+         and a small "FIXED" sign humming over the monitor. The whole figure is the
+         centerpiece — connected strokes read as a recognizable late-night moment,
+         NOT abstract dots, NOT a chatbot. The blur filters make the strokes glow. -->
+    <svg class="sign" id="signMain" viewBox="0 0 760 460" role="img"
+         aria-label="Neon tableau: a developer at a desk late at night, a lit monitor showing a fixed patch, a desk lamp, and a coffee mug — the night you solved it.">
+      <defs>
+        <!-- glow filter: outer halo for tubes -->
+        <filter id="glow" x="-60%" y="-60%" width="220%" height="220%">
+          <feGaussianBlur stdDeviation="3" result="b1"/>
+          <feGaussianBlur stdDeviation="8" result="b2"/>
+          <feMerge>
+            <feMergeNode in="b2"/>
+            <feMergeNode in="b1"/>
+            <feMergeNode in="SourceGraphic"/>
+          </feMerge>
+        </filter>
+        <filter id="glowSoft" x="-80%" y="-80%" width="260%" height="260%">
+          <feGaussianBlur stdDeviation="6"/>
+        </filter>
+      </defs>
+
+      <!-- glow group sits behind, blurred & colored per-tube -->
+      <g class="sign-glow" filter="url(#glowSoft)" opacity="0">
+        <!-- (the lit-state JS reveals this) -->
+      </g>
+
+      <!-- ===== the line scene, all strokes ===== -->
+      <g id="sceneTubes" filter="url(#glow)" stroke-width="3">
+
+        <!-- DESK: horizon the whole scene sits on (amber) -->
+        <line class="tube t-amber" x1="60"  y1="360" x2="700" y2="360"/>
+        <!-- desk front edge -->
+        <line class="tube t-amber" x1="90"  y1="360" x2="120" y2="392"/>
+        <line class="tube t-amber" x1="700" y1="360" x2="668" y2="392"/>
+        <line class="tube t-amber" x1="120" y1="392" x2="668" y2="392"/>
+
+        <!-- MONITOR (cyan rectangle, right of person) -->
+        <rect class="tube t-cyan" x="430" y="150" width="190" height="138" rx="8"/>
+        <!-- screen content: a couple of "code" strokes + a green check (mint) -->
+        <line class="tube t-cyan"  x1="452" y1="178" x2="540" y2="178"/>
+        <line class="tube t-cyan"  x1="452" y1="200" x2="568" y2="200"/>
+        <line class="tube t-cyan"  x1="452" y1="222" x2="516" y2="222"/>
+        <polyline class="tube t-mint" points="540,238 560,258 600,212"/>
+        <!-- monitor stand to desk -->
+        <line class="tube t-cyan" x1="525" y1="288" x2="525" y2="330"/>
+        <line class="tube t-cyan" x1="495" y1="330" x2="555" y2="330"/>
+
+        <!-- PERSON seated at left, facing the monitor (pink) -->
+        <!-- head -->
+        <circle class="tube t-pink" cx="205" cy="150" r="30"/>
+        <!-- neck + back -->
+        <path class="tube t-pink" d="M205,180 L205,210 C205,250 190,280 178,330"/>
+        <!-- seated thigh -->
+        <line class="tube t-pink" x1="178" y1="330" x2="300" y2="338"/>
+        <!-- arm reaching to keyboard -->
+        <path class="tube t-pink" d="M205,224 C250,236 300,300 360,330"/>
+        <!-- chair back -->
+        <path class="tube t-violet" d="M150,210 C138,210 132,240 134,360"/>
+
+        <!-- KEYBOARD on desk (violet) -->
+        <rect class="tube t-violet" x="330" y="330" width="120" height="22" rx="5"/>
+
+        <!-- MUG between person and monitor (mint) with steam -->
+        <path class="tube t-mint" d="M300,310 L300,348 Q300,356 308,356 L336,356 Q344,356 344,348 L344,310 Z"/>
+        <path class="tube t-mint" d="M344,318 Q360,320 358,332 Q356,344 344,344"/>
+        <path class="tube t-mint" d="M314,300 q-6,-12 2,-22 q8,-10 0,-22" stroke-width="2"/>
+
+        <!-- DESK LAMP arcing over the monitor (amber), warm head -->
+        <path class="tube t-amber" d="M680,360 L676,300 C674,250 700,220 640,196"/>
+        <circle class="tube t-amber" cx="628" cy="190" r="13"/>
+
+        <!-- little "FIXED" tag humming above the monitor (pink) -->
+        <!-- F -->
+        <path class="tube t-pink" d="M452,96 L452,128 M452,96 L470,96 M452,112 L466,112" stroke-width="3.4"/>
+        <!-- I -->
+        <line class="tube t-pink" x1="482" y1="96" x2="482" y2="128" stroke-width="3.4"/>
+        <!-- X -->
+        <path class="tube t-pink" d="M494,96 L512,128 M512,96 L494,128" stroke-width="3.4"/>
+        <!-- E -->
+        <path class="tube t-pink" d="M524,96 L524,128 M524,96 L542,96 M524,112 L538,112 M524,128 L542,128" stroke-width="3.4"/>
+        <!-- D -->
+        <path class="tube t-pink" d="M554,96 L554,128 L568,128 C580,128 584,118 584,112 C584,106 580,96 568,96 Z" stroke-width="3.4"/>
+      </g>
+    </svg>
+
+    <!-- the puddle reflection: a mirrored, wavering copy -->
+    <div class="reflect-mask">
+      <svg class="sign reflect" id="signReflect" viewBox="0 0 760 460" aria-hidden="true">
+        <use href="#sceneTubes" filter="url(#glow)"></use>
+      </svg>
+    </div>
+  </div>
+
+  <div class="ground" aria-hidden="true"></div>
+
+  <div class="hud">
+    <header class="topbar">
+      <div class="brand"><span class="dot" aria-hidden="true"></span> Memex</div>
+      <nav aria-label="Primary">
+        <a href="https://github.com/Two-Weeks-Team/memex">Repo</a>
+        <a href="https://two-weeks-team.github.io/memex/">Live</a>
+        <a href="#how">How it works</a>
+        <a href="#agent">For agents</a>
+      </nav>
+    </header>
+
+    <div class="hero">
+      <span class="moment">
+        <span class="pulse" aria-hidden="true"></span>
+        Right now you're <b>chasing the same auth-retry bug again</b> &mdash; and the wall stirs&hellip;
+      </span>
+
+      <h1>You fixed this once.<br>The wall <span class="glow">buzzes&nbsp;alight.</span></h1>
+
+      <p class="lede">
+        You never wrote it down. But the moment calls it up &mdash; a dim tube stutters,
+        catches, and a whole <b>late-night scene draws itself in neon</b>: the desk, the lit
+        screen, the patch that worked. It surfaces on its own, because right now evoked it.
+      </p>
+
+      <div class="cta">
+        <a class="btn btn-primary" href="https://github.com/Two-Weeks-Team/memex">Get Memex on GitHub</a>
+        <a class="btn btn-ghost" href="https://two-weeks-team.github.io/memex/">See it live</a>
+      </div>
+
+      <p class="legend">
+        <span class="scene-label" id="sceneName">tube warming&hellip;</span>
+        <span aria-hidden="true">&middot;</span>
+        a memory surfaced by association, not a search
+      </p>
+    </div>
+
+    <button class="replay" id="replay" type="button" aria-label="Light the neon scene again">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5V1L7 6l5 5V7a5 5 0 1 1-5 5H5a7 7 0 1 0 7-7z"/></svg>
+      Recall again
+    </button>
+  </div>
+</section>
+
+<main class="below">
+  <section id="how">
+    <p class="kicker">What just happened</p>
+    <h2>People don't document every memory &mdash; yet when the moment arrives,
+      the relevant thought surfaces on its own.</h2>
+    <p class="sub">
+      Memex is a non-chatbot, LLM-free-at-runtime tool that reads your existing
+      Claude&nbsp;Code and Codex session history and turns it into a navigable
+      associative memory backed by <b style="color:var(--ink)">Qdrant</b>. You move through your own past by
+      <i>similarity</i>, not keywords &mdash; and the relevant moment can rise to you proactively,
+      the way a neon sign catches on its own in the dark.
+    </p>
+
+    <div class="grid">
+      <article class="card">
+        <h3><span class="gp" aria-hidden="true"></span>Time Machine</h3>
+        <p>Replay any past session as it happened &mdash; the whole scene, not a snippet.</p>
+      </article>
+      <article class="card">
+        <h3><span class="gp" aria-hidden="true"></span>Lens</h3>
+        <p>Named-vector weighted search to look through your history from one angle at a time.</p>
+      </article>
+      <article class="card">
+        <h3><span class="gp" aria-hidden="true"></span>Topology</h3>
+        <p>A distance-matrix &rarr; MST graph: how your sessions actually connect to one another.</p>
+      </article>
+      <article class="card">
+        <h3><span class="gp" aria-hidden="true"></span>Mix &amp; Discovery</h3>
+        <p>Positive / negative recommendation to pull related work toward you and push noise away.</p>
+      </article>
+      <article class="card">
+        <h3><span class="gp" aria-hidden="true"></span>Proactive Recall</h3>
+        <p>The piece that lit the wall above: a relevant past moment surfaces because the current one evoked it.</p>
+      </article>
+      <article class="card">
+        <h3><span class="gp" aria-hidden="true"></span>Companion · Wrapped · Loop&nbsp;Breaker</h3>
+        <p>An agent-memory layer over your corpus &mdash; recap what you've done, and catch yourself circling.</p>
+      </article>
+    </div>
+
+    <div class="facts" aria-label="What Memex is">
+      <div class="row"><div class="lab">Reads</div>
+        <div class="val"><span class="mono">~/.claude/projects/**/*.jsonl</span>, legacy transcripts, and <span class="mono">history.jsonl</span></div></div>
+      <div class="row"><div class="lab">Backed by</div>
+        <div class="val">Qdrant &mdash; navigate by vector similarity, no runtime LLM</div></div>
+      <div class="row"><div class="lab">Why</div>
+        <div class="val">Claude&nbsp;Code silently migrates and deletes old sessions. Memex keeps a corpus <b style="color:var(--ink)">you own.</b></div></div>
+      <div class="row"><div class="lab">Built for</div>
+        <div class="val">Qdrant Vector Space Day 2026 &mdash; <i>"Think Outside the Bot."</i></div></div>
+    </div>
+  </section>
+
+  <section id="agent">
+    <p class="kicker" style="margin-top:56px">For your agent</p>
+    <h2 style="font-size:clamp(20px,3vw,28px)">11 MCP tools over stdio + HTTP &mdash;
+      works in Claude&nbsp;Code, Codex, and Cursor.</h2>
+    <p class="sub">A server / Docker variant runs Qdrant, the web UI, and the MCP server in one image.
+      The tools let an agent recall, replay, and connect across your own history.</p>
+    <div class="addline mono">
+      <span class="c">$</span> claude mcp add memex -- memex-mcp
+    </div>
+    <p style="margin-top:18px;font-size:14px">
+      <a href="https://github.com/Two-Weeks-Team/memex#server--docker">Server / Docker variant</a>
+      &nbsp;&middot;&nbsp;
+      <a href="https://github.com/Two-Weeks-Team/memex">MCP integration &amp; the 11 tools</a>
+    </p>
+  </section>
+</main>
+
+<footer>
+  <div class="foot">
+    <div>Memex &mdash; a memory you own, surfaced by association.</div>
+    <div class="links">
+      <a href="https://github.com/Two-Weeks-Team/memex">GitHub</a>
+      <a href="https://two-weeks-team.github.io/memex/">Live landing</a>
+      <a href="https://github.com/Two-Weeks-Team/memex#server--docker">Docker</a>
+    </div>
+  </div>
+</footer>
+
+<script>
+(function(){
+  "use strict";
+
+  var sign      = document.getElementById('signMain');
+  var reflect   = document.getElementById('signReflect');
+  var sceneName = document.getElementById('sceneName');
+  var replayBtn = document.getElementById('replay');
+
+  function prefersReduced(){
+    return window.matchMedia &&
+           window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  }
+
+  var timers = [];
+  function clearTimers(){ timers.forEach(clearTimeout); timers.length = 0; }
+  function later(fn, ms){ timers.push(setTimeout(fn, ms)); }
+
+  // light it steadily, no animation (reduced-motion or end state)
+  function setSteadyLit(){
+    [sign, reflect].forEach(function(el){
+      el.classList.remove('flicker','hum');
+      el.classList.add('lit');
+    });
+    sceneName.textContent = 'the night you solved it';
+  }
+
+  // the autonomous ignition: dim → stutter/buzz → fully alight, hands-free
+  function ignite(){
+    clearTimers();
+
+    if (prefersReduced()){
+      // steady-lit neon scene, no flicker
+      setSteadyLit();
+      return;
+    }
+
+    // 1) start dim/unlit
+    [sign, reflect].forEach(function(el){
+      el.classList.remove('lit','hum','flicker');
+    });
+    sceneName.textContent = 'tube warming…';
+
+    // 2) a short pause as the gas warms, then it BUZZES alight on its own
+    later(function(){
+      sceneName.textContent = 'catching…';
+      [sign, reflect].forEach(function(el){
+        // .lit raises stroke opacity to full; .flicker drives the buzz keyframes
+        el.classList.add('lit');
+        // restart the flicker animation cleanly
+        el.classList.remove('flicker');
+        void el.offsetWidth;            // reflow to reset animation
+        el.classList.add('flicker');
+      });
+    }, 1400);
+
+    // 3) once the buzz settles, name the scene and start the quiet hum
+    later(function(){
+      sceneName.textContent = 'the night you solved it';
+      [sign, reflect].forEach(function(el){
+        el.classList.remove('flicker');
+        el.classList.add('hum');
+      });
+    }, 1400 + 1500);
+  }
+
+  // replay control — re-ignite from dark
+  replayBtn.addEventListener('click', ignite);
+
+  // honor live changes to the motion preference
+  if (window.matchMedia){
+    try{
+      window.matchMedia('(prefers-reduced-motion: reduce)')
+        .addEventListener('change', function(){ ignite(); });
+    }catch(_){}
+  }
+
+  // kick off autonomously a beat after load — the situation calls the memory up,
+  // the visitor does nothing.
+  if (prefersReduced()){
+    setSteadyLit();
+  } else {
+    later(ignite, 600);
+  }
+})();
+</script>
+</body>
+</html>

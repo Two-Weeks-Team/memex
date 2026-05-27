@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Memex — your session history as navigable memory</title>
+<meta name="description" content="Memex turns your Claude Code / Codex session history into a navigable, associative memory backed by Qdrant. Not a chatbot. No LLM at runtime.">
+<style>
+  /* ---- tokens (OKLCH; falls back gracefully in old engines) ---- */
+  :root{
+    --bg: oklch(0.18 0.02 265);
+    --bg-2: oklch(0.22 0.025 265);
+    --panel: oklch(0.24 0.03 265);
+    --line: oklch(0.34 0.03 265);
+    --ink: oklch(0.93 0.01 265);
+    --ink-dim: oklch(0.70 0.02 265);
+    --ink-faint: oklch(0.56 0.02 265);
+    --accent: oklch(0.78 0.13 195);
+    --accent-2: oklch(0.80 0.12 95);
+    --radius: 10px;
+    --maxw: 920px;
+  }
+  @media (prefers-color-scheme: light){
+    :root{
+      --bg: oklch(0.98 0.005 265);
+      --bg-2: oklch(0.96 0.008 265);
+      --panel: oklch(1 0 0);
+      --line: oklch(0.88 0.01 265);
+      --ink: oklch(0.24 0.02 265);
+      --ink-dim: oklch(0.42 0.02 265);
+      --ink-faint: oklch(0.55 0.02 265);
+      --accent: oklch(0.55 0.13 220);
+      --accent-2: oklch(0.58 0.13 95);
+    }
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+  a{color: var(--accent); text-decoration: none}
+  a:hover, a:focus-visible{text-decoration: underline}
+  :focus-visible{outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px}
+  code{font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.92em}
+  .wrap{max-width: var(--maxw); margin: 0 auto; padding: 0 20px}
+  .skip{position:absolute; left:-9999px}
+  .skip:focus{left:8px; top:8px; position:fixed; z-index:50; background:var(--panel); padding:8px 12px; border:1px solid var(--line); border-radius:8px}
+
+  /* ---- header ---- */
+  header.top{
+    position: sticky; top:0; z-index:20;
+    background: color-mix(in oklab, var(--bg) 88%, transparent);
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line);
+  }
+  .top .wrap{display:flex; align-items:center; gap:16px; height:56px}
+  .brand{display:flex; align-items:center; gap:10px; font-weight:650; letter-spacing:0.2px}
+  .brand svg{display:block}
+  nav.links{margin-left:auto; display:flex; gap:18px; font-size:0.92rem}
+  nav.links a{color: var(--ink-dim)}
+  nav.links a:hover{color: var(--ink)}
+  @media (max-width:640px){ nav.links{display:none} }
+
+  /* ---- hero ---- */
+  .hero{padding: 64px 0 40px}
+  .eyebrow{font-size:0.8rem; letter-spacing:0.12em; text-transform:uppercase; color:var(--ink-faint); margin:0 0 14px}
+  h1{font-size: clamp(1.9rem, 5vw, 3rem); line-height:1.1; margin:0 0 18px; letter-spacing:-0.02em}
+  h1 .em{color: var(--accent)}
+  .lede{font-size: clamp(1.05rem, 2.4vw, 1.25rem); color: var(--ink-dim); max-width:62ch; margin:0 0 12px}
+  .sub{color: var(--ink-faint); max-width:60ch; margin:0 0 26px}
+  .cta{display:flex; gap:12px; flex-wrap:wrap}
+  .btn{
+    display:inline-flex; align-items:center; gap:8px;
+    padding:11px 18px; border-radius: var(--radius);
+    border:1px solid var(--line); background:var(--panel); color:var(--ink);
+    font-weight:600; font-size:0.95rem; cursor:pointer;
+  }
+  .btn.primary{background: var(--accent); color: oklch(0.15 0.02 265); border-color: transparent}
+  .btn:hover{text-decoration:none; border-color: var(--accent)}
+  .btn.primary:hover{filter: brightness(1.05)}
+
+  /* ---- the one tasteful "surfacing" device ----
+     latent thoughts sit dimmed; when scrolled into view they brighten/rise. */
+  .surfacing{margin-top:42px; border-top:1px dashed var(--line); padding-top:22px}
+  .surfacing .hint{font-size:0.82rem; color:var(--ink-faint); margin:0 0 14px}
+  .thoughts{display:flex; flex-wrap:wrap; gap:10px}
+  .thought{
+    font-size:0.9rem; color: var(--ink-dim);
+    border:1px solid var(--line); border-radius: 999px;
+    padding:6px 13px; background: var(--bg-2);
+    opacity:0.32; transform: translateY(8px);
+    transition: opacity .6s ease, transform .6s ease, color .6s ease, border-color .6s ease;
+  }
+  .thought.surfaced{opacity:1; transform: translateY(0); color: var(--ink); border-color: var(--accent)}
+  @media (prefers-reduced-motion: reduce){
+    html{scroll-behavior:auto}
+    .thought{transition:none; opacity:1; transform:none}
+  }
+
+  /* ---- sections ---- */
+  section{padding: 46px 0; border-top:1px solid var(--line)}
+  h2{font-size: clamp(1.3rem, 3vw, 1.7rem); margin:0 0 8px; letter-spacing:-0.01em}
+  .section-sub{color:var(--ink-dim); max-width:64ch; margin:0 0 26px}
+
+  /* not-a-chatbot contrast row */
+  .contrast{display:grid; grid-template-columns:1fr 1fr; gap:16px}
+  @media (max-width:640px){ .contrast{grid-template-columns:1fr} }
+  .card{border:1px solid var(--line); border-radius:var(--radius); padding:18px 20px; background:var(--panel)}
+  .card h3{margin:0 0 10px; font-size:1rem}
+  .card.not h3{color:var(--ink-faint)}
+  .card.is h3{color:var(--accent)}
+  .card ul{margin:0; padding-left:18px; color:var(--ink-dim)}
+  .card li{margin:6px 0}
+
+  /* surfaces grid */
+  .grid{display:grid; grid-template-columns:repeat(2,1fr); gap:14px}
+  @media (max-width:720px){ .grid{grid-template-columns:1fr} }
+  .surface{border:1px solid var(--line); border-radius:var(--radius); padding:16px 18px; background:var(--panel)}
+  .surface .name{font-weight:650; display:flex; align-items:center; gap:8px; margin-bottom:6px}
+  .surface .dot{width:8px; height:8px; border-radius:50%; background:var(--accent); flex:none}
+  .surface p{margin:0; color:var(--ink-dim); font-size:0.93rem}
+
+  /* run / code blocks */
+  .pre{
+    background: var(--bg-2); border:1px solid var(--line);
+    border-radius: var(--radius); padding:16px 18px; overflow-x:auto;
+    color: var(--ink); font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size:0.88rem; line-height:1.7;
+  }
+  .pre .c{color:var(--ink-faint)}
+  .pre .k{color:var(--accent-2)}
+  .run-cols{display:grid; grid-template-columns:1fr 1fr; gap:16px}
+  @media (max-width:720px){ .run-cols{grid-template-columns:1fr} }
+  .run-cols h3{font-size:0.95rem; margin:0 0 10px; color:var(--ink-dim)}
+
+  /* mcp */
+  .mcp-tools{display:flex; flex-wrap:wrap; gap:8px; margin-top:14px}
+  .tool{font-size:0.82rem; color:var(--ink-dim); border:1px solid var(--line); border-radius:6px; padding:4px 9px; background:var(--bg-2)}
+
+  /* footer */
+  footer{padding:36px 0 56px; border-top:1px solid var(--line); color:var(--ink-faint); font-size:0.9rem}
+  footer .wrap{display:flex; gap:20px; flex-wrap:wrap; align-items:center}
+  footer a{color:var(--ink-dim)}
+  footer .built{margin-left:auto}
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="top">
+  <div class="wrap">
+    <span class="brand" aria-label="Memex">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <circle cx="6" cy="6" r="2.4" fill="currentColor"/>
+        <circle cx="18" cy="8" r="2.4" fill="currentColor"/>
+        <circle cx="9" cy="18" r="2.4" fill="currentColor"/>
+        <path d="M6 6 L18 8 M6 6 L9 18 M18 8 L9 18" stroke="currentColor" stroke-width="1" opacity="0.5"/>
+      </svg>
+      Memex
+    </span>
+    <nav class="links" aria-label="Primary">
+      <a href="#what">What it is</a>
+      <a href="#surfaces">Surfaces</a>
+      <a href="#run">Run it</a>
+      <a href="#mcp">For agents</a>
+      <a href="https://github.com/Two-Weeks-Team/memex">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+  <!-- HERO -->
+  <div class="hero">
+    <div class="wrap">
+      <p class="eyebrow">Qdrant Vector Space Day 2026 — Think Outside the Bot</p>
+      <h1>Your session history, as a memory you can <span class="em">move through</span>.</h1>
+      <p class="lede">
+        You don't document every thought. Yet when the moment is right, the relevant one
+        comes back on its own. Memex does that for your coding sessions: it keeps the corpus
+        you own and lets you move through it by <em>similarity</em>, not keywords.
+      </p>
+      <p class="sub">
+        Built over your Claude Code / Codex history. No chatbot. No LLM at runtime.
+        Vectors live in Qdrant; you navigate the space.
+      </p>
+      <div class="cta">
+        <a class="btn primary" href="https://github.com/Two-Weeks-Team/memex">View the repo</a>
+        <a class="btn" href="https://two-weeks-team.github.io/memex/">Live landing</a>
+        <a class="btn" href="#run">How to run</a>
+      </div>
+
+      <!-- ONE tasteful surfacing device: latent → surfaced on scroll -->
+      <div class="surfacing" id="surfacing">
+        <p class="hint">Latent until something approaches them — scroll, and they surface:</p>
+        <div class="thoughts" aria-hidden="true">
+          <span class="thought">that auth refactor</span>
+          <span class="thought">the Docker port bug</span>
+          <span class="thought">why we picked Qdrant</span>
+          <span class="thought">last week's MST graph idea</span>
+          <span class="thought">the migration you forgot</span>
+          <span class="thought">a half-finished prompt</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- WHAT IT IS / NOT A CHATBOT -->
+  <section id="what">
+    <div class="wrap">
+      <h2>Not a chatbot. A place your past work stays reachable.</h2>
+      <p class="section-sub">
+        Claude Code silently migrates and deletes old sessions. Memex preserves them in a
+        corpus you own, then turns it into a navigable spatial / associative memory.
+      </p>
+      <div class="contrast">
+        <div class="card not">
+          <h3>What it is not</h3>
+          <ul>
+            <li>Not a search box you query with keywords</li>
+            <li>Not a chatbot answering on your behalf</li>
+            <li>Not calling an LLM at runtime</li>
+          </ul>
+        </div>
+        <div class="card is">
+          <h3>What it is</h3>
+          <ul>
+            <li>An associative trail through your own history — Vannevar Bush's 1945 Memex idea</li>
+            <li>Reads <code>~/.claude/projects/**/*.jsonl</code>, legacy transcripts, and <code>history.jsonl</code></li>
+            <li>Embeddings indexed in Qdrant; you move by similarity</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- SURFACES -->
+  <section id="surfaces">
+    <div class="wrap">
+      <h2>The surfaces</h2>
+      <p class="section-sub">Different ways to move through the same memory space.</p>
+      <div class="grid">
+        <div class="surface"><div class="name"><span class="dot"></span>Time Machine</div><p>Replay sessions as they actually unfolded.</p></div>
+        <div class="surface"><div class="name"><span class="dot"></span>Lens</div><p>Named-vector weighted search — bias the space toward what you mean.</p></div>
+        <div class="surface"><div class="name"><span class="dot"></span>Topology</div><p>Distance matrix turned into an MST graph of related work.</p></div>
+        <div class="surface"><div class="name"><span class="dot"></span>Mix / Discovery</div><p>Positive / negative recommendation — more like this, less like that.</p></div>
+        <div class="surface"><div class="name"><span class="dot"></span>Proactive Recall</div><p>Relevant past context surfaces as your current work approaches it.</p></div>
+        <div class="surface"><div class="name"><span class="dot"></span>Dashboard</div><p>One overview of the corpus and where you've been.</p></div>
+        <div class="surface"><div class="name"><span class="dot"></span>Companion / Wrapped</div><p>The agent-memory layer — a longer view of how your sessions evolve.</p></div>
+        <div class="surface"><div class="name"><span class="dot"></span>Loop Breaker</div><p>Spot when you're circling the same problem and step out of it.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- RUN IT -->
+  <section id="run">
+    <div class="wrap">
+      <h2>Run it</h2>
+      <p class="section-sub">
+        Two ways. The server / Docker variant bundles Qdrant, the web UI, and the MCP server
+        in one image — nothing exotic to install.
+      </p>
+      <div class="run-cols">
+        <div>
+          <h3>Docker (server variant)</h3>
+          <pre class="pre" aria-label="Docker run commands"><span class="c"># clone</span>
+git clone https://github.com/Two-Weeks-Team/memex
+cd memex
+
+<span class="c"># Qdrant + web + MCP in one image</span>
+docker compose up <span class="k">-d</span>
+
+<span class="c"># open the web UI</span>
+open http://localhost:8080</pre>
+        </div>
+        <div>
+          <h3>Local</h3>
+          <pre class="pre" aria-label="Local run commands"><span class="c"># index your existing session history</span>
+memex index ~/.claude/projects
+
+<span class="c"># start the web surfaces</span>
+memex web
+
+<span class="c"># then browse Time Machine, Lens,</span>
+<span class="c"># Topology, Mix, Recall…</span></pre>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- FOR AGENTS / MCP -->
+  <section id="mcp">
+    <div class="wrap">
+      <h2>For agents — one line to wire it in</h2>
+      <p class="section-sub">
+        Memex exposes 11 MCP tools over stdio + HTTP. It works inside Claude Code, Codex, and
+        Cursor — your agent reaches into your own memory instead of starting cold.
+      </p>
+      <pre class="pre" aria-label="MCP add command">claude mcp add memex <span class="k">--</span> memex mcp</pre>
+      <div class="mcp-tools" aria-label="MCP tool surfaces">
+        <span class="tool">time_machine</span>
+        <span class="tool">lens_search</span>
+        <span class="tool">topology</span>
+        <span class="tool">mix_discover</span>
+        <span class="tool">recall</span>
+        <span class="tool">dashboard</span>
+        <span class="tool">companion</span>
+        <span class="tool">wrapped</span>
+        <span class="tool">loop_breaker</span>
+        <span class="tool">+ 2 more</span>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <a href="https://github.com/Two-Weeks-Team/memex">github.com/Two-Weeks-Team/memex</a>
+    <a href="https://two-weeks-team.github.io/memex/">Live landing</a>
+    <span class="built">Built for Qdrant Vector Space Day 2026 — Think Outside the Bot.</span>
+  </div>
+</footer>
+
+<script>
+  // The one tasteful device: latent thoughts surface as they enter the viewport,
+  // staggered so it reads like recall rather than a single fade. Cheap, no deps.
+  (function(){
+    var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    var thoughts = document.querySelectorAll('.thought');
+    if (reduce || !('IntersectionObserver' in window)) {
+      thoughts.forEach(function(t){ t.classList.add('surfaced'); });
+      return;
+    }
+    var io = new IntersectionObserver(function(entries){
+      entries.forEach(function(e){
+        if (e.isIntersecting){
+          var nodes = Array.prototype.slice.call(thoughts);
+          var i = nodes.indexOf(e.target);
+          setTimeout(function(){ e.target.classList.add('surfaced'); }, i * 120);
+          io.unobserve(e.target);
+        }
+      });
+    }, { threshold: 0.4 });
+    thoughts.forEach(function(t){ io.observe(t); });
+  })();
+</script>
+</body>
+</html>

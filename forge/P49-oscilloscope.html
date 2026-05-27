@@ -1,0 +1,886 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Memex — the trace settles into the moment</title>
+<meta name="description" content="Memex turns your Claude Code & Codex session history into a navigable associative memory backed by Qdrant. A phosphor oscilloscope trace dances as noise, then settles on its own and draws itself into the line-art scene of a remembered coding moment — then dissolves back to noise as the next one arrives." />
+<style>
+  :root{
+    --ink:#e7fff0;
+    --dim:#86b7a0;
+    --faint:#557766;
+    --phos:#5fffa6;          /* phosphor green — the trace */
+    --phos-soft:#7dffc0;
+    --amber:#ffcf7a;          /* a single warm accent: the lamp in the scene */
+    --accent:#9affc8;
+    --bg0:#01100a;
+    --bg1:#03160e;
+    --panel: rgba(6,26,18,.56);
+    --hair: rgba(95,255,166,.16);
+    --grid: rgba(95,255,166,.085);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    background:
+      radial-gradient(1200px 760px at 72% 26%, #0a2418 0%, transparent 60%),
+      radial-gradient(1500px 980px at 10% 96%, #051a10 0%, transparent 55%),
+      linear-gradient(180deg, var(--bg1), var(--bg0) 74%);
+    color:var(--ink);
+    font:16px/1.6 ui-sans-serif,-apple-system,"Segoe UI",Roboto,Inter,system-ui,sans-serif;
+    overflow-x:hidden;
+    -webkit-font-smoothing:antialiased;
+  }
+  a{color:var(--accent);text-decoration:none}
+  a:hover{text-decoration:underline}
+  code,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+
+  /* ---------- the scope stage ---------- */
+  .stage{position:relative;width:100%;height:100svh;min-height:660px;overflow:hidden}
+
+  /* the instrument: a CRT scope screen seated in a dark bezel */
+  .scope{
+    position:absolute;
+    left:50%; top:clamp(64px,11vh,118px);
+    transform:translateX(-50%);
+    width:min(86vw, 1060px);
+    aspect-ratio: 1.66 / 1;
+    max-height: 58vh;
+    border-radius:18px;
+    padding:clamp(10px,1.5vw,18px);
+    background:
+      linear-gradient(180deg,#072017,#04140d 70%);
+    box-shadow:
+      0 28px 70px rgba(0,0,0,.6),
+      inset 0 0 0 1px rgba(95,255,166,.10),
+      inset 0 2px 1px rgba(180,255,220,.06);
+    z-index:2;
+  }
+  .crt{
+    position:relative;width:100%;height:100%;
+    border-radius:11px;overflow:hidden;
+    background:
+      radial-gradient(130% 120% at 50% 38%, #05221a 0%, #021109 78%, #010a06 100%);
+    box-shadow:
+      inset 0 0 60px rgba(0,0,0,.7),
+      inset 0 0 1px rgba(95,255,166,.5);
+  }
+  #scope{position:absolute;inset:0;width:100%;height:100%;display:block}
+  /* glass curvature highlight + faint scanlines, screen-realism */
+  .crt::after{
+    content:"";position:absolute;inset:0;pointer-events:none;border-radius:11px;
+    background:
+      linear-gradient(180deg, rgba(255,255,255,.05) 0%, transparent 12%),
+      repeating-linear-gradient(180deg, rgba(0,0,0,.10) 0 2px, transparent 2px 4px);
+    mix-blend-mode:screen;opacity:.5;
+  }
+  .crt::before{
+    content:"";position:absolute;inset:0;pointer-events:none;border-radius:11px;
+    box-shadow:inset 0 0 120px rgba(0,0,0,.55);
+  }
+
+  /* instrument labels on the bezel */
+  .scope .meta{
+    position:absolute;left:clamp(14px,2vw,22px);bottom:6px;right:clamp(14px,2vw,22px);
+    display:flex;justify-content:space-between;align-items:center;
+    font:11px/1 ui-monospace,SFMono-Regular,Menlo,monospace;
+    letter-spacing:.14em;text-transform:uppercase;color:var(--faint);
+    pointer-events:none;
+  }
+  .scope .meta .ch{color:var(--phos);text-shadow:0 0 8px rgba(95,255,166,.5)}
+  .scope .meta .st{color:var(--dim)}
+
+  /* a tiny "TRIG" lamp that lights when the trace settles */
+  .triglamp{display:inline-flex;align-items:center;gap:6px}
+  .triglamp i{width:7px;height:7px;border-radius:50%;background:#1c3a2c;
+    box-shadow:inset 0 0 2px rgba(0,0,0,.6);transition:background .3s,box-shadow .3s}
+  .triglamp.lit i{background:var(--phos);box-shadow:0 0 9px 1px rgba(95,255,166,.8)}
+
+  /* ---------- overlaid copy ---------- */
+  .hud{position:absolute;inset:0;display:flex;flex-direction:column;pointer-events:none;z-index:3}
+  .hud > *{pointer-events:auto}
+
+  .topbar{display:flex;align-items:center;justify-content:space-between;gap:16px;
+    padding:22px clamp(18px,5vw,56px)}
+  .brand{display:flex;align-items:center;gap:11px;font-weight:700;letter-spacing:.16em;
+    text-transform:uppercase;font-size:13px;color:var(--ink)}
+  .brand .dot{width:9px;height:9px;border-radius:50%;background:var(--phos);
+    box-shadow:0 0 10px 2px rgba(95,255,166,.7)}
+  .topbar nav{display:flex;gap:clamp(10px,2.4vw,26px);font-size:13px;color:var(--dim);
+    letter-spacing:.02em}
+  .topbar nav a{color:var(--dim)}
+  .topbar nav a:hover{color:var(--ink)}
+
+  /* hero copy sits BELOW the scope, anchored to the bottom of the stage */
+  .hero{margin-top:auto;padding:0 clamp(18px,5vw,56px) clamp(24px,5vh,52px);max-width:760px;
+    z-index:3}
+
+  /* the "current situation" that calls the memory up */
+  .moment{display:inline-flex;align-items:center;gap:10px;margin-bottom:18px;
+    padding:8px 14px;border:1px solid var(--hair);border-radius:999px;
+    background:var(--panel);backdrop-filter:blur(6px);
+    font-size:12.5px;letter-spacing:.02em;color:var(--dim)}
+  .moment .pulse{width:7px;height:7px;border-radius:50%;background:var(--phos);
+    box-shadow:0 0 0 0 rgba(95,255,166,.6);animation:pulse 2.6s ease-out infinite}
+  .moment b{color:var(--ink);font-weight:600}
+  @keyframes pulse{
+    0%{box-shadow:0 0 0 0 rgba(95,255,166,.55)}
+    70%{box-shadow:0 0 0 9px rgba(95,255,166,0)}
+    100%{box-shadow:0 0 0 0 rgba(95,255,166,0)}
+  }
+
+  h1{margin:0;font-weight:680;font-size:clamp(30px,5.2vw,54px);line-height:1.05;
+    letter-spacing:-.018em;color:#fff;text-shadow:0 2px 40px rgba(0,12,6,.7)}
+  h1 .glow{color:var(--phos);text-shadow:0 0 26px rgba(95,255,166,.45)}
+  .lede{margin:16px 0 0;font-size:clamp(14.5px,2vw,18px);color:var(--dim);max-width:600px}
+  .lede b{color:var(--ink);font-weight:600}
+
+  .cta{display:flex;flex-wrap:wrap;gap:13px;margin-top:26px}
+  .btn{display:inline-flex;align-items:center;gap:9px;padding:12px 20px;border-radius:11px;
+    font-size:14.5px;font-weight:600;letter-spacing:.01em;border:1px solid transparent;
+    transition:transform .15s ease, box-shadow .25s ease, background .25s ease}
+  .btn:hover{text-decoration:none;transform:translateY(-1px)}
+  .btn-primary{background:linear-gradient(180deg,#c6ffe1,#5fffa6);color:#04231a;
+    box-shadow:0 8px 30px rgba(95,255,166,.26)}
+  .btn-primary:hover{box-shadow:0 12px 36px rgba(95,255,166,.42)}
+  .btn-ghost{border-color:var(--hair);color:var(--ink);background:var(--panel);
+    backdrop-filter:blur(6px)}
+  .btn-ghost:hover{border-color:rgba(95,255,166,.42)}
+
+  .legend{margin-top:20px;font-size:12.5px;color:var(--faint);letter-spacing:.01em;
+    display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+  .legend .scene-label{color:var(--phos);font-weight:600;letter-spacing:.03em}
+
+  /* replay control */
+  .replay{position:absolute;right:clamp(16px,4vw,40px);bottom:clamp(20px,5vh,40px);
+    display:inline-flex;align-items:center;gap:8px;padding:9px 14px;border-radius:999px;
+    border:1px solid var(--hair);background:var(--panel);backdrop-filter:blur(6px);
+    color:var(--dim);font-size:12.5px;cursor:pointer;z-index:4}
+  .replay:hover{color:var(--ink);border-color:rgba(95,255,166,.4)}
+  .replay svg{width:13px;height:13px;fill:currentColor}
+
+  /* ---------- ground-truth section below the fold ---------- */
+  .below{position:relative;z-index:2;max-width:1080px;margin:0 auto;
+    padding:clamp(56px,10vh,110px) clamp(18px,5vw,40px) 40px}
+  .kicker{font-size:12px;letter-spacing:.22em;text-transform:uppercase;color:var(--faint);
+    margin:0 0 14px}
+  .below h2{font-size:clamp(24px,4vw,38px);line-height:1.12;margin:0;color:#fff;
+    letter-spacing:-.01em;font-weight:660;max-width:780px}
+  .below p.sub{color:var(--dim);max-width:700px;margin:16px 0 0;font-size:16px}
+
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(238px,1fr));gap:16px;
+    margin-top:42px}
+  .card{border:1px solid var(--hair);border-radius:16px;padding:22px 22px 24px;
+    background:linear-gradient(180deg, rgba(9,32,23,.6), rgba(4,16,10,.45));
+    transition:border-color .2s ease, transform .2s ease}
+  .card:hover{border-color:rgba(95,255,166,.4);transform:translateY(-2px)}
+  .card h3{margin:0 0 8px;font-size:16px;color:#fff;letter-spacing:.01em;
+    display:flex;align-items:center;gap:9px}
+  .card h3 .gp{width:8px;height:8px;border-radius:50%;background:var(--phos);
+    box-shadow:0 0 8px 1px rgba(95,255,166,.7);flex:0 0 auto}
+  .card p{margin:0;font-size:14px;color:var(--dim);line-height:1.55}
+
+  .facts{margin-top:44px;border:1px solid var(--hair);border-radius:16px;overflow:hidden;
+    background:rgba(4,16,10,.5)}
+  .facts .row{display:grid;grid-template-columns:160px 1fr;gap:18px;padding:16px 22px;
+    border-top:1px solid rgba(95,255,166,.08);font-size:14.5px}
+  .facts .row:first-child{border-top:0}
+  .facts .row .lab{color:var(--faint);letter-spacing:.04em;font-size:12.5px;
+    text-transform:uppercase;padding-top:2px}
+  .facts .row .val{color:var(--ink)}
+  .facts .row .val .mono{color:var(--phos);font-size:13.5px}
+
+  .addline{margin-top:34px;border:1px solid var(--hair);border-radius:14px;
+    background:#03140c;padding:16px 18px;font-size:13.5px;color:var(--dim);overflow-x:auto}
+  .addline .mono{color:var(--ink)}
+  .addline .c{color:var(--phos)}
+
+  footer{position:relative;z-index:2;border-top:1px solid var(--hair);margin-top:60px}
+  .foot{max-width:1080px;margin:0 auto;padding:28px clamp(18px,5vw,40px) 60px;
+    display:flex;flex-wrap:wrap;gap:18px;justify-content:space-between;align-items:center;
+    color:var(--faint);font-size:13px}
+  .foot a{color:var(--dim)}
+  .foot .links{display:flex;flex-wrap:wrap;gap:18px}
+
+  @media (prefers-reduced-motion: reduce){
+    .moment .pulse{animation:none}
+  }
+
+  @media (max-width:860px){
+    .scope{max-height:46vh}
+  }
+  @media (max-width:640px){
+    .topbar nav{display:none}
+    .facts .row{grid-template-columns:1fr;gap:4px}
+    .replay{display:none}
+    .scope .meta{font-size:10px}
+  }
+</style>
+</head>
+<body>
+
+<section class="stage" aria-label="A phosphor oscilloscope: a noisy green trace dances, then settles on its own and draws itself into the line-art of a remembered coding moment, holds, then dissolves back to noise as the next memory arrives">
+  <div class="scope" aria-hidden="true">
+    <div class="crt"><canvas id="scope"></canvas></div>
+    <div class="meta">
+      <span class="ch">CH1 &middot; assoc.recall</span>
+      <span class="triglamp" id="triglamp"><i></i><span class="st" id="trigtxt">SCANNING</span></span>
+    </div>
+  </div>
+
+  <div class="hud">
+    <header class="topbar">
+      <div class="brand"><span class="dot" aria-hidden="true"></span> Memex</div>
+      <nav aria-label="Primary">
+        <a href="https://github.com/Two-Weeks-Team/memex">Repo</a>
+        <a href="https://two-weeks-team.github.io/memex/">Live</a>
+        <a href="#how">How it works</a>
+        <a href="#agent">For agents</a>
+      </nav>
+    </header>
+
+    <div class="hero">
+      <span class="moment">
+        <span class="pulse" aria-hidden="true"></span>
+        Right now you're <b>untangling a merge conflict that won't resolve</b> &mdash; and the trace steadies&hellip;
+      </span>
+
+      <h1>You've been here before.<br>The noise <span class="glow">settles into&nbsp;it.</span></h1>
+
+      <p class="lede">
+        You never wrote it down. But the jittering line stops dancing and &mdash; on its own &mdash;
+        draws itself into the <b>scene of the night the merge finally went through</b>:
+        the late screen, the branch lines joining, the lamp still on. It holds for a breath,
+        then dissolves back to noise as the next memory arrives.
+      </p>
+
+      <div class="cta">
+        <a class="btn btn-primary" href="https://github.com/Two-Weeks-Team/memex">Get Memex on GitHub</a>
+        <a class="btn btn-ghost" href="https://two-weeks-team.github.io/memex/">See it live</a>
+      </div>
+
+      <p class="legend">
+        <span class="scene-label" id="sceneName">scanning&hellip;</span>
+        <span aria-hidden="true">&middot;</span>
+        a signal resolving into form, not a search
+      </p>
+    </div>
+
+    <button class="replay" id="replay" type="button" aria-label="Let the trace settle again">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5V1L7 6l5 5V7a5 5 0 1 1-5 5H5a7 7 0 1 0 7-7z"/></svg>
+      Let it settle again
+    </button>
+  </div>
+</section>
+
+<main class="below">
+  <section id="how">
+    <p class="kicker">What just happened</p>
+    <h2>People don't document every memory &mdash; yet when the moment arrives,
+      the relevant thought surfaces on its own.</h2>
+    <p class="sub">
+      Memex is a non-chatbot, LLM-free-at-runtime tool that reads your existing
+      Claude&nbsp;Code and Codex session history and turns it into a navigable
+      associative memory backed by <b style="color:var(--ink)">Qdrant</b>. You move through your own past by
+      <i>similarity</i>, not keywords &mdash; and the relevant moment can rise to you proactively.
+    </p>
+
+    <div class="grid">
+      <article class="card">
+        <h3><span class="gp" aria-hidden="true"></span>Time Machine</h3>
+        <p>Replay any past session as it happened &mdash; the whole scene, not a snippet.</p>
+      </article>
+      <article class="card">
+        <h3><span class="gp" aria-hidden="true"></span>Lens</h3>
+        <p>Named-vector weighted search to look through your history from one angle at a time.</p>
+      </article>
+      <article class="card">
+        <h3><span class="gp" aria-hidden="true"></span>Topology</h3>
+        <p>A distance-matrix &rarr; MST graph: how your sessions actually connect to one another.</p>
+      </article>
+      <article class="card">
+        <h3><span class="gp" aria-hidden="true"></span>Mix &amp; Discovery</h3>
+        <p>Positive / negative recommendation to pull related work toward you and push noise away.</p>
+      </article>
+      <article class="card">
+        <h3><span class="gp" aria-hidden="true"></span>Proactive Recall</h3>
+        <p>The piece that steadied the trace above: a relevant past moment surfaces because the current one evoked it.</p>
+      </article>
+      <article class="card">
+        <h3><span class="gp" aria-hidden="true"></span>Companion · Wrapped · Loop&nbsp;Breaker</h3>
+        <p>An agent-memory layer over your corpus &mdash; recap what you've done, and catch yourself circling.</p>
+      </article>
+    </div>
+
+    <div class="facts" aria-label="What Memex is">
+      <div class="row"><div class="lab">Reads</div>
+        <div class="val"><span class="mono">~/.claude/projects/**/*.jsonl</span>, legacy transcripts, and <span class="mono">history.jsonl</span></div></div>
+      <div class="row"><div class="lab">Backed by</div>
+        <div class="val">Qdrant &mdash; navigate by vector similarity, no runtime LLM</div></div>
+      <div class="row"><div class="lab">Why</div>
+        <div class="val">Claude&nbsp;Code silently migrates and deletes old sessions. Memex keeps a corpus <b style="color:var(--ink)">you own.</b></div></div>
+      <div class="row"><div class="lab">Built for</div>
+        <div class="val">Qdrant Vector Space Day 2026 &mdash; <i>"Think Outside the Bot."</i></div></div>
+    </div>
+  </section>
+
+  <section id="agent">
+    <p class="kicker" style="margin-top:56px">For your agent</p>
+    <h2 style="font-size:clamp(20px,3vw,28px)">11 MCP tools over stdio + HTTP &mdash;
+      works in Claude&nbsp;Code, Codex, and Cursor.</h2>
+    <p class="sub">A server / Docker variant runs Qdrant, the web UI, and the MCP server in one image.
+      The tools let an agent recall, replay, and connect across your own history.</p>
+    <div class="addline mono">
+      <span class="c">$</span> claude mcp add memex -- memex-mcp
+    </div>
+    <p style="margin-top:18px;font-size:14px">
+      <a href="https://github.com/Two-Weeks-Team/memex#server--docker">Server / Docker variant</a>
+      &nbsp;&middot;&nbsp;
+      <a href="https://github.com/Two-Weeks-Team/memex">MCP integration &amp; the 11 tools</a>
+    </p>
+  </section>
+</main>
+
+<footer>
+  <div class="foot">
+    <div>Memex &mdash; a memory you own, surfaced by association.</div>
+    <div class="links">
+      <a href="https://github.com/Two-Weeks-Team/memex">GitHub</a>
+      <a href="https://two-weeks-team.github.io/memex/">Live landing</a>
+      <a href="https://github.com/Two-Weeks-Team/memex#server--docker">Docker</a>
+    </div>
+  </div>
+</footer>
+
+<script>
+(function(){
+  "use strict";
+
+  var canvas   = document.getElementById('scope');
+  var ctx      = canvas.getContext('2d');
+  var sceneName= document.getElementById('sceneName');
+  var trigLamp = document.getElementById('triglamp');
+  var trigTxt  = document.getElementById('trigtxt');
+  var replayBtn= document.getElementById('replay');
+
+  var DPR = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+  var W = 0, H = 0;
+  var reduce = window.matchMedia &&
+               window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  /* ---------------------------------------------------------------------------
+     THE SCENE the trace settles into.
+     A SINGLE continuous oscilloscope trace (one polyline of N samples) is what
+     dances as noise — and the SAME polyline is what gets re-targeted, sample by
+     sample, onto the line-art of a remembered coding moment. So the picture is
+     literally *drawn by the trace*: not a separate image, not a point cloud
+     (that's P83), not a heat-fill (P81), not connected star nodes (P27).
+
+     A DISTINCT moment from P83's "suite went green":
+       "the night the merge finally went through." Read across the screen:
+         • a window upper-left with a small MOON (it's late),
+         • a LAPTOP at center showing a BRANCH-MERGE diagram — two lines that
+           converge into one (the merge), with a settled commit dot,
+         • a COFFEE MUG with a wisp of steam,
+         • a small DESK LAMP, still on, far right.
+     The scene is authored as an ORDERED list of open sub-paths in a normalized
+     [0..1] box (aspect ~1.66). We flatten them into one continuous sample array
+     (with short "pen-up travel" segments between sub-paths kept dim) so a single
+     left-to-right sweep can render the whole tableau as line-art.
+  --------------------------------------------------------------------------- */
+
+  // Each sub-path is an array of [x,y] knots in normalized space; we resample
+  // them to a fixed sample budget along arc-length so the trace is evenly dense.
+  // `kind` tints the segment: 'line' = phosphor green, 'warm' = the lamp glow.
+  var SCENE = {
+    aspect: 1.66,
+    paths: [
+      // ---- window frame (upper-left), drawn as a rounded rectangle outline ----
+      { kind:'line', pts:[
+        [0.085,0.150],[0.300,0.150],[0.300,0.430],[0.085,0.430],[0.085,0.150]
+      ]},
+      // window mullion (vertical) — the pane divider
+      { kind:'line', pts:[ [0.1925,0.150],[0.1925,0.430] ]},
+      // a small MOON inside the right pane (crescent as an arc-ish loop)
+      { kind:'line', pts:[
+        [0.262,0.205],[0.245,0.215],[0.236,0.245],[0.244,0.278],[0.262,0.292],
+        [0.250,0.276],[0.247,0.248],[0.252,0.222],[0.262,0.205]
+      ]},
+
+      // ---- desk line (the horizon the scene rests on) ----
+      { kind:'line', pts:[ [0.045,0.760],[0.955,0.760] ]},
+
+      // ---- laptop at center: screen (lid) ----
+      { kind:'line', pts:[
+        [0.405,0.345],[0.660,0.345],[0.660,0.620],[0.405,0.620],[0.405,0.345]
+      ]},
+      // laptop base / keyboard deck (a shallow trapezoid in front of the lid)
+      { kind:'line', pts:[
+        [0.388,0.620],[0.677,0.620],[0.712,0.690],[0.353,0.690],[0.388,0.620]
+      ]},
+
+      // ---- the BRANCH-MERGE diagram ON the screen (the emotional payload) ----
+      // branch A: comes down the left, then bends right to converge
+      { kind:'line', pts:[
+        [0.452,0.395],[0.452,0.470],[0.470,0.505],[0.520,0.520]
+      ]},
+      // branch B: comes down the right, then bends left to converge
+      { kind:'line', pts:[
+        [0.612,0.395],[0.612,0.470],[0.594,0.505],[0.544,0.520]
+      ]},
+      // the merged trunk continuing down to the settled commit
+      { kind:'line', pts:[ [0.532,0.520],[0.532,0.585] ]},
+      // the settled commit dot (a small closed loop) — the moment it took
+      { kind:'line', pts:[
+        [0.532,0.560],[0.519,0.567],[0.519,0.581],[0.532,0.588],
+        [0.545,0.581],[0.545,0.567],[0.532,0.560]
+      ]},
+
+      // ---- coffee mug (left of laptop) ----
+      // body
+      { kind:'line', pts:[
+        [0.250,0.560],[0.250,0.690],[0.330,0.690],[0.330,0.560],[0.250,0.560]
+      ]},
+      // handle
+      { kind:'line', pts:[
+        [0.330,0.585],[0.362,0.590],[0.368,0.625],[0.348,0.652],[0.330,0.652]
+      ]},
+      // steam wisp rising
+      { kind:'line', pts:[
+        [0.282,0.545],[0.272,0.520],[0.290,0.500],[0.280,0.476],[0.296,0.456]
+      ]},
+
+      // ---- desk lamp (far right), still on ----
+      // base
+      { kind:'line', pts:[ [0.792,0.690],[0.872,0.690] ]},
+      // stem
+      { kind:'line', pts:[ [0.832,0.690],[0.832,0.520] ]},
+      // arm bending left over the desk
+      { kind:'line', pts:[ [0.832,0.520],[0.792,0.430] ]},
+      // lamp shade (warm) — a small open cup shape
+      { kind:'warm', pts:[
+        [0.762,0.452],[0.822,0.452],[0.806,0.408],[0.778,0.408],[0.762,0.452]
+      ]}
+    ]
+  };
+
+  // ---- flatten the scene into ONE arc-length-resampled sample array ----------
+  // SAMPLES[i] = {x,y in [0..1], kind, pen} where pen=false means this sample is
+  // a "travel move" between sub-paths and should be drawn very dim (pen-up).
+  var SAMPLES = [];
+
+  function resampleScene(total){
+    SAMPLES.length = 0;
+
+    // measure total drawn length (sum of each path's polyline length)
+    var lens = [], grand = 0;
+    for (var p=0;p<SCENE.paths.length;p++){
+      var pts = SCENE.paths[p].pts, L = 0;
+      for (var i=1;i<pts.length;i++){
+        L += Math.hypot(pts[i][0]-pts[i-1][0], pts[i][1]-pts[i-1][1]);
+      }
+      lens.push(L); grand += L;
+    }
+    // reserve a slice of the budget for short travel moves between paths
+    var travelEach = 5;                 // samples spent traveling pen-up
+    var travelTotal = travelEach * (SCENE.paths.length - 1);
+    var drawBudget = Math.max(200, total - travelTotal);
+
+    for (var pp=0; pp<SCENE.paths.length; pp++){
+      var path = SCENE.paths[pp];
+      var pts2 = path.pts;
+      var n = Math.max(8, Math.round(drawBudget * (lens[pp] / grand)));
+      // resample this path's polyline to n points along its arc length
+      var segLen = [], pathLen = 0, k;
+      for (k=1;k<pts2.length;k++){
+        var d = Math.hypot(pts2[k][0]-pts2[k-1][0], pts2[k][1]-pts2[k-1][1]);
+        segLen.push(d); pathLen += d;
+      }
+      for (var s=0;s<n;s++){
+        var target = (n===1?0:(s/(n-1))) * pathLen;
+        // walk segments to find where `target` lands
+        var acc = 0, seg = 0;
+        while (seg < segLen.length && acc + segLen[seg] < target){ acc += segLen[seg]; seg++; }
+        var a = pts2[Math.min(seg, pts2.length-1)];
+        var b = pts2[Math.min(seg+1, pts2.length-1)];
+        var segL = segLen[seg] || 1e-6;
+        var t = (target - acc) / segL;
+        SAMPLES.push({
+          x: a[0] + (b[0]-a[0])*t,
+          y: a[1] + (b[1]-a[1])*t,
+          kind: path.kind, pen:true
+        });
+      }
+      // travel to next path (pen-up): a few interpolated dim samples
+      if (pp < SCENE.paths.length-1){
+        var endP = pts2[pts2.length-1];
+        var startN = SCENE.paths[pp+1].pts[0];
+        for (var tv=1; tv<=travelEach; tv++){
+          var tt = tv/(travelEach+1);
+          SAMPLES.push({
+            x: endP[0] + (startN[0]-endP[0])*tt,
+            y: endP[1] + (startN[1]-endP[1])*tt,
+            kind:'line', pen:false
+          });
+        }
+      }
+    }
+  }
+
+  // ---- per-sample trace state: each sample has a HOME (its scene position) ----
+  // plus a live position the renderer interpolates from "noise" toward home.
+  var N = 0;                  // number of samples
+  var HX, HY, KIND, PEN;      // home device coords + kind/pen arrays
+  var amp = [];               // per-sample noise amplitude phase (for the dance)
+
+  function buildLayout(){
+    N = SAMPLES.length;
+    HX = new Float32Array(N);
+    HY = new Float32Array(N);
+    KIND = new Uint8Array(N);   // 0=line, 1=warm
+    PEN  = new Uint8Array(N);   // 1=pen-down, 0=travel
+    amp.length = 0;
+
+    // fit the scene box inside the CRT with padding
+    var pad = Math.min(W,H) * 0.06;
+    var availW = W - pad*2, availH = H - pad*2;
+    var boxW = availW, boxH = boxW / SCENE.aspect;
+    if (boxH > availH){ boxH = availH; boxW = boxH * SCENE.aspect; }
+    var ox = (W - boxW)/2, oy = (H - boxH)/2;
+
+    for (var i=0;i<N;i++){
+      HX[i] = ox + SAMPLES[i].x * boxW;
+      HY[i] = oy + SAMPLES[i].y * boxH;
+      KIND[i] = SAMPLES[i].kind === 'warm' ? 1 : 0;
+      PEN[i]  = SAMPLES[i].pen ? 1 : 0;
+      amp.push(Math.random()*Math.PI*2);
+    }
+    midY = oy + boxH*0.5;
+    boxLeft = ox; boxRight = ox + boxW; boxH_ = boxH;
+  }
+  var midY = 0, boxLeft = 0, boxRight = 0, boxH_ = 0;
+
+  function resize(){
+    var box = canvas.parentElement.getBoundingClientRect();
+    W = Math.max(1, Math.round(box.width));
+    H = Math.max(1, Math.round(box.height));
+    canvas.style.width = W + 'px';
+    canvas.style.height = H + 'px';
+    canvas.width = Math.round(W*DPR);
+    canvas.height = Math.round(H*DPR);
+    ctx.setTransform(DPR,0,0,DPR,0,0);
+
+    // sample budget scales with width so the line stays smooth but cheap
+    var budget = W < 560 ? 900 : (W < 980 ? 1500 : 2100);
+    resampleScene(budget);
+    buildLayout();
+  }
+
+  // ---- the graticule (scope grid) — drawn fresh under the trace each frame ----
+  function drawGraticule(){
+    var cols = 10, rows = 8;
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = 'rgba(95,255,166,0.06)';
+    ctx.beginPath();
+    for (var c=1;c<cols;c++){ var x=boxLeft + (boxRight-boxLeft)*(c/cols); ctx.moveTo(x,0); ctx.lineTo(x,H); }
+    for (var r=1;r<rows;r++){ var y=(H/rows)*r; ctx.moveTo(0,y); ctx.lineTo(W,y); }
+    ctx.stroke();
+    // brighter center cross-hair
+    ctx.strokeStyle = 'rgba(95,255,166,0.12)';
+    ctx.beginPath();
+    ctx.moveTo(0, midY); ctx.lineTo(W, midY);
+    ctx.moveTo((boxLeft+boxRight)/2, 0); ctx.lineTo((boxLeft+boxRight)/2, H);
+    ctx.stroke();
+  }
+
+  // ---- phosphor persistence: we keep a faint copy of the previous frame so the
+  //      trace leaves an afterglow trail (the signature CRT look) ------------
+  var persist = null;            // offscreen canvas holding the decaying glow
+  var pctx = null;
+  function ensurePersist(){
+    if (!persist){ persist = document.createElement('canvas'); pctx = persist.getContext('2d'); }
+    if (persist.width !== canvas.width || persist.height !== canvas.height){
+      persist.width = canvas.width; persist.height = canvas.height;
+      pctx.setTransform(DPR,0,0,DPR,0,0);
+    }
+  }
+
+  // ---- cycle state machine: SCAN(noise) → SETTLE(draw) → HOLD → DISSOLVE ----
+  var phase = 'scan';
+  var phaseStart = 0;
+  var SCAN_MS    = 2200;   // the noisy trace dances, untriggered
+  var SETTLE_MS  = 2600;   // noise resolves: samples migrate to their home line-art
+  var HOLD_MS    = 3200;   // the scene holds, lit, phosphor steady
+  var DISSOLVE_MS= 1500;   // the line breaks back into noise
+  var formed = 0;          // 0..1 how-formed the scene is (drives glow + lamp)
+
+  function setPhase(name, now){ phase = name; phaseStart = now; }
+  function easeInOut(t){ return t<0.5 ? 2*t*t : 1-Math.pow(-2*t+2,2)/2; }
+
+  var rafId = 0, running = false, lastT = 0, pausedAt = 0;
+
+  function startLoop(){
+    if (running) return;
+    running = true; lastT = 0;
+    if (pausedAt && phaseStart){ phaseStart += performance.now() - pausedAt; }
+    pausedAt = 0;
+    rafId = requestAnimationFrame(frame);
+  }
+  function stopLoop(){
+    if (running) pausedAt = performance.now();
+    running = false;
+    cancelAnimationFrame(rafId); rafId = 0;
+  }
+
+  // compute the live position of sample i given the current `pull` (0=noise,1=home)
+  // noise = a travelling waveform across the screen midline (the classic dance)
+  function liveX(i, pull, now){
+    // in noise, x marches left→right across the screen evenly (a swept beam)
+    var nx = boxLeft + (boxRight-boxLeft) * (i/(N-1));
+    return nx + (HX[i]-nx)*pull;
+  }
+  function liveY(i, pull, now){
+    // noise Y = layered sines + jitter around the midline → a lively trace
+    var u = i/(N-1);
+    var wob = Math.sin(u*36 + now*0.012 + amp[i]) * 0.5
+            + Math.sin(u*13 - now*0.007) * 0.3
+            + Math.sin(u*4  + now*0.004) * 0.2;
+    var jitter = (Math.sin(now*0.05 + amp[i]*7.3)) * 0.06;
+    var ny = midY + (wob + jitter) * boxH_ * 0.34;
+    return ny + (HY[i]-ny)*pull;
+  }
+
+  function frame(now){
+    if (!running) return;
+    if (!phaseStart) phaseStart = now;
+    var el = now - phaseStart;
+
+    // ---- phase → pull (how strongly samples sit on their home line-art) ----
+    var pull;
+    if (phase === 'scan'){
+      pull = 0; formed = 0;
+      if (el >= SCAN_MS){ setPhase('settle', now); }
+    } else if (phase === 'settle'){
+      pull = easeInOut(Math.min(1, el / SETTLE_MS));
+      formed = pull;
+      if (el >= SETTLE_MS){ setPhase('hold', now); formed = 1; }
+    } else if (phase === 'hold'){
+      pull = 1; formed = 1;
+      if (el >= HOLD_MS){ setPhase('dissolve', now); }
+    } else { // dissolve
+      var d = Math.min(1, el / DISSOLVE_MS);
+      pull = 1 - easeInOut(d);
+      formed = 1 - d;
+      if (el >= DISSOLVE_MS){ setPhase('scan', now); }
+    }
+
+    ensurePersist();
+
+    // 1) decay the persistence buffer (phosphor fades) and use it as the base
+    pctx.setTransform(1,0,0,1,0,0);
+    pctx.globalCompositeOperation = 'source-over';
+    // faster decay while dancing (sharp trace), slower while held (long glow)
+    pctx.fillStyle = 'rgba(2,17,10,' + (0.30 + 0.12*(1-formed)) + ')';
+    pctx.fillRect(0,0,persist.width,persist.height);
+    pctx.setTransform(DPR,0,0,DPR,0,0);
+
+    // 2) draw the trace into the persistence buffer with additive glow
+    pctx.globalCompositeOperation = 'lighter';
+    pctx.lineJoin = 'round'; pctx.lineCap = 'round';
+
+    // draw in two passes: a soft wide halo, then a crisp core line
+    drawTrace(pctx, pull, now, true);   // halo
+    drawTrace(pctx, pull, now, false);  // core
+
+    // 3) composite: clear visible canvas, lay graticule, then the glow buffer
+    ctx.setTransform(DPR,0,0,DPR,0,0);
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.clearRect(0,0,W,H);
+    drawGraticule();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.setTransform(1,0,0,1,0,0);
+    ctx.drawImage(persist,0,0);
+    ctx.setTransform(DPR,0,0,DPR,0,0);
+    ctx.globalCompositeOperation = 'source-over';
+
+    // 4) the bright "beam head" — a dot that races along while scanning
+    if (formed < 0.35){
+      var head = (now*0.0006) % 1;
+      var hi = Math.floor(head*(N-1));
+      var hx = liveX(hi, pull, now), hy = liveY(hi, pull, now);
+      var hg = ctx.createRadialGradient(hx,hy,0,hx,hy,10);
+      hg.addColorStop(0,'rgba(180,255,220,0.9)');
+      hg.addColorStop(1,'rgba(95,255,166,0)');
+      ctx.fillStyle = hg; ctx.beginPath(); ctx.arc(hx,hy,10,0,Math.PI*2); ctx.fill();
+    }
+
+    // ---- UI: TRIG lamp + scene label track the phase ----
+    var lit = formed > 0.55;
+    if (lit && !trigLamp.classList.contains('lit')){ trigLamp.classList.add('lit'); }
+    if (!lit && trigLamp.classList.contains('lit')){ trigLamp.classList.remove('lit'); }
+
+    if (phase === 'hold' && trigTxt.textContent !== 'TRIG · LOCKED'){ trigTxt.textContent = 'TRIG · LOCKED'; }
+    else if (phase === 'settle' && trigTxt.textContent !== 'TRIGGERED'){ trigTxt.textContent = 'TRIGGERED'; }
+    else if (phase === 'dissolve' && trigTxt.textContent !== 'RELEASING'){ trigTxt.textContent = 'RELEASING'; }
+    else if (phase === 'scan' && trigTxt.textContent !== 'SCANNING'){ trigTxt.textContent = 'SCANNING'; }
+
+    if (formed > 0.75 && sceneName.textContent !== 'the night the merge went through'){
+      sceneName.textContent = 'the night the merge went through';
+    } else if (phase === 'scan' && sceneName.textContent !== 'scanning…'){
+      sceneName.textContent = 'scanning…';
+    } else if (phase === 'dissolve' && formed < 0.5 && sceneName.textContent !== 'releasing…'){
+      sceneName.textContent = 'releasing…';
+    }
+
+    if (running) rafId = requestAnimationFrame(frame);
+  }
+
+  // render the continuous trace as a single polyline (one beam) ----------------
+  function drawTrace(c, pull, now, halo){
+    // green for 'line', warm for 'warm' (lamp shade). We split into runs by kind
+    // and by pen so travel moves stay dim and the lamp glows amber.
+    var i, started=false;
+    var coreW = halo ? (formed>0.5 ? 4.2 : 5.2) : (formed>0.5 ? 1.5 : 1.9);
+
+    // pass: walk samples, batching same-kind/pen runs into stroked sub-paths
+    var run = [];
+    var runKind = -1, runPen = -1;
+
+    function flush(){
+      if (run.length < 2){ run.length=0; return; }
+      var warm = runKind === 1;
+      var penUp = runPen === 0;
+      var base, a;
+      if (penUp){ base = warm ? [255,207,122] : [95,255,166]; a = 0.05 + 0.05*pull; }
+      else if (warm){ base = [255,207,122]; a = halo ? 0.10 + 0.18*formed : 0.55 + 0.4*formed; }
+      else { base = [95,255,166]; a = halo ? 0.06 + 0.16*formed : 0.40 + 0.5*Math.max(pull,0.35); }
+      c.strokeStyle = 'rgba('+base[0]+','+base[1]+','+base[2]+','+a.toFixed(3)+')';
+      c.lineWidth = coreW * (warm && !halo ? 1.1 : 1) * (penUp ? 0.7 : 1);
+      c.beginPath();
+      c.moveTo(run[0].x, run[0].y);
+      for (var q=1;q<run.length;q++) c.lineTo(run[q].x, run[q].y);
+      c.stroke();
+      run.length = 0;
+    }
+
+    for (i=0;i<N;i++){
+      var x = liveX(i, pull, now), y = liveY(i, pull, now);
+      var k = KIND[i], pen = PEN[i];
+      if (k !== runKind || pen !== runPen){
+        // carry the last point over so runs connect visually
+        var carry = run.length ? run[run.length-1] : null;
+        flush();
+        if (carry) run.push(carry);
+        runKind = k; runPen = pen;
+      }
+      run.push({x:x,y:y});
+    }
+    flush();
+
+    // warm lamp bloom once formed
+    if (!halo && formed > 0.5){
+      var wc = warmCenter();
+      if (wc){
+        var g = c.createRadialGradient(wc.x,wc.y,0,wc.x,wc.y, Math.min(W,H)*0.10);
+        var ga = (formed-0.5)/0.5;
+        g.addColorStop(0,'rgba(255,207,122,'+(0.22*ga).toFixed(3)+')');
+        g.addColorStop(0.6,'rgba(255,180,110,'+(0.07*ga).toFixed(3)+')');
+        g.addColorStop(1,'rgba(255,180,110,0)');
+        c.fillStyle = g; c.beginPath(); c.arc(wc.x,wc.y, Math.min(W,H)*0.10,0,Math.PI*2); c.fill();
+      }
+    }
+  }
+
+  function warmCenter(){
+    var sx=0, sy=0, n=0;
+    for (var i=0;i<N;i++){ if (KIND[i]===1){ sx+=HX[i]; sy+=HY[i]; n++; } }
+    if (!n) return null;
+    return {x:sx/n, y:sy/n};
+  }
+
+  // ---- reduced motion: draw the SETTLED scene once, static, no dance --------
+  function renderStatic(){
+    stopLoop();
+    ensurePersist();
+    pctx.setTransform(1,0,0,1,0,0);
+    pctx.clearRect(0,0,persist.width,persist.height);
+    pctx.setTransform(DPR,0,0,DPR,0,0);
+    pctx.globalCompositeOperation = 'lighter';
+    formed = 1;
+    drawTrace(pctx, 1, 0, true);
+    drawTrace(pctx, 1, 0, false);
+
+    ctx.setTransform(DPR,0,0,DPR,0,0);
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.clearRect(0,0,W,H);
+    drawGraticule();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.setTransform(1,0,0,1,0,0);
+    ctx.drawImage(persist,0,0);
+    ctx.setTransform(DPR,0,0,DPR,0,0);
+    ctx.globalCompositeOperation = 'source-over';
+
+    trigLamp.classList.add('lit');
+    trigTxt.textContent = 'TRIG · LOCKED';
+    sceneName.textContent = 'the night the merge went through';
+  }
+
+  function start(){
+    stopLoop();
+    resize();
+    if (reduce){
+      renderStatic();
+    } else {
+      phase = 'scan'; phaseStart = 0; formed = 0; pausedAt = 0;
+      sceneName.textContent = 'scanning…';
+      trigLamp.classList.remove('lit'); trigTxt.textContent = 'SCANNING';
+      startLoop();
+    }
+  }
+
+  // ---- controls / lifecycle ----
+  replayBtn.addEventListener('click', function(){
+    reduce = window.matchMedia &&
+             window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (reduce){ start(); return; }
+    stopLoop();
+    phase = 'scan'; phaseStart = 0; formed = 0; pausedAt = 0;
+    sceneName.textContent = 'scanning…';
+    trigLamp.classList.remove('lit'); trigTxt.textContent = 'SCANNING';
+    startLoop();
+  });
+
+  var rT;
+  window.addEventListener('resize', function(){
+    clearTimeout(rT);
+    rT = setTimeout(function(){
+      resize();
+      if (reduce) renderStatic();
+    }, 160);
+  });
+
+  // pause when the scope scrolls out of view (perf + battery)
+  if ('IntersectionObserver' in window){
+    var io = new IntersectionObserver(function(entries){
+      entries.forEach(function(e){
+        if (reduce) return;
+        if (e.isIntersecting) startLoop(); else stopLoop();
+      });
+    }, {threshold:0.02});
+    io.observe(canvas);
+  }
+
+  // honor live changes to the motion preference
+  if (window.matchMedia){
+    try {
+      window.matchMedia('(prefers-reduced-motion: reduce)')
+        .addEventListener('change', function(e){ reduce = e.matches; start(); });
+    } catch(_){}
+  }
+
+  start();
+})();
+</script>
+</body>
+</html>

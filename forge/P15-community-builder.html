@@ -1,0 +1,512 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Memex — the team remembers, even when no one looked it up</title>
+<meta name="description" content="Memex turns your team's Claude Code / Codex session history into a shared associative memory. When a teammate hits a wall someone already solved, the past solution surfaces on its own." />
+<style>
+  :root{
+    color-scheme: dark;
+    --bg:        oklch(17% 0.02 265);
+    --bg-2:      oklch(21% 0.03 265);
+    --panel:     oklch(24% 0.035 265);
+    --panel-2:   oklch(27% 0.04 265);
+    --line:      oklch(38% 0.04 265);
+    --ink:       oklch(95% 0.01 265);
+    --ink-soft:  oklch(78% 0.02 265);
+    --ink-dim:   oklch(62% 0.025 265);
+    --accent:    oklch(72% 0.15 200);   /* surfacing memory */
+    --accent-2:  oklch(78% 0.16 145);   /* the "click" of recognition */
+    --warm:      oklch(80% 0.13 70);    /* the present wall / friction */
+    --focus:     oklch(85% 0.14 200);
+    --radius: 14px;
+    --maxw: 1080px;
+    font-synthesis: none;
+  }
+  *{ box-sizing:border-box; }
+  html{ scroll-behavior:smooth; }
+  body{
+    margin:0;
+    background:
+      radial-gradient(120% 90% at 80% -10%, oklch(24% 0.05 265) 0%, transparent 55%),
+      radial-gradient(90% 70% at -10% 0%, oklch(22% 0.05 290) 0%, transparent 50%),
+      var(--bg);
+    color:var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    line-height:1.6;
+    -webkit-font-smoothing:antialiased;
+  }
+  a{ color:var(--accent); }
+  a:focus-visible, button:focus-visible{
+    outline:2px solid var(--focus);
+    outline-offset:3px;
+    border-radius:6px;
+  }
+  .wrap{ max-width:var(--maxw); margin:0 auto; padding:0 22px; }
+  .skip{
+    position:absolute; left:-9999px; top:auto;
+    background:var(--panel); color:var(--ink); padding:10px 14px; border-radius:8px; z-index:50;
+  }
+  .skip:focus{ left:16px; top:16px; }
+
+  header.site{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:18px 22px; max-width:var(--maxw); margin:0 auto;
+  }
+  .brand{ display:flex; align-items:center; gap:11px; font-weight:650; letter-spacing:.2px; }
+  .brand .glyph{ width:30px; height:30px; flex:0 0 auto; }
+  .nav{ display:flex; gap:18px; align-items:center; font-size:.92rem; }
+  .nav a{ color:var(--ink-soft); text-decoration:none; }
+  .nav a:hover{ color:var(--ink); }
+  @media(max-width:680px){ .nav .hide-sm{ display:none; } }
+
+  /* ---------- hero ---------- */
+  .hero{ padding:46px 0 12px; }
+  .eyebrow{
+    display:inline-flex; align-items:center; gap:8px;
+    font-size:.78rem; letter-spacing:.12em; text-transform:uppercase;
+    color:var(--ink-dim); border:1px solid var(--line);
+    padding:5px 12px; border-radius:999px; background:var(--bg-2);
+  }
+  .eyebrow .dot{ width:7px; height:7px; border-radius:50%; background:var(--accent); }
+  h1{
+    font-size:clamp(2rem, 4.6vw, 3.15rem);
+    line-height:1.08; letter-spacing:-0.02em; margin:.5em 0 .35em; max-width:18ch;
+  }
+  h1 .em{ color:var(--accent-2); }
+  .lede{ font-size:clamp(1.02rem,1.7vw,1.22rem); color:var(--ink-soft); max-width:60ch; }
+  .cta-row{ display:flex; flex-wrap:wrap; gap:12px; margin-top:24px; }
+  .btn{
+    display:inline-flex; align-items:center; gap:9px;
+    padding:11px 18px; border-radius:11px; text-decoration:none; font-weight:600; font-size:.95rem;
+    border:1px solid var(--line);
+  }
+  .btn.primary{ background:var(--accent); color:oklch(18% 0.04 230); border-color:transparent; }
+  .btn.ghost{ background:var(--bg-2); color:var(--ink); }
+  .btn:hover{ filter:brightness(1.07); }
+
+  /* ---------- the team room ---------- */
+  .room{ margin-top:42px; }
+  .room-head{
+    display:flex; align-items:baseline; justify-content:space-between; gap:14px; flex-wrap:wrap;
+    margin-bottom:14px;
+  }
+  .room-head h2{ font-size:1.18rem; margin:0; letter-spacing:-.01em; }
+  .room-head p{ margin:0; color:var(--ink-dim); font-size:.9rem; }
+  .roster{ display:flex; align-items:center; gap:6px; }
+  .av{
+    width:30px; height:30px; border-radius:50%; display:grid; place-items:center;
+    font-size:.72rem; font-weight:700; color:oklch(16% 0.02 265);
+    margin-left:-7px; border:2px solid var(--bg); position:relative;
+  }
+  .av:first-child{ margin-left:0; }
+  .av-more{ background:var(--panel-2); color:var(--ink-soft); border:2px solid var(--bg); }
+
+  .board{
+    border:1px solid var(--line); border-radius:var(--radius);
+    background:linear-gradient(180deg, var(--bg-2), var(--bg));
+    overflow:hidden;
+  }
+  .board-top{
+    display:flex; align-items:center; gap:10px; padding:12px 16px;
+    border-bottom:1px solid var(--line); background:var(--panel);
+    font-size:.84rem; color:var(--ink-soft);
+  }
+  .board-top .live{ display:inline-flex; align-items:center; gap:7px; margin-left:auto; color:var(--ink-dim); }
+  .pulse{ width:8px; height:8px; border-radius:50%; background:var(--accent-2); }
+
+  .stream{ padding:8px 0 12px; min-height:330px; }
+
+  /* a single event row in the shared stream */
+  .ev{
+    display:grid; grid-template-columns:40px 1fr; gap:13px;
+    padding:13px 18px;
+  }
+  .ev .who{ width:34px; height:34px; border-radius:50%; display:grid; place-items:center;
+    font-size:.74rem; font-weight:700; color:oklch(16% 0.02 265); align-self:start; }
+  .ev .body{ min-width:0; }
+  .ev .meta{ font-size:.8rem; color:var(--ink-dim); margin-bottom:3px; }
+  .ev .meta b{ color:var(--ink-soft); font-weight:600; }
+  .ev .text{ font-size:.97rem; color:var(--ink); }
+
+  /* the present "wall" — friction the team hits now */
+  .ev.wall .who{ background:var(--warm); }
+  .ev.wall .text code{
+    background:oklch(28% 0.05 70); color:oklch(90% 0.06 80);
+    padding:1px 6px; border-radius:6px; font-size:.86em;
+  }
+
+  /* the surfaced memory — arrives unbidden, attributed to a past teammate */
+  .recall{
+    margin:6px 18px 4px 71px;
+    border:1px solid oklch(45% 0.08 200 / 0.55);
+    border-left:3px solid var(--accent);
+    border-radius:11px;
+    background:
+      linear-gradient(180deg, oklch(26% 0.05 205 / .55), oklch(23% 0.03 205 / .25));
+    padding:13px 15px;
+    opacity:0; transform:translateY(9px);
+  }
+  .recall.in{ animation:rise .9s cubic-bezier(.16,.84,.34,1) forwards; }
+  @keyframes rise{
+    0%{ opacity:0; transform:translateY(9px); }
+    62%{ opacity:1; }
+    100%{ opacity:1; transform:translateY(0); }
+  }
+  .recall .tag{
+    display:inline-flex; align-items:center; gap:7px;
+    font-size:.72rem; letter-spacing:.08em; text-transform:uppercase;
+    color:var(--accent); margin-bottom:7px;
+  }
+  .recall .tag svg{ width:14px; height:14px; }
+  .recall .src{
+    display:flex; align-items:center; gap:9px; margin-bottom:8px;
+  }
+  .recall .src .av{ margin:0; width:26px; height:26px; font-size:.66rem; }
+  .recall .src .name{ font-size:.84rem; color:var(--ink-soft); }
+  .recall .src .name b{ color:var(--ink); font-weight:650; }
+  .recall .src .when{ color:var(--ink-dim); font-size:.8rem; margin-left:auto; }
+  .recall .quote{ font-size:.97rem; color:var(--ink); }
+  .recall .quote code{
+    background:oklch(30% 0.04 205); color:oklch(90% 0.04 205);
+    padding:1px 6px; border-radius:6px; font-size:.86em;
+  }
+  .recall .react{
+    display:flex; gap:8px; margin-top:11px; flex-wrap:wrap;
+  }
+  .react .chip{
+    font-size:.78rem; color:var(--ink-soft);
+    border:1px solid var(--line); background:var(--bg-2);
+    padding:3px 10px; border-radius:999px;
+  }
+  .react .chip .em{ filter:grayscale(.1); }
+
+  .board-foot{
+    border-top:1px solid var(--line); padding:11px 18px; font-size:.82rem; color:var(--ink-dim);
+    background:var(--panel); display:flex; gap:8px; align-items:center;
+  }
+  .board-foot svg{ width:15px; height:15px; flex:0 0 auto; }
+
+  @media (prefers-reduced-motion: reduce){
+    .recall{ opacity:1; transform:none; animation:none; }
+    .recall.in{ animation:none; }
+    html{ scroll-behavior:auto; }
+    .pulse{ animation:none !important; }
+  }
+
+  /* ---------- how it works ---------- */
+  section.band{ padding:54px 0; }
+  .band h2{ font-size:clamp(1.4rem,2.6vw,1.9rem); letter-spacing:-.02em; margin:0 0 8px; }
+  .band .sub{ color:var(--ink-soft); max-width:62ch; margin:0 0 26px; }
+  .grid3{ display:grid; grid-template-columns:repeat(3,1fr); gap:16px; }
+  @media(max-width:760px){ .grid3{ grid-template-columns:1fr; } }
+  .card{
+    border:1px solid var(--line); border-radius:var(--radius);
+    background:linear-gradient(180deg, var(--panel), var(--bg-2));
+    padding:20px;
+  }
+  .card .n{ font-size:.78rem; color:var(--accent); letter-spacing:.12em; }
+  .card h3{ font-size:1.05rem; margin:7px 0 8px; }
+  .card p{ margin:0; color:var(--ink-soft); font-size:.93rem; }
+
+  .surfaces{ display:flex; flex-wrap:wrap; gap:9px; margin-top:10px; }
+  .surfaces .s{
+    font-size:.82rem; color:var(--ink-soft); border:1px solid var(--line);
+    background:var(--bg-2); padding:5px 11px; border-radius:9px;
+  }
+
+  /* ---------- honesty note ---------- */
+  .honest{
+    border:1px solid var(--line); border-left:3px solid var(--warm);
+    background:var(--bg-2); border-radius:12px; padding:16px 18px;
+    color:var(--ink-soft); font-size:.92rem; max-width:72ch;
+  }
+  .honest b{ color:var(--ink); }
+
+  /* ---------- mcp / agent ---------- */
+  .pre{
+    background:oklch(13% 0.02 265); border:1px solid var(--line); border-radius:12px;
+    padding:15px 16px; overflow:auto; font-size:.86rem;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    color:var(--ink-soft);
+  }
+  .pre .c{ color:var(--ink-dim); }
+  .pre .k{ color:var(--accent-2); }
+
+  /* ---------- footer ---------- */
+  footer.site{
+    border-top:1px solid var(--line); margin-top:30px; padding:30px 0 48px;
+    color:var(--ink-dim); font-size:.9rem;
+  }
+  footer .links{ display:flex; flex-wrap:wrap; gap:18px; margin-bottom:14px; }
+  footer a{ color:var(--ink-soft); text-decoration:none; }
+  footer a:hover{ color:var(--ink); text-decoration:underline; }
+  .vsd{ color:var(--ink-dim); }
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="site">
+  <div class="brand">
+    <svg class="glyph" viewBox="0 0 32 32" aria-hidden="true">
+      <circle cx="16" cy="16" r="14" fill="none" stroke="oklch(72% 0.15 200)" stroke-width="1.4" opacity="0.5"/>
+      <circle cx="9" cy="12" r="2.6" fill="oklch(78% 0.16 145)"/>
+      <circle cx="22" cy="11" r="2.2" fill="oklch(72% 0.15 200)"/>
+      <circle cx="17" cy="22" r="2.4" fill="oklch(80% 0.13 70)"/>
+      <path d="M9 12 L17 22 M17 22 L22 11 M9 12 L22 11" stroke="oklch(72% 0.15 200)" stroke-width="1.1" opacity="0.55" fill="none"/>
+    </svg>
+    <span>Memex</span>
+  </div>
+  <nav class="nav" aria-label="Primary">
+    <a class="hide-sm" href="#room">The team room</a>
+    <a class="hide-sm" href="#how">How it works</a>
+    <a class="hide-sm" href="#agents">For agents</a>
+    <a href="https://github.com/Two-Weeks-Team/memex">GitHub</a>
+  </nav>
+</header>
+
+<main id="main">
+<div class="wrap">
+
+  <!-- HERO -->
+  <section class="hero">
+    <span class="eyebrow"><span class="dot" aria-hidden="true"></span> Shared associative memory, from day one</span>
+    <h1>Someone on your team <span class="em">already solved this.</span> The answer comes back on its own.</h1>
+    <p class="lede">
+      Your team doesn't write everything down — yet the moment a teammate hits a wall someone
+      crossed three weeks ago, that past solution should just <em>arrive</em>. Memex turns your
+      shared Claude&nbsp;Code and Codex session history into a memory the whole team moves through
+      by similarity, so the right recollection surfaces because the situation called it up — not
+      because anyone went searching the wiki.
+    </p>
+    <div class="cta-row">
+      <a class="btn primary" href="https://github.com/Two-Weeks-Team/memex">
+        <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="currentColor"><path d="M8 .2a8 8 0 0 0-2.5 15.6c.4.07.55-.17.55-.38v-1.3c-2.2.48-2.67-1.06-2.67-1.06-.36-.92-.88-1.16-.88-1.16-.72-.5.05-.49.05-.49.8.06 1.22.82 1.22.82.71 1.22 1.87.87 2.33.66.07-.52.28-.87.5-1.07-1.75-.2-3.6-.88-3.6-3.9 0-.86.31-1.56.82-2.11-.08-.2-.36-1 .08-2.1 0 0 .67-.21 2.2.8a7.6 7.6 0 0 1 4 0c1.53-1.01 2.2-.8 2.2-.8.44 1.1.16 1.9.08 2.1.51.55.82 1.25.82 2.11 0 3.03-1.85 3.7-3.61 3.89.29.24.54.72.54 1.46v2.16c0 .21.15.46.55.38A8 8 0 0 0 8 .2Z"/></svg>
+        View the repository
+      </a>
+      <a class="btn ghost" href="https://two-weeks-team.github.io/memex/">See the live landing</a>
+      <a class="btn ghost" href="#agents">Connect your agents</a>
+    </div>
+  </section>
+
+  <!-- THE TEAM ROOM: autonomous surfacing -->
+  <section class="room" id="room" aria-labelledby="room-h">
+    <div class="room-head">
+      <div>
+        <h2 id="room-h">#backend &mdash; the team room</h2>
+        <p>A shared workspace. Watch what happens when the present touches the past.</p>
+      </div>
+      <div class="roster" aria-label="Members in this workspace">
+        <span class="av" style="background:oklch(80% 0.13 70)" title="Dana">DK</span>
+        <span class="av" style="background:oklch(78% 0.16 145)" title="Priya">PR</span>
+        <span class="av" style="background:oklch(72% 0.15 200)" title="Marco">MA</span>
+        <span class="av" style="background:oklch(74% 0.14 300)" title="Sun">SU</span>
+        <span class="av av-more" title="and others">+3</span>
+      </div>
+    </div>
+
+    <div class="board">
+      <div class="board-top">
+        <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true" fill="oklch(72% 0.15 200)"><circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" stroke-width="1.3"/><circle cx="8" cy="8" r="2" fill="currentColor"/></svg>
+        Shared memory across 7 members &middot; 1,940 indexed sessions
+        <span class="live"><span class="pulse" aria-hidden="true"></span> recall is active</span>
+      </div>
+
+      <!-- live region: surfaced memories are announced, not searched -->
+      <div class="stream" id="stream" aria-live="polite" aria-atomic="false">
+        <!-- the present "wall" stays put; recollections rise under it on their own -->
+        <div class="ev wall">
+          <span class="who" title="Dana" style="background:oklch(80% 0.13 70)">DK</span>
+          <div class="body">
+            <div class="meta"><b>Dana</b> &middot; just now &middot; debugging</div>
+            <div class="text">our auth token refresh keeps looping &mdash; the retry fires before
+              <code>expires_at</code> is written. anyone seen this?</div>
+          </div>
+        </div>
+        <!-- JS appends .recall blocks here, one at a time, on irregular timing -->
+      </div>
+
+      <div class="board-foot">
+        <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="oklch(72% 0.15 200)" stroke-width="1.4"><path d="M8 1.5v3M8 11.5v3M1.5 8h3M11.5 8h3"/><circle cx="8" cy="8" r="2.4"/></svg>
+        Nobody opened a search box. Memex matched Dana's situation against the team's corpus and let the past surface.
+      </div>
+    </div>
+  </section>
+
+  <!-- HONESTY -->
+  <section class="band" aria-labelledby="honest-h" style="padding-top:30px;">
+    <div class="honest">
+      <h2 id="honest-h" style="font-size:1rem; margin:0 0 6px;">Where this is real &mdash; and where it's the direction</h2>
+      Memex today runs <b>local-first and single-user</b>: it indexes the session history on
+      your own machine and surfaces from <em>your</em> corpus. The team room above shows the
+      same associative-recall principle applied to a <b>shared corpus</b> &mdash; the server /
+      Docker variant runs Qdrant, the web UI, and MCP in one image, which is the foundation a
+      team build sits on. We're showing the idea honestly, not claiming multiplayer is shipped.
+    </div>
+  </section>
+
+  <!-- HOW IT WORKS -->
+  <section class="band" id="how" aria-labelledby="how-h">
+    <h2 id="how-h">How a memory comes back to you</h2>
+    <p class="sub">No keyword search, no chatbot. Memex reads similarity, so a recollection rises
+      because the moment evoked it.</p>
+    <div class="grid3">
+      <div class="card">
+        <div class="n">01 &middot; PRESERVE</div>
+        <h3>The corpus you own</h3>
+        <p>Claude&nbsp;Code silently migrates and deletes old sessions. Memex reads
+          <code>~/.claude/projects/**/*.jsonl</code> plus legacy transcripts and keeps a corpus
+          that stays yours.</p>
+      </div>
+      <div class="card">
+        <div class="n">02 &middot; EMBED</div>
+        <h3>Distance, not keywords</h3>
+        <p>Sessions become vectors in <b>Qdrant</b>. The space is navigable by similarity, so two
+          moments that <em>felt</em> the same end up near each other &mdash; even with no shared words.</p>
+      </div>
+      <div class="card">
+        <div class="n">03 &middot; SURFACE</div>
+        <h3>Recall arrives unbidden</h3>
+        <p>When your current context resembles a past one, proactive <b>Recall</b> brings the
+          relevant memory forward on its own &mdash; the recipient experience you saw above.</p>
+      </div>
+    </div>
+
+    <div style="margin-top:22px;">
+      <p class="sub" style="margin-bottom:10px;">The same corpus, explored through several surfaces:</p>
+      <div class="surfaces">
+        <span class="s">Time Machine &mdash; replay a session</span>
+        <span class="s">Lens &mdash; named-vector weighted view</span>
+        <span class="s">Topology &mdash; distance-matrix MST graph</span>
+        <span class="s">Mix / Discovery &mdash; pos/neg recommendation</span>
+        <span class="s">Proactive Recall</span>
+        <span class="s">Companion / Wrapped / Loop&nbsp;Breaker</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- AGENTS -->
+  <section class="band" id="agents" aria-labelledby="agents-h">
+    <h2 id="agents-h">Give your agents the same shared memory</h2>
+    <p class="sub">Memex exposes <b>11 MCP tools</b> over stdio + HTTP. It works in Claude&nbsp;Code,
+      Codex, and Cursor, and the server / Docker variant bundles Qdrant, the web UI, and MCP in one image.</p>
+    <div class="pre" role="group" aria-label="Connect Memex as an MCP server">
+<span class="c"># add Memex as an MCP server to your agent</span>
+claude mcp add memex <span class="k">--</span> memex serve --stdio
+
+<span class="c"># or run the all-in-one server variant (Qdrant + web + MCP)</span>
+docker run -p <span class="k">8080</span>:8080 ghcr.io/two-weeks-team/memex
+    </div>
+    <p class="sub" style="margin-top:14px;">
+      Built for <span class="vsd">Qdrant Vector Space Day 2026 &mdash; "Think Outside the Bot."</span>
+      Memex is a non-chatbot, LLM-free-at-runtime way to move through what your team already learned.
+    </p>
+  </section>
+
+</div>
+
+<footer class="site">
+  <div class="wrap">
+    <div class="links">
+      <a href="https://github.com/Two-Weeks-Team/memex">Repository</a>
+      <a href="https://two-weeks-team.github.io/memex/">Live landing</a>
+      <a href="#room">The team room</a>
+      <a href="#how">How it works</a>
+      <a href="#agents">For agents</a>
+    </div>
+    <div>An associative memory for what your team has already figured out. The thought comes to you.</div>
+  </div>
+</footer>
+</main>
+
+<script>
+(function(){
+  "use strict";
+  var stream = document.getElementById("stream");
+  if(!stream) return;
+
+  var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  // Avatar palette for past contributors whose memory resurfaces.
+  function avatar(initials, hue){
+    return '<span class="av" style="background:oklch(76% 0.14 '+hue+')" title="'+initials+'">'+initials+'</span>';
+  }
+
+  // Memories that RISE in response to Dana's present situation.
+  // Each is attributed to a teammate's past session — the team's own corpus answering.
+  var recollections = [
+    {
+      who:"Priya", initials:"PR", hue:145, when:"from a session 3 weeks ago",
+      quote:'I had this exact loop. The fix was to await the <code>expires_at</code> write before scheduling the refresh &mdash; the retry was racing the token store, not the network.'
+    },
+    {
+      who:"Marco", initials:"MA", hue:200, when:"from a session last month",
+      quote:'Related: we set the refresh timer to <code>expires_at &minus; 60s</code> after that. Stopped the thundering-herd retries when several services refreshed at once.'
+    },
+    {
+      who:"Sun", initials:"SU", hue:300, when:"from a session in March",
+      quote:'And the integration test that caught it lives in <code>auth/refresh_race_test</code> &mdash; worth running before you touch this path again.'
+    }
+  ];
+
+  var reactionSets = [
+    ['<span class="chip"><span class="em">✨</span> exactly this</span>', '<span class="chip">@Priya you legend</span>'],
+    ['<span class="chip"><span class="em">📌</span> pinning this</span>', '<span class="chip">2 others recognized it</span>'],
+    ['<span class="chip"><span class="em">✅</span> running the test</span>']
+  ];
+
+  function render(rec, idx){
+    var node = document.createElement("div");
+    node.className = "recall";
+    node.setAttribute("role","note");
+    node.innerHTML =
+      '<span class="tag">'+
+        '<svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="oklch(72% 0.15 200)" stroke-width="1.4"><path d="M8 14s-5-3.2-5-7a3 3 0 0 1 5-2.2A3 3 0 0 1 13 7c0 3.8-5 7-5 7Z"/></svg>'+
+        'rose on its own'+
+      '</span>'+
+      '<div class="src">'+
+        avatar(rec.initials, rec.hue)+
+        '<span class="name"><b>'+rec.who+'</b> &mdash; a teammate\'s past solution</span>'+
+        '<span class="when">'+rec.when+'</span>'+
+      '</div>'+
+      '<div class="quote">'+rec.quote+'</div>'+
+      '<div class="react">'+reactionSets[idx % reactionSets.length].join('')+'</div>';
+    stream.appendChild(node);
+    if(reduce){
+      node.classList.remove("in"); // already visible via CSS
+    } else {
+      // next frame so the rise animation runs
+      requestAnimationFrame(function(){ node.classList.add("in"); });
+    }
+    return node;
+  }
+
+  // Irregular, lifelike cadence — the visitor is a recipient, never a trigger.
+  var i = 0;
+  function tick(){
+    if(i >= recollections.length) return;
+    render(recollections[i], i);
+    i++;
+    if(i < recollections.length){
+      var delay = 2600 + Math.random()*2400; // 2.6s–5s, uneven
+      setTimeout(tick, delay);
+    }
+  }
+
+  if(reduce){
+    // Respect reduced motion: show all recollections immediately, no staggered animation.
+    recollections.forEach(function(r, k){ render(r, k); });
+  } else {
+    // First memory surfaces shortly after the wall is read — unprompted.
+    setTimeout(tick, 1400);
+    // animate the live pulse subtly
+    var style = document.createElement("style");
+    style.textContent = "@keyframes mpulse{0%,100%{opacity:1}50%{opacity:.35}} .pulse{animation:mpulse 1.8s ease-in-out infinite;}";
+    document.head.appendChild(style);
+  }
+})();
+</script>
+</body>
+</html>

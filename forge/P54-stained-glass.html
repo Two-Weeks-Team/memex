@@ -1,0 +1,619 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Memex — the window remembers the light</title>
+<meta name="description" content="Memex turns your Claude Code & Codex session history into a navigable associative memory backed by Qdrant. The relevant moment surfaces on its own — like light kindling behind a leaded-glass window until one pane illuminates into a scene you lived." />
+<style>
+  :root{
+    --ink:#e9e2cf;          /* warm parchment text */
+    --dim:#a99e84;
+    --faint:#766c56;
+    --lead:#0a0906;         /* the dark leading / cames */
+    --stone:#16110a;        /* surrounding stone-dark */
+    --gold:#f4c66a;         /* the kindling light */
+    --gold-2:#ffb24a;
+    --ruby:#c8324a;
+    --sapphire:#2f6fb8;
+    --emerald:#3f9d6b;
+    --amber:#e6913a;
+    --violet:#7d5aa6;
+    --hair:rgba(244,198,106,.18);
+    --panel:rgba(18,13,7,.62);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    background:
+      radial-gradient(1200px 820px at 50% -8%, #1b140b 0%, transparent 62%),
+      linear-gradient(180deg, #0e0a05 0%, #060402 78%);
+    color:var(--ink);
+    font:16px/1.62 ui-serif, Georgia, "Iowan Old Style", "Palatino Linotype", Palatino, serif;
+    overflow-x:hidden;
+    -webkit-font-smoothing:antialiased;
+  }
+  a{color:var(--gold);text-decoration:none}
+  a:hover{text-decoration:underline}
+  code,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+
+  /* ---------- the cathedral stage ---------- */
+  .stage{position:relative;width:100%;height:100svh;min-height:660px;overflow:hidden;
+    display:flex;align-items:stretch}
+
+  /* the window itself lives in a centered niche of dark stone */
+  .niche{position:absolute;inset:0;display:grid;place-items:center;
+    /* faint masonry texture around the window */
+    background:
+      radial-gradient(140% 120% at 50% 30%, transparent 40%, rgba(0,0,0,.55) 100%);
+  }
+  .windowWrap{position:relative;width:min(86vw,560px);
+    /* the glass casts colored light onto the surrounding stone once kindled */
+    filter:drop-shadow(0 30px 70px rgba(0,0,0,.6));}
+  #glass{display:block;width:100%;height:auto;
+    /* the whole window starts dark and dormant; light grows via CSS var --lit */
+    transition:none;}
+
+  /* coloured wash the lit window throws into the room (behind copy, in front of stone) */
+  .spill{position:absolute;inset:0;pointer-events:none;z-index:1;
+    opacity:0;transition:opacity 1.2s ease;
+    background:
+      radial-gradient(60% 50% at 50% 38%, rgba(244,198,106,.16), transparent 70%),
+      radial-gradient(80% 70% at 50% 60%, rgba(199,50,74,.06), transparent 75%);
+    mix-blend-mode:screen;}
+  .stage.kindled .spill{opacity:1}
+
+  /* ---------- overlaid copy ---------- */
+  .hud{position:absolute;inset:0;display:flex;flex-direction:column;pointer-events:none;z-index:3}
+  .hud > *{pointer-events:auto}
+
+  .topbar{display:flex;align-items:center;justify-content:space-between;gap:16px;
+    padding:22px clamp(18px,5vw,56px)}
+  .brand{display:flex;align-items:center;gap:11px;font-weight:700;letter-spacing:.20em;
+    text-transform:uppercase;font-size:13px;color:var(--ink);font-family:ui-sans-serif,system-ui,sans-serif}
+  .brand .bead{width:10px;height:10px;border-radius:50%;
+    background:radial-gradient(circle at 35% 30%, #ffe6ad, var(--gold-2));
+    box-shadow:0 0 12px 2px rgba(244,198,106,.7)}
+  .topbar nav{display:flex;gap:clamp(10px,2.4vw,26px);font-size:13px;color:var(--dim);
+    letter-spacing:.02em;font-family:ui-sans-serif,system-ui,sans-serif}
+  .topbar nav a{color:var(--dim)}
+  .topbar nav a:hover{color:var(--ink)}
+
+  .hero{margin-top:auto;padding:0 clamp(18px,5vw,56px) clamp(28px,6vh,66px);max-width:720px}
+
+  /* the "current situation" that calls the light up */
+  .moment{display:inline-flex;align-items:center;gap:10px;margin-bottom:20px;
+    padding:8px 14px;border:1px solid var(--hair);border-radius:4px;
+    background:var(--panel);backdrop-filter:blur(6px);
+    font-size:12.5px;letter-spacing:.02em;color:var(--dim);
+    font-family:ui-sans-serif,system-ui,sans-serif}
+  .moment .ember{width:7px;height:7px;border-radius:50%;background:var(--gold);
+    box-shadow:0 0 0 0 rgba(244,198,106,.6);animation:ember 2.8s ease-out infinite}
+  .moment b{color:var(--ink);font-weight:600}
+  @keyframes ember{
+    0%{box-shadow:0 0 0 0 rgba(244,198,106,.55)}
+    70%{box-shadow:0 0 0 9px rgba(244,198,106,0)}
+    100%{box-shadow:0 0 0 0 rgba(244,198,106,0)}
+  }
+
+  h1{margin:0;font-weight:600;font-size:clamp(33px,6vw,60px);line-height:1.05;
+    letter-spacing:-.01em;color:#fff;text-shadow:0 2px 44px rgba(0,0,0,.8)}
+  h1 .glow{color:var(--gold);text-shadow:0 0 30px rgba(244,198,106,.5)}
+  .lede{margin:18px 0 0;font-size:clamp(15px,2.1vw,18.5px);color:var(--dim);max-width:600px;
+    line-height:1.6}
+  .lede b{color:var(--ink);font-weight:600}
+
+  .cta{display:flex;flex-wrap:wrap;gap:13px;margin-top:28px;
+    font-family:ui-sans-serif,system-ui,sans-serif}
+  .btn{display:inline-flex;align-items:center;gap:9px;padding:12px 20px;border-radius:6px;
+    font-size:14.5px;font-weight:600;letter-spacing:.01em;border:1px solid transparent;
+    transition:transform .15s ease, box-shadow .25s ease, background .25s ease}
+  .btn:hover{text-decoration:none;transform:translateY(-1px)}
+  .btn-primary{background:linear-gradient(180deg,#ffe1ad,var(--gold));color:#3a2705;
+    box-shadow:0 8px 30px rgba(244,198,106,.28)}
+  .btn-primary:hover{box-shadow:0 12px 36px rgba(244,198,106,.42)}
+  .btn-ghost{border-color:var(--hair);color:var(--ink);background:var(--panel);
+    backdrop-filter:blur(6px)}
+  .btn-ghost:hover{border-color:rgba(244,198,106,.42)}
+
+  .legend{margin-top:22px;font-size:12.5px;color:var(--faint);letter-spacing:.02em;
+    display:flex;align-items:center;gap:9px;font-family:ui-sans-serif,system-ui,sans-serif}
+  .legend .scene-label{color:var(--gold);font-weight:600;letter-spacing:.04em}
+
+  /* small replay control */
+  .replay{position:absolute;right:clamp(16px,4vw,40px);bottom:clamp(20px,5vh,40px);
+    display:inline-flex;align-items:center;gap:8px;padding:9px 14px;border-radius:6px;
+    border:1px solid var(--hair);background:var(--panel);backdrop-filter:blur(6px);
+    color:var(--dim);font-size:12.5px;cursor:pointer;z-index:4;
+    font-family:ui-sans-serif,system-ui,sans-serif}
+  .replay:hover{color:var(--ink);border-color:rgba(244,198,106,.4)}
+  .replay svg{width:13px;height:13px;fill:currentColor}
+
+  /* ---------- ground-truth section ---------- */
+  .below{position:relative;z-index:2;max-width:1080px;margin:0 auto;
+    padding:clamp(56px,10vh,110px) clamp(18px,5vw,40px) 40px;
+    font-family:ui-sans-serif,-apple-system,"Segoe UI",Roboto,Inter,system-ui,sans-serif}
+  .kicker{font-size:12px;letter-spacing:.22em;text-transform:uppercase;color:var(--faint);
+    margin:0 0 14px}
+  .below h2{font-size:clamp(24px,4vw,38px);line-height:1.14;margin:0;color:#fff;
+    letter-spacing:-.01em;font-weight:660;max-width:760px;font-family:ui-serif,Georgia,serif}
+  .below p.sub{color:var(--dim);max-width:680px;margin:16px 0 0;font-size:16px}
+
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(238px,1fr));gap:16px;
+    margin-top:42px}
+  .card{border:1px solid var(--hair);border-radius:10px;padding:22px 22px 24px;
+    background:linear-gradient(180deg, rgba(26,19,10,.7), rgba(14,10,5,.5));
+    transition:border-color .2s ease, transform .2s ease;position:relative;overflow:hidden}
+  .card::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;
+    background:var(--cc, var(--gold));opacity:.7}
+  .card:hover{border-color:rgba(244,198,106,.4);transform:translateY(-2px)}
+  .card h3{margin:0 0 8px;font-size:16px;color:#fff;letter-spacing:.01em;
+    display:flex;align-items:center;gap:9px}
+  .card h3 .pane{width:9px;height:9px;border-radius:2px;background:var(--cc, var(--gold));
+    box-shadow:0 0 8px 1px var(--cc, var(--gold));flex:0 0 auto}
+  .card p{margin:0;font-size:14px;color:var(--dim);line-height:1.55}
+
+  .facts{margin-top:44px;border:1px solid var(--hair);border-radius:10px;overflow:hidden;
+    background:rgba(14,10,5,.55)}
+  .facts .row{display:grid;grid-template-columns:160px 1fr;gap:18px;padding:16px 22px;
+    border-top:1px solid rgba(244,198,106,.08);font-size:14.5px}
+  .facts .row:first-child{border-top:0}
+  .facts .row .lab{color:var(--faint);letter-spacing:.04em;font-size:12.5px;
+    text-transform:uppercase;padding-top:2px}
+  .facts .row .val{color:var(--ink)}
+  .facts .row .val .mono{color:var(--gold);font-size:13.5px}
+
+  .addline{margin-top:34px;border:1px solid var(--hair);border-radius:8px;
+    background:#0a0703;padding:16px 18px;font-size:13.5px;color:var(--dim);overflow-x:auto}
+  .addline .mono{color:var(--ink)}
+  .addline .c{color:var(--gold)}
+
+  footer{position:relative;z-index:2;border-top:1px solid var(--hair);margin-top:60px;
+    font-family:ui-sans-serif,system-ui,sans-serif}
+  .foot{max-width:1080px;margin:0 auto;padding:28px clamp(18px,5vw,40px) 60px;
+    display:flex;flex-wrap:wrap;gap:18px;justify-content:space-between;align-items:center;
+    color:var(--faint);font-size:13px}
+  .foot a{color:var(--dim)}
+  .foot .links{display:flex;flex-wrap:wrap;gap:18px}
+
+  /* reduced motion: the window is shown already lit, static, no flicker */
+  @media (prefers-reduced-motion: reduce){
+    .moment .ember{animation:none}
+    .spill{transition:none}
+  }
+  @media (max-width:640px){
+    .topbar nav{display:none}
+    .facts .row{grid-template-columns:1fr;gap:4px}
+    .replay{display:none}
+    .hero{padding-bottom:34px}
+  }
+</style>
+</head>
+<body>
+
+<section class="stage" id="stage" aria-label="A dark leaded-glass window in which light kindles on its own until one figurative pane illuminates into a remembered coding moment">
+  <div class="niche" aria-hidden="true">
+    <div class="windowWrap">
+      <!--
+        Hand-authored leaded-glass window (single inline SVG).
+        Structure:
+          • a Gothic arch frame of dark "lead" (cames)
+          • a lattice of small jewel-toned BORDER panes (the surround)
+          • ONE large central FIGURATIVE pane that depicts a SCENE:
+            a person at a desk under a night window, a glowing monitor,
+            a desk lamp, a mug — the moment a late fix finally worked.
+        Every pane begins near-black (dormant). JS raises a per-pane
+        --kindle value over an irregular cadence; the central scene
+        illuminates last and brightest, jewel light spilling.
+      -->
+      <svg id="glass" viewBox="0 0 560 760" role="img"
+           aria-label="A stained-glass window depicting a person at a glowing desk under a night-sky window — the scene of the late night a fix finally worked.">
+        <defs>
+          <!-- soft inner glow used to bloom lit panes -->
+          <radialGradient id="lampGlow" cx="50%" cy="40%" r="60%">
+            <stop offset="0%" stop-color="#fff0c8"/>
+            <stop offset="45%" stop-color="#f4c66a"/>
+            <stop offset="100%" stop-color="#7a4d12"/>
+          </radialGradient>
+          <radialGradient id="skyGlow" cx="50%" cy="30%" r="80%">
+            <stop offset="0%" stop-color="#5b8fd6"/>
+            <stop offset="70%" stop-color="#244a86"/>
+            <stop offset="100%" stop-color="#10203f"/>
+          </radialGradient>
+          <radialGradient id="screenGlow" cx="50%" cy="45%" r="70%">
+            <stop offset="0%" stop-color="#bfe9ff"/>
+            <stop offset="60%" stop-color="#4f9bd6"/>
+            <stop offset="100%" stop-color="#1d4566"/>
+          </radialGradient>
+          <linearGradient id="cameSheen" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#2a2418"/>
+            <stop offset="50%" stop-color="#0a0906"/>
+            <stop offset="100%" stop-color="#211a0f"/>
+          </linearGradient>
+          <!-- glassy mottle so panes don't read as flat fills -->
+          <filter id="mottle"><feTurbulence type="fractalNoise" baseFrequency="0.012 0.02" numOctaves="2" seed="7" result="n"/>
+            <feColorMatrix in="n" type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 .35 0"/>
+            <feComposite operator="over" in2="SourceGraphic"/></filter>
+        </defs>
+
+        <!-- ===== outer arched frame (stone + lead) ===== -->
+        <path d="M30 360 Q30 70 280 40 Q530 70 530 360 L530 730 L30 730 Z"
+              fill="#0c0a06" stroke="#241c10" stroke-width="10"/>
+        <path d="M44 360 Q44 86 280 56 Q516 86 516 360 L516 716 L44 716 Z"
+              fill="#050403" stroke="url(#cameSheen)" stroke-width="6"/>
+
+        <!--
+          ===== BORDER JEWEL PANES (the surround) =====
+          A ring of small diamond/rectangular panes around the scene.
+          Each <rect>/<path> carries a CSS custom prop default and reads
+          its lit color through fill="var(--lit-COLOR)". JS animates each
+          pane group's opacity-of-light via the .pane class + --kindle.
+        -->
+        <g class="panes" stroke="var(--lead)" stroke-width="5" stroke-linejoin="round">
+          <!-- top arch ribbon of small panes -->
+          <path class="pane" data-jewel="ruby"     d="M70 150 Q280 78 490 150 L470 196 Q280 130 90 196 Z"/>
+          <path class="pane" data-jewel="amber"    d="M90 196 Q280 130 470 196 L452 238 Q280 178 108 238 Z"/>
+          <path class="pane" data-jewel="emerald"  d="M108 238 Q280 178 452 238 L440 276 Q280 224 120 276 Z"/>
+
+          <!-- left vertical column of diamonds -->
+          <path class="pane" data-jewel="sapphire" d="M58 300 L96 330 L58 360 L20 330 Z" transform="translate(40 -12)"/>
+          <path class="pane" data-jewel="violet"   d="M58 300 L96 330 L58 360 L20 330 Z" transform="translate(40 70)"/>
+          <path class="pane" data-jewel="amber"    d="M58 300 L96 330 L58 360 L20 330 Z" transform="translate(40 152)"/>
+          <path class="pane" data-jewel="ruby"     d="M58 300 L96 330 L58 360 L20 330 Z" transform="translate(40 234)"/>
+
+          <!-- right vertical column of diamonds -->
+          <path class="pane" data-jewel="violet"   d="M58 300 L96 330 L58 360 L20 330 Z" transform="translate(406 -12)"/>
+          <path class="pane" data-jewel="sapphire" d="M58 300 L96 330 L58 360 L20 330 Z" transform="translate(406 70)"/>
+          <path class="pane" data-jewel="ruby"     d="M58 300 L96 330 L58 360 L20 330 Z" transform="translate(406 152)"/>
+          <path class="pane" data-jewel="emerald"  d="M58 300 L96 330 L58 360 L20 330 Z" transform="translate(406 234)"/>
+
+          <!-- bottom ribbon -->
+          <rect class="pane" data-jewel="sapphire" x="64"  y="636" width="124" height="64" rx="3"/>
+          <rect class="pane" data-jewel="amber"    x="218" y="636" width="124" height="64" rx="3"/>
+          <rect class="pane" data-jewel="ruby"     x="372" y="636" width="124" height="64" rx="3"/>
+
+          <!-- ===== THE CENTRAL FIGURATIVE SCENE PANE =====
+               Bounded roughly x[120..440] y[280..630]. Inside it, smaller
+               leaded shapes compose a recognizable tableau. This is the
+               memory rendered AS illuminated glass — the centerpiece. -->
+
+          <!-- scene field / room wall (warm) -->
+          <rect class="pane scene" data-jewel="room" x="120" y="280" width="320" height="350" rx="6"/>
+
+          <!-- the night-sky window high on the room's wall (the world beyond) -->
+          <rect class="pane scene" data-jewel="sky"    x="156" y="306" width="120" height="92" rx="3"/>
+          <!-- a star + a thin crescent inside the night window -->
+          <path class="pane scene" data-jewel="star"   d="M200 332 l5 12 13 1 -10 9 3 13 -11 -7 -11 7 3 -13 -10 -9 13 -1 Z"/>
+          <path class="pane scene" data-jewel="moon"   d="M250 322 a16 16 0 1 0 2 30 a13 13 0 1 1 -2 -30 Z"/>
+
+          <!-- the glowing MONITOR on the desk (the screen that finally went green) -->
+          <rect class="pane scene" data-jewel="screen" x="300" y="404" width="92" height="64" rx="3"/>
+          <!-- a few "lines of code" / a check, suggested as leaded slivers on the screen -->
+          <path class="pane scene" data-jewel="code"   d="M312 420 h40 M312 432 h54 M312 444 h30"
+                fill="none" stroke="var(--lead)" stroke-width="4" stroke-linecap="round"/>
+          <!-- monitor stand -->
+          <path class="pane scene" data-jewel="frame"  d="M338 468 h16 v18 h-30 v-8 h14 Z"/>
+
+          <!-- the DESK as a wide warm band -->
+          <rect class="pane scene" data-jewel="desk"   x="150" y="492" width="260" height="22" rx="3"/>
+
+          <!-- the PERSON: head + shoulders, seated facing the screen -->
+          <circle class="pane scene" data-jewel="figure" cx="210" cy="430" r="22"/>
+          <path class="pane scene" data-jewel="figure"  d="M176 492 Q176 452 210 452 Q244 452 244 492 Z"/>
+
+          <!-- the MUG beside them on the desk -->
+          <path class="pane scene" data-jewel="mug"     d="M262 470 h22 v18 a4 4 0 0 1 -4 4 h-14 a4 4 0 0 1 -4 -4 Z M284 474 a8 8 0 0 1 0 12"
+                stroke="var(--lead)" stroke-width="4"/>
+
+          <!-- the DESK LAMP arcing over the screen, the warm source -->
+          <path class="pane scene" data-jewel="lamparm" d="M398 492 v-46 q0 -22 -22 -30"
+                fill="none" stroke="var(--lead)" stroke-width="6" stroke-linecap="round"/>
+          <path class="pane scene" data-jewel="lamp"    d="M362 408 l24 -8 8 22 -24 8 Z"/>
+
+          <!-- floor strip under the desk -->
+          <rect class="pane scene" data-jewel="floor"   x="120" y="514" width="320" height="116" rx="4"/>
+        </g>
+
+        <!-- ===== central tracery / mullions over the whole window ===== -->
+        <g fill="none" stroke="#0a0906" stroke-width="9" stroke-linecap="round" opacity=".95">
+          <line x1="280" y1="56" x2="280" y2="280"/>
+          <line x1="120" y1="280" x2="440" y2="280"/>
+          <line x1="120" y1="630" x2="440" y2="630"/>
+          <line x1="50"  y1="630" x2="510" y2="630"/>
+        </g>
+      </svg>
+    </div>
+  </div>
+
+  <div class="spill" aria-hidden="true"></div>
+
+  <div class="hud">
+    <header class="topbar">
+      <div class="brand"><span class="bead" aria-hidden="true"></span> Memex</div>
+      <nav aria-label="Primary">
+        <a href="https://github.com/Two-Weeks-Team/memex">Repo</a>
+        <a href="https://two-weeks-team.github.io/memex/">Live</a>
+        <a href="#how">How it works</a>
+        <a href="#agent">For agents</a>
+      </nav>
+    </header>
+
+    <div class="hero">
+      <span class="moment">
+        <span class="ember" aria-hidden="true"></span>
+        Right now you're <b>tracing a flaky test that only fails at night</b> &mdash; and the glass begins to warm&hellip;
+      </span>
+
+      <h1>You lived through this once.<br>The window <span class="glow">keeps&nbsp;its light.</span></h1>
+
+      <p class="lede">
+        You never wrote it down. But behind the dark leading, light kindles on its own &mdash;
+        and one pane <b>illuminates into the scene of the night it finally went green</b>:
+        the late desk, the lit screen, the mug gone cold. The memory doesn't wait to be
+        searched. It returns to you, because right now called it up.
+      </p>
+
+      <div class="cta">
+        <a class="btn btn-primary" href="https://github.com/Two-Weeks-Team/memex">Get Memex on GitHub</a>
+        <a class="btn btn-ghost" href="https://two-weeks-team.github.io/memex/">See it live</a>
+      </div>
+
+      <p class="legend">
+        <span class="scene-label" id="sceneName">dormant&hellip;</span>
+        <span aria-hidden="true">&middot;</span>
+        light kindles on its own &mdash; not a search
+      </p>
+    </div>
+
+    <button class="replay" id="replay" type="button" aria-label="Let the window kindle again">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5V1L7 6l5 5V7a5 5 0 1 1-5 5H5a7 7 0 1 0 7-7z"/></svg>
+      Recall again
+    </button>
+  </div>
+</section>
+
+<main class="below">
+  <section id="how">
+    <p class="kicker">What just happened</p>
+    <h2>People don't document every memory &mdash; yet when the moment arrives,
+      the relevant thought surfaces on its own.</h2>
+    <p class="sub">
+      Memex is a non-chatbot, LLM-free-at-runtime tool that reads your existing
+      Claude&nbsp;Code and Codex session history and turns it into a navigable
+      associative memory backed by <b style="color:var(--ink)">Qdrant</b>. You move through your own past by
+      <i>similarity</i>, not keywords &mdash; and the relevant moment can rise to you proactively.
+    </p>
+
+    <div class="grid">
+      <article class="card" style="--cc:var(--gold)">
+        <h3><span class="pane" aria-hidden="true"></span>Time Machine</h3>
+        <p>Replay any past session as it happened &mdash; the whole scene, not a fragment.</p>
+      </article>
+      <article class="card" style="--cc:var(--sapphire)">
+        <h3><span class="pane" aria-hidden="true"></span>Lens</h3>
+        <p>Named-vector weighted search to look through your history from one angle at a time.</p>
+      </article>
+      <article class="card" style="--cc:var(--emerald)">
+        <h3><span class="pane" aria-hidden="true"></span>Topology</h3>
+        <p>A distance-matrix &rarr; MST graph: the leaded lattice of how your sessions actually connect.</p>
+      </article>
+      <article class="card" style="--cc:var(--ruby)">
+        <h3><span class="pane" aria-hidden="true"></span>Mix &amp; Discovery</h3>
+        <p>Positive / negative recommendation to pull related work toward you and push noise away.</p>
+      </article>
+      <article class="card" style="--cc:var(--amber)">
+        <h3><span class="pane" aria-hidden="true"></span>Proactive Recall</h3>
+        <p>The pane that lit above: a relevant past moment surfaces because the current one evoked it.</p>
+      </article>
+      <article class="card" style="--cc:var(--violet)">
+        <h3><span class="pane" aria-hidden="true"></span>Companion &middot; Wrapped &middot; Loop&nbsp;Breaker</h3>
+        <p>An agent-memory layer over your corpus &mdash; recap what you've done, and catch yourself circling.</p>
+      </article>
+    </div>
+
+    <div class="facts" aria-label="What Memex is">
+      <div class="row"><div class="lab">Reads</div>
+        <div class="val"><span class="mono">~/.claude/projects/**/*.jsonl</span>, legacy transcripts, and <span class="mono">history.jsonl</span></div></div>
+      <div class="row"><div class="lab">Backed by</div>
+        <div class="val">Qdrant &mdash; navigate by vector similarity, no runtime LLM</div></div>
+      <div class="row"><div class="lab">Why</div>
+        <div class="val">Claude&nbsp;Code silently migrates and deletes old sessions. Memex keeps a corpus <b style="color:var(--ink)">you own.</b></div></div>
+      <div class="row"><div class="lab">Built for</div>
+        <div class="val">Qdrant Vector Space Day 2026 &mdash; <i>"Think Outside the Bot."</i></div></div>
+    </div>
+  </section>
+
+  <section id="agent">
+    <p class="kicker" style="margin-top:56px">For your agent</p>
+    <h2 style="font-size:clamp(20px,3vw,28px)">11 MCP tools over stdio + HTTP &mdash;
+      works in Claude&nbsp;Code, Codex, and Cursor.</h2>
+    <p class="sub">A server / Docker variant runs Qdrant, the web UI, and the MCP server in one image.
+      The tools let an agent recall, replay, and connect across your own history.</p>
+    <div class="addline mono">
+      <span class="c">$</span> claude mcp add memex -- memex-mcp
+    </div>
+    <p style="margin-top:18px;font-size:14px">
+      <a href="https://github.com/Two-Weeks-Team/memex#server--docker">Server / Docker variant</a>
+      &nbsp;&middot;&nbsp;
+      <a href="https://github.com/Two-Weeks-Team/memex">MCP integration &amp; the 11 tools</a>
+    </p>
+  </section>
+</main>
+
+<footer>
+  <div class="foot">
+    <div>Memex &mdash; a memory you own, kept like light in glass.</div>
+    <div class="links">
+      <a href="https://github.com/Two-Weeks-Team/memex">GitHub</a>
+      <a href="https://two-weeks-team.github.io/memex/">Live landing</a>
+      <a href="https://github.com/Two-Weeks-Team/memex#server--docker">Docker</a>
+    </div>
+  </div>
+</footer>
+
+<script>
+(function(){
+  "use strict";
+
+  var stage     = document.getElementById('stage');
+  var glass     = document.getElementById('glass');
+  var sceneName = document.getElementById('sceneName');
+  var replayBtn = document.getElementById('replay');
+
+  var reduce = window.matchMedia &&
+               window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // --- jewel palette: dormant (near-black, glass-tinted) -> lit (vivid) -------
+  // Each pane is painted by its CSS fill which we set per-frame. We keep two
+  // colors per jewel and lerp between them as the pane "kindles".
+  var JEWELS = {
+    ruby:     {dark:[28,8,12],   lit:[200,50,74]},
+    amber:    {dark:[30,18,6],   lit:[230,145,58]},
+    emerald:  {dark:[8,24,15],   lit:[63,157,107]},
+    sapphire: {dark:[8,18,34],   lit:[47,111,184]},
+    violet:   {dark:[20,12,28],  lit:[125,90,166]},
+    // --- the scene panes ---
+    room:     {dark:[22,14,8],   lit:[120,74,40]},   // warm room wall
+    sky:      {dark:[6,12,24],   lit:[45,90,160]},   // night window
+    star:     {dark:[40,36,18],  lit:[255,238,170]},
+    moon:     {dark:[34,32,22],  lit:[244,232,196]},
+    screen:   {dark:[8,20,28],   lit:[150,220,255]}, // the monitor goes bright
+    code:     {dark:[0,0,0],     lit:[0,0,0]},        // leading only
+    frame:    {dark:[14,10,6],   lit:[60,46,30]},
+    desk:     {dark:[24,15,7],   lit:[150,96,46]},
+    figure:   {dark:[16,12,18],  lit:[92,70,120]},   // person in violet-ish glass
+    mug:      {dark:[28,12,10],  lit:[196,70,60]},
+    lamp:     {dark:[34,24,8],   lit:[255,206,110]}, // the warm source
+    lamparm:  {dark:[0,0,0],     lit:[0,0,0]},
+    floor:    {dark:[14,10,6],   lit:[74,50,28]}
+  };
+
+  function rgb(c){ return 'rgb('+(c[0]|0)+','+(c[1]|0)+','+(c[2]|0)+')'; }
+  function lerp(a,b,t){ return a+(b-a)*t; }
+  function mix(d,l,t){ return [lerp(d[0],l[0],t), lerp(d[1],l[1],t), lerp(d[2],l[2],t)]; }
+
+  // collect panes + assign each a kindle schedule
+  var panes = [];
+  (function init(){
+    var nodes = glass.querySelectorAll('.pane');
+    for (var i=0;i<nodes.length;i++){
+      var n = nodes[i];
+      var jewel = n.getAttribute('data-jewel');
+      var def = JEWELS[jewel] || JEWELS.amber;
+      var isScene = n.classList.contains('scene');
+      // leading-only strokes (code/lamparm) keep their lead color; skip fill
+      var fillOnly = (jewel === 'code' || jewel === 'lamparm');
+      panes.push({
+        node:n, def:def, isScene:isScene, fillOnly:fillOnly,
+        // border panes kindle early on an irregular cadence;
+        // scene panes wait, then bloom together (the recall) — brightest.
+        start: isScene ? (1500 + Math.random()*900)
+                       : (200  + Math.random()*1500),
+        dur:   isScene ? (1700 + Math.random()*700)
+                       : (900  + Math.random()*900),
+        // each pane settles to its own brightness; the lamp + screen peak high
+        peak:  isScene ? (jewel==='lamp'||jewel==='screen'||jewel==='star'||jewel==='moon' ? 1.0 : 0.92)
+                       : (0.62 + Math.random()*0.22),
+        // subtle living flicker amplitude once lit
+        flick: 0.05 + Math.random()*0.06,
+        phase: Math.random()*Math.PI*2
+      });
+    }
+  })();
+
+  function easeOutCubic(t){ return 1 - Math.pow(1-t, 3); }
+
+  function paint(p, lvl){
+    // lvl 0..1 of how lit this pane is right now
+    var c = mix(p.def.dark, p.def.lit, lvl);
+    if (!p.fillOnly){
+      p.node.style.fill = rgb(c);
+    }
+    // lit panes gain a soft glow via SVG-friendly drop-shadow filter
+    if (lvl > 0.15 && !p.fillOnly){
+      var glow = Math.min(1, (lvl-0.15)/0.85);
+      // strongest on the lamp/screen scene panes
+      var amt = (p.isScene ? 5 : 2.4) * glow;
+      p.node.style.filter = 'drop-shadow(0 0 '+amt.toFixed(1)+'px '+rgb(p.def.lit)+')';
+    } else if (!p.fillOnly){
+      p.node.style.filter = 'none';
+    }
+  }
+
+  var T0 = 0, named = false, done = false;
+  var SCENE_NAMED_AT = 2600;       // when to reveal the scene's name
+  var FINISH = 4200;               // after this we hold + add gentle flicker
+
+  function setStatic(){
+    // fully-lit, no animation: used for prefers-reduced-motion
+    stage.classList.add('kindled');
+    sceneName.textContent = 'the night it finally went green';
+    for (var i=0;i<panes.length;i++){ paint(panes[i], panes[i].peak); }
+  }
+
+  function frame(now){
+    if (!T0) T0 = now;
+    var el = now - T0;
+
+    var anyScene = false;
+    for (var i=0;i<panes.length;i++){
+      var p = panes[i];
+      var t = (el - p.start) / p.dur;
+      var lvl = 0;
+      if (t > 0){
+        lvl = easeOutCubic(Math.min(1, t)) * p.peak;
+        // once settled, add a quiet candle-like flicker so it feels alive
+        if (t >= 1 && el < FINISH + 60000){
+          lvl = p.peak * (1 - p.flick*0.5 + p.flick*0.5*Math.sin(now*0.003 + p.phase));
+        }
+      }
+      if (p.isScene && lvl > 0.2) anyScene = true;
+      paint(p, lvl);
+    }
+
+    if (anyScene && !stage.classList.contains('kindled')){
+      stage.classList.add('kindled');           // room light spills out
+    }
+    if (!named && el > SCENE_NAMED_AT){
+      sceneName.textContent = 'the night it finally went green';
+      named = true;
+    } else if (!named && el > 700){
+      sceneName.textContent = 'kindling…';
+    }
+
+    rafId = requestAnimationFrame(frame);
+  }
+
+  var rafId = 0;
+  function start(){
+    cancelAnimationFrame(rafId);
+    reduce = window.matchMedia &&
+             window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    // reset filters/fills
+    stage.classList.remove('kindled');
+    named = false;
+    if (reduce){
+      sceneName.textContent = 'the night it finally went green';
+      setStatic();
+      return;
+    }
+    sceneName.textContent = 'dormant…';
+    for (var i=0;i<panes.length;i++){ paint(panes[i], 0); }
+    T0 = 0;
+    rafId = requestAnimationFrame(frame);
+  }
+
+  replayBtn.addEventListener('click', start);
+
+  if (window.matchMedia){
+    try{
+      window.matchMedia('(prefers-reduced-motion: reduce)')
+        .addEventListener('change', function(e){ reduce = e.matches; start(); });
+    }catch(_){}
+  }
+
+  start();
+})();
+</script>
+</body>
+</html>
