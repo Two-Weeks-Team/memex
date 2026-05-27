@@ -147,6 +147,22 @@ pub enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Start the headless web service: serves the UI + JSON API + HTTP MCP at
+    /// `/mcp`. Used by the single Docker image. (`web` feature only.)
+    #[cfg(feature = "web")]
+    Serve {
+        /// Port to listen on.
+        #[arg(long, default_value_t = 8765)]
+        port: u16,
+        /// Directory of static UI assets to serve.
+        #[arg(long, default_value = "src")]
+        ui_dir: PathBuf,
+    },
+    /// Download/load the embedding model into the cache, then exit. Used to
+    /// pre-bake the model into the Docker image so first query needs no
+    /// network. (`web` feature only.)
+    #[cfg(feature = "web")]
+    WarmEmbedder,
 }
 
 #[derive(Debug, Subcommand)]
@@ -193,6 +209,14 @@ pub fn run(args: Vec<String>) -> Result<()> {
         Command::InstallMcp { run } => cmd_install_mcp(run),
         Command::Memory { cwd, limit, json } => cmd_memory(cwd, limit, json),
         Command::Wrapped { window_days, limit, json } => cmd_wrapped(window_days, limit, json),
+        #[cfg(feature = "web")]
+        Command::Serve { port, ui_dir } => cmd_serve(port, ui_dir),
+        #[cfg(feature = "web")]
+        Command::WarmEmbedder => {
+            let _ = indexer::Embedder::new()?;
+            println!("embedder model ready");
+            Ok(())
+        }
     }
 }
 
@@ -251,6 +275,14 @@ fn cmd_memory(cwd: Option<PathBuf>, limit: usize, json: bool) -> Result<()> {
         }
         anyhow::Ok(())
     })
+}
+
+#[cfg(feature = "web")]
+fn cmd_serve(port: u16, ui_dir: PathBuf) -> Result<()> {
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?;
+    rt.block_on(async move { crate::web::serve(port, ui_dir).await })
 }
 
 fn cmd_mcp() -> Result<()> {

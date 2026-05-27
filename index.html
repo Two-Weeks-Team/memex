@@ -418,6 +418,55 @@
       overflow-x: auto;
     }
 
+    /* --- run it your way (app vs server) --------------------------- */
+    section.run { padding: 64px 0; }
+    .run-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin-top: 8px; }
+    .run-card {
+      position: relative; padding: 24px;
+      background: var(--bg-2); border: 1px solid var(--border); border-radius: 16px;
+    }
+    .run-card.featured {
+      background: linear-gradient(135deg, rgba(10, 132, 255, 0.10) 0%, rgba(191, 90, 242, 0.08) 100%);
+      border-color: rgba(10, 132, 255, 0.34);
+    }
+    .run-card .rc-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+    .run-card .rc-head .ic { font-size: 22px; }
+    .run-card h3 { margin: 0; font-size: 18px; font-weight: 650; }
+    .run-card .rc-sub { color: var(--fg-2); font-size: 13.5px; margin: 0 0 14px; line-height: 1.5; }
+    .run-card .rc-sub em { color: var(--fg); font-style: normal; font-weight: 600; }
+    .run-card pre {
+      margin: 0 0 14px; padding: 12px 14px;
+      background: rgba(0, 0, 0, 0.42); border: 1px solid var(--border);
+      border-radius: 9px; font-size: 12.5px; line-height: 1.6; color: var(--fg); overflow-x: auto;
+    }
+    .run-card pre .c { color: var(--fg-3); }
+    .run-card pre .p { color: var(--green); }
+    .chiprow { display: flex; flex-wrap: wrap; gap: 7px; }
+    .chip {
+      font-family: var(--mono); font-size: 11px; padding: 4px 9px; border-radius: 999px;
+      background: var(--bg-glass-hi); border: 1px solid var(--border); color: var(--fg-2);
+    }
+    .chip.on { color: var(--green); border-color: rgba(48, 209, 88, 0.34); background: rgba(48, 209, 88, 0.08); }
+    .run-shots {
+      margin-top: 22px; display: grid; grid-template-columns: 1.5fr 1fr; gap: 14px;
+    }
+    .run-shots .shot {
+      position: relative; border-radius: 14px; overflow: hidden;
+      border: 1px solid var(--border); background: var(--bg-2);
+      box-shadow: 0 22px 60px rgba(0, 0, 0, 0.5);
+      transition: transform 280ms ease, border-color 280ms ease;
+    }
+    .run-shots .shot:hover { transform: translateY(-4px); border-color: var(--border-strong); }
+    .run-shots .shot img { display: block; width: 100%; height: auto; }
+    .run-shots .shot .cap {
+      position: absolute; left: 12px; bottom: 12px; right: 12px;
+      font-size: 11.5px; color: var(--fg);
+      padding: 6px 10px; border-radius: 7px;
+      background: rgba(15, 15, 18, 0.74);
+      border: 1px solid var(--border-strong);
+      backdrop-filter: blur(8px);
+    }
+
     /* --- footer ----------------------------------------------------- */
     footer {
       margin-top: 96px;
@@ -436,6 +485,8 @@
       .shots { grid-template-columns: 1fr; }
       .spotlight { grid-template-columns: 1fr; padding: 24px; }
       .steps { grid-template-columns: 1fr; }
+      .run-grid { grid-template-columns: 1fr; }
+      .run-shots { grid-template-columns: 1fr; }
       nav.top .links { display: none; }
     }
   </style>
@@ -449,6 +500,7 @@
     <div class="links">
       <a href="#features">Features</a>
       <a href="#predict">Predict</a>
+      <a href="#run">Run</a>
       <a href="#install">Install</a>
       <a href="https://github.com/Two-Weeks-Team/memex" target="_blank" rel="noopener">GitHub ↗</a>
     </div>
@@ -480,8 +532,8 @@
         <a class="btn primary" href="https://github.com/Two-Weeks-Team/memex" target="_blank" rel="noopener">
           View on GitHub <span class="arrow">↗</span>
         </a>
-        <a class="btn" href="#install">
-          Install <span class="arrow">↓</span>
+        <a class="btn" href="#run">
+          Run it <span class="arrow">↓</span>
         </a>
         <a class="btn" href="#predict">
           See predict in action <span class="arrow">→</span>
@@ -725,9 +777,91 @@ memex install-mcp --run</code></pre>
     </div>
   </section>
 
+  <section class="run" id="run">
+    <div class="wrap">
+      <h2>Run it your way</h2>
+      <p class="h-sub">
+        The same Rust core and the same six Qdrant primitives — two ways to run.
+        Take the native macOS app, or the new <strong>single Docker image</strong>
+        that bundles Qdrant, the web UI, a JSON API, and an MCP server in one
+        container.
+      </p>
+
+      <div class="run-grid">
+        <div class="run-card">
+          <div class="rc-head"><span class="ic">🖥</span><h3>Desktop app · macOS</h3></div>
+          <p class="rc-sub">
+            A real window, OS notifications, and <em>live</em> proactive recall
+            that watches your sessions as you work.
+          </p>
+          <pre><span class="c"># build from source (Apple Silicon)</span>
+<span class="p">$</span> npm install &amp;&amp; npm run tauri build
+<span class="p">$</span> open src-tauri/target/release/bundle/macos/Memex.app</pre>
+          <div class="chiprow">
+            <span class="chip on">native UX</span>
+            <span class="chip on">live recall</span>
+            <span class="chip on">OS notifications</span>
+            <span class="chip">macOS only</span>
+          </div>
+        </div>
+
+        <div class="run-card featured">
+          <span class="badge-new">NEW</span>
+          <div class="rc-head"><span class="ic">🐳</span><h3>Server · one Docker image</h3></div>
+          <p class="rc-sub">
+            Qdrant + web UI + JSON API + MCP in <em>one</em> container. The
+            embedding model is pre-baked and the corpus auto-indexes on boot, so
+            it runs <em>fully offline</em>.
+          </p>
+          <pre><span class="c"># one command — Qdrant boots inside the image</span>
+<span class="p">$</span> docker run -p 8765:8765 memex-allinone
+<span class="c"># browser UI · JSON API · MCP — all on :8765</span></pre>
+          <div class="chiprow">
+            <span class="chip on">any OS (browser)</span>
+            <span class="chip on">JSON API</span>
+            <span class="chip on">MCP over HTTP</span>
+            <span class="chip on">offline</span>
+            <span class="chip on">non-root</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="run-shots">
+        <div class="shot">
+          <img src="docs/img/web/web-timemachine.png" alt="Memex web UI in a browser — Time Machine deck, Lens sliders, and Predict panel, served over HTTP" loading="lazy" />
+          <span class="cap">🌐 The whole UI in a browser — zero install</span>
+        </div>
+        <div class="shot">
+          <img src="docs/img/web/web-topology.png" alt="Topology galaxy rendered in the browser over HTTP" loading="lazy" />
+          <span class="cap">🌌 Topology, served over HTTP</span>
+        </div>
+      </div>
+
+      <details class="mcp-badge" style="margin-top:22px">
+        <summary>
+          <span class="mcp-dot"></span>
+          <strong>Connect any agent over MCP — two transports</strong>
+          — HTTP/SSE for the server, or stdio inside the container
+        </summary>
+        <div class="mcp-cmd">
+          <pre><code># remote MCP over HTTP (recommended for the server)
+claude mcp add --transport http memex-web http://localhost:8765/mcp
+
+# …or stdio, the same binary inside the running container
+claude mcp add memex-web -- docker exec -i memex-allinone memex mcp</code></pre>
+          <p class="mcp-tools">
+            The same 9 tools on both transports · 100 % local · no LLM inside the
+            server. Full run guide →
+            <a href="https://github.com/Two-Weeks-Team/memex/blob/main/deploy/web/README.md" target="_blank" rel="noopener">deploy/web/README.md</a>.
+          </p>
+        </div>
+      </details>
+    </div>
+  </section>
+
   <section class="install" id="install">
     <div class="wrap">
-      <h2>Install</h2>
+      <h2>Install the desktop app</h2>
       <p class="h-sub">
         macOS 11+ (Apple Silicon recommended). Tested on macOS 26.5 / arm64.
         Linux + Windows builds are roadmap items.
@@ -745,7 +879,7 @@ npm install</pre>
           <h4>Start Qdrant locally</h4>
           <pre># Binary (arm64 macOS):
 mkdir -p .qdrant && curl -sL \
-  https://github.com/qdrant/qdrant/releases/download/v1.18.0/qdrant-aarch64-apple-darwin.tar.gz \
+  https://github.com/qdrant/qdrant/releases/download/v1.18.1/qdrant-aarch64-apple-darwin.tar.gz \
   | tar xz -C .qdrant
 ./.qdrant/qdrant &amp;</pre>
         </div>
@@ -771,7 +905,8 @@ open src-tauri/target/release/bundle/macos/Memex.app</pre>
       <a href="https://github.com/Two-Weeks-Team/memex">GitHub</a> ·
       <a href="https://github.com/Two-Weeks-Team/memex/blob/main/LICENSE">Apache 2.0</a> ·
       <a href="https://github.com/Two-Weeks-Team/memex/blob/main/docs/architecture.md">Architecture</a> ·
-      <a href="https://github.com/Two-Weeks-Team/memex/blob/main/docs/qdrant-features.md">Qdrant features</a>
+      <a href="https://github.com/Two-Weeks-Team/memex/blob/main/docs/qdrant-features.md">Qdrant features</a> ·
+      <a href="https://github.com/Two-Weeks-Team/memex/blob/main/deploy/web/README.md">Server variant</a>
     </div>
     <div class="credits">
       © 2026 · Built for

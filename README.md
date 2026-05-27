@@ -45,6 +45,7 @@
 | **Built for** | [Qdrant Vector Space Day 2026](https://qdrant.tech) — *"Think Outside the Bot."* All code authored during the hackathon build period (May 2026). |
 | **Qdrant role** | **Load-bearing, not a sidecar** — five distinct Qdrant primitives *are* the product. **No chatbot, no LLM at runtime.** |
 | **Landing page** | [sgwannabe.github.io/memex](https://sgwannabe.github.io/memex/) (static single-file, no JS) |
+| **Server variant** | Run Memex headless as a **single Docker image** — Qdrant + web UI/API + MCP in one container, usable from the Claude CLI → [deploy/web/README.md](deploy/web/README.md) |
 
 ### 🧑‍⚖️ Judge path in 5 steps
 
@@ -506,8 +507,8 @@ The Lens slider is intentionally the *last* surface, not the first.
 # 1. Clone + install JS deps
 gh repo clone Two-Weeks-Team/memex ~/memex && cd ~/memex && npm install
 
-# 2. Start Qdrant (binary path — or docker run -d -p 6333:6333 -p 6334:6334 qdrant/qdrant:v1.18.0)
-mkdir -p .qdrant && curl -sL https://github.com/qdrant/qdrant/releases/download/v1.18.0/qdrant-aarch64-apple-darwin.tar.gz | tar xz -C .qdrant
+# 2. Start Qdrant (binary path — or docker run -d -p 6333:6333 -p 6334:6334 qdrant/qdrant:v1.18.1)
+mkdir -p .qdrant && curl -sL https://github.com/qdrant/qdrant/releases/download/v1.18.1/qdrant-aarch64-apple-darwin.tar.gz | tar xz -C .qdrant
 ./.qdrant/qdrant &
 
 # 3. Index your ~/.claude/projects (downloads BGE-small ~130 MB on first run)
@@ -547,7 +548,7 @@ npm install
 bash scripts/start-qdrant.sh
 ```
 
-This starts `qdrant/qdrant:v1.18.0`, waits for `/readyz`, and prints the
+This starts `qdrant/qdrant:v1.18.1`, waits for `/readyz`, and prints the
 health-check command. Qdrant listens on:
 
 | Port | Protocol | Used by | URL |
@@ -563,11 +564,11 @@ Stop later with `bash scripts/start-qdrant.sh --stop` (data is preserved in the 
 
 ```bash
 # Raw docker (no compose):
-docker run -d --name memex-qdrant -p 6333:6333 -p 6334:6334 qdrant/qdrant:v1.18.0
+docker run -d --name memex-qdrant -p 6333:6333 -p 6334:6334 qdrant/qdrant:v1.18.1
 
 # Prebuilt binary (no Docker — Apple Silicon shown):
 mkdir -p .qdrant && cd .qdrant
-curl -sL https://github.com/qdrant/qdrant/releases/download/v1.18.0/qdrant-aarch64-apple-darwin.tar.gz | tar xz
+curl -sL https://github.com/qdrant/qdrant/releases/download/v1.18.1/qdrant-aarch64-apple-darwin.tar.gz | tar xz
 ./qdrant            # serves Qdrant on localhost:6333 (HTTP) + 6334 (gRPC)
 ```
 

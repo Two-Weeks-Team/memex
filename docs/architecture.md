@@ -28,7 +28,7 @@ A one-screen reference for someone reading the code for the first time.
    │            │ qdrant-client 1.18 (gRPC) / reqwest (HTTP for snapshots)
    │            ▼
    │   ┌──────────────────────────────────────────────────┐
-   │   │ local Qdrant 1.18.0                              │
+   │   │ local Qdrant 1.18.1                              │
    │   │ collection `memex_sessions`                      │
    │   │  point_id = uuid_v5(session_id)                  │
    │   │  vectors  = {content, tool, path, error, code}   │
