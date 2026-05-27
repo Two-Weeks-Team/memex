@@ -33,6 +33,16 @@ pub const LOOP_RECENT_WINDOW: usize = 10;
 /// Errors-in-window threshold that flips the banner.
 pub const LOOP_ERROR_THRESHOLD: usize = 3;
 
+/// Per-session debounce window for Loop Breaker hook emission. Once the
+/// hook surfaces the pivot for a given session_id, suppress further emits
+/// for this window so the agent doesn't see the same `# ⚠ Memex Loop
+/// Breaker` block on every subsequent Bash error in the same loop.
+///
+/// 20 minutes mirrors the GUI watcher's `LOOP_DEBOUNCE` so the two
+/// surfaces (Tauri banner + hook injection) honor the same cool-down
+/// window — addresses PR #8 follow-up #2 (Loop Breaker dual-fire).
+pub const LOOP_DEBOUNCE_SECS: u64 = 60 * 20;
+
 /// Why a session was judged "stuck", carrying the numbers the pivot surface
 /// needs to render an honest, factual message ("N errors in the last W turns").
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -79,6 +89,76 @@ pub fn is_stuck(session: &Session) -> Option<StuckContext> {
         recent_window: LOOP_RECENT_WINDOW,
         total_turns: session.turns.len(),
     })
+}
+
+// ---------------------------------------------------------------------------
+// Cross-process debounce (PR #8 follow-up #2)
+// ---------------------------------------------------------------------------
+//
+// The hook command (`memex loop-check --hook post-tool-use`) is a one-shot
+// process spawned by Claude Code on every Bash PostToolUse — there's no
+// in-process state to hold a debounce HashMap (unlike the long-lived GUI
+// watcher). Use a touch-file per session whose mtime IS the last-fired
+// timestamp. The GUI watcher honors the same path, so a primer fired by the
+// watcher also suppresses the hook (and vice versa) for the next 20 min.
+
+/// Returns the directory where Loop Breaker debounce touch-files live.
+/// `$XDG_CACHE_HOME/memex/loopcheck` on Unix, `%LOCALAPPDATA%\memex\loopcheck`
+/// on Windows. Creates the directory if it doesn't exist.
+fn debounce_dir() -> std::path::PathBuf {
+    let base = dirs::cache_dir().unwrap_or_else(std::env::temp_dir);
+    let dir = base.join("memex").join("loopcheck");
+    let _ = std::fs::create_dir_all(&dir);
+    dir
+}
+
+/// Sanitize a session_id into a filename-safe stem. session_ids are
+/// already UUID-shaped in practice, but be defensive against arbitrary
+/// agent identifiers.
+fn debounce_stem(session_id: &str) -> String {
+    session_id
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '_' })
+        .take(96)
+        .collect()
+}
+
+fn debounce_path(session_id: &str) -> std::path::PathBuf {
+    debounce_dir().join(format!("{}.ts", debounce_stem(session_id)))
+}
+
+/// True iff Loop Breaker hasn't fired for this session within
+/// `LOOP_DEBOUNCE_SECS`. Reading the touch-file's mtime is a single stat
+/// syscall — fast on the hook hot path. Returns `true` on any I/O error
+/// (fail-open: better to occasionally double-emit than to suppress
+/// indefinitely if the cache dir is unwriteable).
+pub fn should_fire_for_session(session_id: &str) -> bool {
+    let path = debounce_path(session_id);
+    let Ok(meta) = std::fs::metadata(&path) else {
+        return true;
+    };
+    let Ok(mtime) = meta.modified() else { return true };
+    let Ok(elapsed) = std::time::SystemTime::now().duration_since(mtime) else {
+        return true;
+    };
+    elapsed.as_secs() >= LOOP_DEBOUNCE_SECS
+}
+
+/// Stamp the touch-file so future calls within the debounce window
+/// suppress further emits. Best-effort: I/O failure is logged-but-ignored
+/// so a missing stamp doesn't break the hook output (which the agent has
+/// already received by the time we mark).
+pub fn mark_fired_for_session(session_id: &str) {
+    let path = debounce_path(session_id);
+    // `File::create` with truncate=true updates the mtime even when the
+    // file already exists. Empty payload is intentional — mtime IS the
+    // signal.
+    if let Err(e) = std::fs::write(&path, b"") {
+        eprintln!(
+            "[memex loopcheck] failed to write debounce stamp at {}: {e}",
+            path.display()
+        );
+    }
 }
 
 #[cfg(test)]
@@ -177,5 +257,61 @@ mod tests {
         assert_eq!(turns.len(), LOOP_MIN_TURNS);
         let s = sess(turns);
         assert!(is_stuck(&s).is_some());
+    }
+
+    // ----- PR #8 follow-up #2 — cross-process debounce ----------------
+
+    /// Sanitization: turn `/`, `.`, and other path-busting chars into `_`
+    /// so a malformed session id can't traverse out of the debounce dir.
+    #[test]
+    fn debounce_stem_strips_path_traversal_chars() {
+        let s = debounce_stem("../../etc/passwd");
+        assert!(!s.contains('/'));
+        assert!(!s.contains('.'));
+        assert!(s.starts_with('_'));
+    }
+
+    #[test]
+    fn debounce_stem_caps_length() {
+        let huge = "a".repeat(500);
+        assert!(debounce_stem(&huge).len() <= 96);
+    }
+
+    #[test]
+    fn debounce_should_fire_then_marked_suppresses() {
+        // Use a unique session id per test run to avoid colliding with
+        // any real debounce file the local watcher might have written.
+        let sid = format!(
+            "memex-test-debounce-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        );
+        // Before marking: fire is allowed.
+        assert!(should_fire_for_session(&sid));
+        // After marking: fire is suppressed (mtime is now-ish).
+        mark_fired_for_session(&sid);
+        assert!(
+            !should_fire_for_session(&sid),
+            "freshly-marked session should suppress further fires within debounce window"
+        );
+        // Cleanup the touch-file so we don't leak test state.
+        let _ = std::fs::remove_file(debounce_path(&sid));
+    }
+
+    #[test]
+    fn debounce_should_fire_when_no_touch_file_exists() {
+        // Fail-open: a session we've never marked is always allowed to fire.
+        let sid = format!(
+            "memex-test-debounce-virgin-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        );
+        // Belt-and-suspenders: ensure no stale file from a prior run.
+        let _ = std::fs::remove_file(debounce_path(&sid));
+        assert!(should_fire_for_session(&sid));
     }
 }

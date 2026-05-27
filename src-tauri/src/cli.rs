@@ -568,6 +568,24 @@ fn cmd_loop_check(cwd: Option<PathBuf>, hook: String) -> Result<()> {
         return Ok(());
     };
 
+    // PR #8 follow-up #2 — per-session debounce so the hook doesn't re-inject
+    // the same Loop Breaker pivot on EVERY subsequent Bash error. Once the
+    // stuck gate is open it stays open until 7+ successful tools push the
+    // errors out of the LOOP_RECENT_WINDOW, so without this the agent would
+    // see the same `# ⚠ Memex Loop Breaker` block ~5-10 times in a row.
+    //
+    // State lives as a touch-file at
+    //   $XDG_CACHE_HOME/memex/loopcheck/<session_id>.ts (defaults to
+    //   ~/.cache/memex/loopcheck on Unix, %LOCALAPPDATA%/memex/loopcheck on
+    // Windows via `dirs::cache_dir`). One file per session; mtime IS the
+    // last-fired timestamp. Re-using `loopcheck::LOOP_DEBOUNCE_SECS`
+    // (canonical 20-min window — same the GUI watcher uses) keeps the two
+    // surfaces in sync (concern #2 also covers the GUI+hook double-fire:
+    // both honor the SAME debounce file so they suppress each other).
+    if !crate::loopcheck::should_fire_for_session(&active.session_id) {
+        return Ok(());
+    }
+
     let tool = payload
         .get("tool_name")
         .and_then(|v| v.as_str())
@@ -581,6 +599,8 @@ past session broke out of a comparable position.\n",
         stuck.recent_errors, stuck.recent_window, tool,
     );
     crate::hook::emit(event, &body);
+    // Stamp AFTER emit so a failed emit doesn't suppress the next try.
+    crate::loopcheck::mark_fired_for_session(&active.session_id);
     Ok(())
 }
 

@@ -540,24 +540,21 @@ async fn tool_call(state: &Arc<McpState>, params: Value) -> Result<Value> {
             let cwd = companion::resolve_cwd_arg(cwd_arg.as_deref())?;
             let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(8) as usize;
             let qdrant = state.qdrant().await?;
-            // PR7-A — lazy embedder. First compose a LOCAL-ONLY primer (no
-            // embedder): the common case is resuming a directory that already
-            // has indexed sessions, served entirely from the project_name
-            // keyword scroll — so we never pay the ~130MB BGE-small load and
-            // the primer works offline / cold-start. Only when no local
-            // project matched do we lazily init the embedder and recompose
-            // with the cross-project semantic-neighbor pass.
-            let primer = {
-                let local =
-                    companion::compose_memory_primer_lazy(&qdrant, None, &cwd, limit).await?;
-                if local.matched_local_project {
-                    local
-                } else {
-                    let embedder = state.embedder().await?;
-                    companion::compose_memory_primer_lazy(&qdrant, Some(&embedder), &cwd, limit)
-                        .await?
-                }
-            };
+            // PR7-A — lazy embedder. Local-project hits use the
+            // project_name keyword scroll only (no embedder), so the
+            // common "resume in this directory" case never pays the
+            // ~130MB BGE-small ONNX init. Only when no local match
+            // exists do we lazy-load the embedder for the cross-project
+            // semantic-neighbor pass. PR #8 follow-up #1 — centralized
+            // in `companion::compose_memory_primer_lazy_load` so the
+            // peek-then-load branch isn't hand-rolled at every caller.
+            let primer = companion::compose_memory_primer_lazy_load(
+                &qdrant,
+                &cwd,
+                limit,
+                || async { state.embedder().await },
+            )
+            .await?;
             serde_json::to_value(primer)?
         }
         "generate_wrapped_report" => {

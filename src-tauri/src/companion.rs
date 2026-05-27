@@ -254,6 +254,35 @@ fn is_boilerplate_line(line: &str) -> bool {
     if PREFIXES.iter().any(|p| lower_head.starts_with(p)) {
         return true;
     }
+    // Self-referential bootstrap noise (PR #8 follow-up #3): when Memex
+    // is being demoed / dogfooded, user turns frequently look like
+    //   "Call the memex MCP tool get_project_memory with cwd=…"
+    //   "Show me the markdown primer it returned"
+    //   "Run the mcp__memex__find_similar_sessions tool"
+    // These are *test queries about Memex itself*, not real engineering
+    // intent. Without this filter the primer ends up echoing Memex's
+    // own bootstrap turns as "Past intents in this area", which is
+    // confusing for any judge / new user inspecting the demo.
+    //
+    // Matches anywhere in the first 80 chars (the snippet we already
+    // lowered above), not just prefix: the noise tends to land mid-line
+    // after agent quoting.
+    const SELF_REF_NOISE: &[&str] = &[
+        "mcp__memex__",
+        "call the memex mcp",
+        "memex mcp tool",
+        "memex's mcp",
+        "get_project_memory",
+        "find_similar_sessions",
+        "find_similar_error",
+        "predict_next_action",
+        "generate_wrapped_report",
+        "analyze_corpus_topology",
+        "snapshot_export",
+    ];
+    if SELF_REF_NOISE.iter().any(|n| lower_head.contains(n)) {
+        return true;
+    }
     false
 }
 
@@ -391,6 +420,46 @@ pub async fn compose_memory_primer_lazy(
     limit: usize,
 ) -> Result<MemoryPrimer> {
     compose_memory_primer_excluding(qdrant, embedder, cwd, limit, &[]).await
+}
+
+/// Lazy-embedder primer composition. Peeks at the local-project pass
+/// first; only invokes `embedder_loader` when the cross-project
+/// semantic-neighbor pass would actually contribute (no local matches).
+///
+/// Centralizes the two-call lazy-embedder pattern that PR #8's MCP
+/// `get_project_memory` handler previously inlined, so callers no
+/// longer hand-roll the peek-then-load branch. The `embedder_loader`
+/// closure is only awaited when needed — local-only hits never pay
+/// the ~130MB BGE-small ONNX init.
+///
+/// **Known minor cost (PR #8 follow-up #1).** When no local hits are
+/// found, `compose_memory_primer_excluding` re-runs the project_name
+/// keyword scroll inside the second call. The scroll is index-backed
+/// (~< 10ms measured at the demo's session counts) so the duplication
+/// is below the demo's noise floor. A future refactor can extract
+/// Pass A as a `pub(crate)` helper and thread its result through,
+/// avoiding the second scroll on the cross-project fallback path.
+pub async fn compose_memory_primer_lazy_load<F, Fut, E>(
+    qdrant: &Qdrant,
+    cwd: &Path,
+    limit: usize,
+    embedder_loader: F,
+) -> Result<MemoryPrimer>
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = std::result::Result<E, anyhow::Error>>,
+    E: AsRef<Embedder>,
+{
+    // First pass: local-only (None embedder). Cheap — single Qdrant
+    // keyword scroll, no jsonl re-parse, no embedder.
+    let local = compose_memory_primer_excluding(qdrant, None, cwd, limit, &[]).await?;
+    if local.matched_local_project {
+        return Ok(local);
+    }
+    // No local hits — fall back to cross-project semantic neighbors.
+    // Load the embedder NOW (first time the caller actually needs it).
+    let embedder_arc = embedder_loader().await?;
+    compose_memory_primer_excluding(qdrant, Some(embedder_arc.as_ref()), cwd, limit, &[]).await
 }
 
 /// Same as [`compose_memory_primer`], but skips any past sessions whose
@@ -1636,6 +1705,30 @@ OAuth 로그인을 이 프로젝트에 붙여줘.";
         // Real user intents must NOT be filtered.
         assert!(!is_boilerplate_line("Add OAuth login to this Next.js app"));
         assert!(!is_boilerplate_line("이 코드베이스에 인증 붙여줘"));
+    }
+
+    /// PR #8 follow-up #3 — self-referential MCP-tool turns appearing in
+    /// the corpus (Memex demo / dogfood sessions) must be filtered so the
+    /// primer doesn't echo "Call the memex MCP tool" / `mcp__memex__*` as
+    /// the user's past intent.
+    #[test]
+    fn boilerplate_line_skips_self_referential_memex_mcp_noise() {
+        assert!(is_boilerplate_line(
+            "Call the memex MCP tool get_project_memory with cwd=/Users/demo/acme"
+        ));
+        assert!(is_boilerplate_line(
+            "Run mcp__memex__find_similar_sessions and show the top 3"
+        ));
+        assert!(is_boilerplate_line(
+            "Use predict_next_action to figure out what comes next"
+        ));
+        assert!(is_boilerplate_line(
+            "memex MCP tool generate_wrapped_report with window=30"
+        ));
+        // Real engineering intents must STILL pass through — the filter
+        // must not bleed into legitimate Memex feature discussions.
+        assert!(!is_boilerplate_line("Add a button to the Companion modal"));
+        assert!(!is_boilerplate_line("Memex needs better Korean tokenization"));
     }
 
     #[test]

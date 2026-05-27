@@ -733,7 +733,11 @@ async fn maybe_fire_loop_breaker(
         None => return Ok(false),
     };
 
-    // Debounce.
+    // Debounce: in-memory map (per-watcher-process) AND the on-disk
+    // touch-file used by the headless `memex loop-check` hook. Honoring
+    // both means the GUI banner + the Claude Code hook can't double-fire
+    // for the same session — whichever surface stamps first suppresses
+    // the other for the 20-min window (PR #8 follow-up #2).
     let key = session.session_id.clone();
     {
         let g = debounce.lock().await;
@@ -743,6 +747,9 @@ async fn maybe_fire_loop_breaker(
                 return Ok(false);
             }
         }
+    }
+    if !crate::loopcheck::should_fire_for_session(&key) {
+        return Ok(false);
     }
 
     // Ask predict for what past-you would do at this conversational
@@ -772,11 +779,14 @@ async fn maybe_fire_loop_breaker(
         return Ok(false);
     }
 
-    // Reserve debounce slot now we're committed to firing.
+    // Reserve debounce slot in BOTH the in-memory map and the on-disk
+    // touch-file so the headless hook also sees the suppression (PR #8
+    // follow-up #2).
     {
         let mut g = debounce.lock().await;
-        g.insert(key, SystemTime::now());
+        g.insert(key.clone(), SystemTime::now());
     }
+    crate::loopcheck::mark_fired_for_session(&key);
 
     let top = &ctx.predictions[0];
     let project = session.project_name.as_deref().unwrap_or("?");
