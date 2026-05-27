@@ -25,6 +25,7 @@
         <button id="btn-dashboard" type="button" class="btn">Dashboard</button>
         <button id="btn-topology" type="button" class="btn">Topology</button>
         <button id="btn-mix" type="button" class="btn">Mix &amp; Match</button>
+        <button id="btn-companion" type="button" class="btn">Companion</button>
         <button id="btn-snapshot" type="button" class="btn">Snapshot</button>
         <button id="btn-refresh" type="button" class="btn primary">Re-index</button>
       </div>
@@ -268,6 +269,117 @@
         <div id="mix-results" class="mix-results"></div>
       </div>
     </dialog>
+
+    <dialog id="companion-modal" class="modal companion-modal">
+      <header>
+        <div>
+          <h3>📚 Memex Companion — Cold Start Killer</h3>
+          <p class="modal-sub">
+            Every Claude Code / Codex session starts with amnesia.
+            Memex composes a memory primer for any directory — past decisions,
+            known pitfalls, stack fingerprint — that you can drop into a new
+            session's system prompt. <strong>Zero LLM in the loop.</strong>
+          </p>
+        </div>
+        <button type="button" class="btn ghost" data-close>Close</button>
+      </header>
+      <div class="companion-body">
+        <div class="companion-controls">
+          <label class="companion-cwd-lbl" for="companion-cwd-input">
+            <span>Working directory</span>
+            <input
+              type="text"
+              id="companion-cwd-input"
+              class="companion-cwd-input"
+              placeholder="/Users/you/projects/foo  (paste a path, then press ↵)"
+              autocomplete="off"
+              spellcheck="false"
+            />
+          </label>
+          <label class="companion-limit-lbl" for="companion-limit-input">
+            <span>Sessions</span>
+            <input
+              type="number"
+              id="companion-limit-input"
+              class="companion-limit-input"
+              min="2"
+              max="20"
+              step="1"
+              value="8"
+            />
+          </label>
+          <button id="btn-companion-compose" type="button" class="btn primary">
+            Compose primer
+          </button>
+        </div>
+
+        <div id="companion-stats" class="companion-stats hidden">
+          <span class="cs-pill"><strong id="cs-sources">0</strong>&nbsp;sources</span>
+          <span class="cs-pill"><strong id="cs-decisions">0</strong>&nbsp;decisions</span>
+          <span class="cs-pill"><strong id="cs-pitfalls">0</strong>&nbsp;pitfalls</span>
+          <span class="cs-pill"><strong id="cs-intents">0</strong>&nbsp;intents</span>
+          <span class="cs-pill muted"><strong id="cs-elapsed">0</strong>&nbsp;ms</span>
+          <span class="cs-pill cs-mode" id="cs-mode">local match</span>
+          <button id="btn-companion-copy" type="button" class="btn xs primary">
+            Copy markdown
+          </button>
+          <button id="btn-companion-copy-prompt" type="button" class="btn xs">
+            Copy as system prompt
+          </button>
+        </div>
+
+        <div class="companion-grid">
+          <section class="companion-markdown-wrap">
+            <header class="cm-head">
+              <span class="cm-title">Memory primer (system prompt)</span>
+              <span class="cm-hint muted">paste into a new Claude Code / Codex session ↵</span>
+            </header>
+            <pre id="companion-markdown" class="companion-markdown"><span class="empty">Click <b>Compose primer</b> to mine your past sessions for this directory.</span></pre>
+          </section>
+          <aside class="companion-detail">
+            <header class="cm-head">
+              <span class="cm-title">Source sessions</span>
+            </header>
+            <div id="companion-sources" class="companion-sources">
+              <span class="empty muted">No sources yet.</span>
+            </div>
+          </aside>
+        </div>
+
+        <section class="companion-recent" id="companion-recent-wrap">
+          <header class="cm-head">
+            <span class="cm-title">Recent live primers (auto-composed by watcher)</span>
+          </header>
+          <div id="companion-recent" class="companion-recent-list">
+            <span class="empty muted">No live primers yet. Open a new Claude Code session and Memex will surface one within ~60s.</span>
+          </div>
+        </section>
+      </div>
+    </dialog>
+
+    <div id="loop-banner" class="recall-banner hidden">
+      <div class="recall-banner-body">
+        <span class="recall-icon">🔁</span>
+        <div class="recall-text">
+          <strong id="loop-banner-title">You've been stuck for a while</strong>
+          <span id="loop-banner-detail" class="muted"></span>
+        </div>
+        <button type="button" id="loop-banner-open" class="btn primary xs">Show pivot</button>
+        <button type="button" id="loop-banner-dismiss" class="btn ghost xs">Dismiss</button>
+      </div>
+    </div>
+
+    <div id="companion-banner" class="recall-banner hidden">
+      <div class="recall-banner-body">
+        <span class="recall-icon">📚</span>
+        <div class="recall-text">
+          <strong id="companion-banner-title">Memex loaded memory for this session</strong>
+          <span id="companion-banner-detail" class="muted"></span>
+        </div>
+        <button type="button" id="companion-banner-open" class="btn primary xs">Open primer</button>
+        <button type="button" id="companion-banner-dismiss" class="btn ghost xs">Dismiss</button>
+      </div>
+    </div>
 
     <dialog id="replay-modal" class="modal replay-modal">
       <header>

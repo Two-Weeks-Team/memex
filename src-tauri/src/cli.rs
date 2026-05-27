@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 
-use crate::{codex_parser, crud, indexer, parser};
+use crate::{codex_parser, companion, crud, indexer, parser};
 
 #[derive(Debug, Parser)]
 #[command(name = "memex", version, about = "Time Machine for AI session JSONL")]
@@ -115,6 +115,38 @@ pub enum Command {
         #[arg(long)]
         run: bool,
     },
+    /// **Cold Start Killer.** Compose a memory primer for `cwd` from past
+    /// sessions in the same codebase (or semantically similar projects).
+    /// The markdown output is the same one the MCP `get_project_memory`
+    /// tool returns — pipe it to `pbcopy` and paste into a new session as
+    /// a system message:
+    ///   memex memory --cwd "$(pwd)" | pbcopy
+    Memory {
+        /// Directory to compose for. Defaults to the current process cwd.
+        #[arg(long)]
+        cwd: Option<PathBuf>,
+        /// Max past sessions to mine.
+        #[arg(long, default_value_t = 8)]
+        limit: usize,
+        /// Emit the full structured JSON instead of just the markdown.
+        #[arg(long)]
+        json: bool,
+    },
+    /// **Engineering Wrapped.** A monthly / weekly digest of your corpus:
+    /// top tools, top binaries, intent / arc / outcome mix, repeated
+    /// decisions, debugging fingerprint. Designed to be screenshot-shared.
+    ///   memex wrapped --window-days 30 | pbcopy
+    Wrapped {
+        /// Time window in days. 0 = all-time.
+        #[arg(long, default_value_t = 30)]
+        window_days: u32,
+        /// Max sessions to deep-mine for repeated-decision detection.
+        #[arg(long, default_value_t = 32)]
+        limit: usize,
+        /// Emit JSON instead of the markdown digest.
+        #[arg(long)]
+        json: bool,
+    },
     /// Start the headless web service: serves the UI + JSON API + HTTP MCP at
     /// `/mcp`. Used by the single Docker image. (`web` feature only.)
     #[cfg(feature = "web")]
@@ -175,6 +207,8 @@ pub fn run(args: Vec<String>) -> Result<()> {
         Command::Snapshot { op } => cmd_snapshot(op),
         Command::Mcp => cmd_mcp(),
         Command::InstallMcp { run } => cmd_install_mcp(run),
+        Command::Memory { cwd, limit, json } => cmd_memory(cwd, limit, json),
+        Command::Wrapped { window_days, limit, json } => cmd_wrapped(window_days, limit, json),
         #[cfg(feature = "web")]
         Command::Serve { port, ui_dir } => cmd_serve(port, ui_dir),
         #[cfg(feature = "web")]
@@ -184,6 +218,63 @@ pub fn run(args: Vec<String>) -> Result<()> {
             Ok(())
         }
     }
+}
+
+fn cmd_wrapped(window_days: u32, limit: usize, json: bool) -> Result<()> {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .context("building tokio runtime")?;
+    rt.block_on(async {
+        let client = indexer::connect().await?;
+        // Wrapped is payload-only aggregation — no embedder needed.
+        // (Codex P2-a: skipped the 130MB BGE-small first-run download.)
+        let report =
+            crate::wrapped::compose_wrapped(&client, window_days, limit).await?;
+        eprintln!(
+            "[memex wrapped] window={}d sessions={} mined={} tool_calls={} ({} ms)",
+            window_days,
+            report.sessions_total,
+            report.sessions_mined,
+            report.total_tool_calls,
+            report.elapsed_ms,
+        );
+        if json {
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        } else {
+            print!("{}", report.markdown);
+        }
+        anyhow::Ok(())
+    })
+}
+
+fn cmd_memory(cwd: Option<PathBuf>, limit: usize, json: bool) -> Result<()> {
+    let resolved = companion::resolve_cwd_arg(cwd.as_deref())?;
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .context("building tokio runtime")?;
+    rt.block_on(async {
+        let client = indexer::connect().await?;
+        let embedder = indexer::Embedder::new()?;
+        let primer =
+            companion::compose_memory_primer(&client, &embedder, &resolved, limit).await?;
+        eprintln!(
+            "[memex memory] cwd={} sessions_used={}/{} decisions={} pitfalls={} ({} ms)",
+            primer.cwd,
+            primer.stats.neighbors_used,
+            primer.stats.neighbors_searched,
+            primer.stats.decisions_extracted,
+            primer.stats.pitfalls_extracted,
+            primer.elapsed_ms,
+        );
+        if json {
+            println!("{}", serde_json::to_string_pretty(&primer)?);
+        } else {
+            print!("{}", primer.markdown);
+        }
+        anyhow::Ok(())
+    })
 }
 
 #[cfg(feature = "web")]

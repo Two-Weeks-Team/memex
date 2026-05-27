@@ -16,6 +16,11 @@
 //!   - list_recent_sessions
 //!   - analyze_corpus_topology
 //!   - snapshot_export
+//!   - **get_project_memory** — Cold Start Killer. Synthesizes a memory
+//!     primer for the current working directory, distilling past decisions,
+//!     pitfalls, and stack fingerprint from semantically-related past
+//!     sessions. Drop the returned markdown into the agent's system message
+//!     at session start and the agent stops starting cold.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -26,8 +31,10 @@ use serde_json::{json, Value};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::Mutex as AsyncMutex;
 
+use crate::companion;
 use crate::indexer::{self, Embedder, LensWeights};
 use crate::parser;
+use crate::wrapped;
 
 const SERVER_NAME: &str = "memex";
 const SERVER_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -358,6 +365,43 @@ fn tools_catalog() -> Value {
                     },
                     "required": ["path"]
                 }
+            },
+            {
+                "name": "get_project_memory",
+                "description": "**Memex Cold Start Killer.** Given a working directory, returns a ready-to-inject memory primer for the agent. Mines past sessions in that codebase (or semantically similar projects) and surfaces: original intents, committed decisions (\"I'll use NextAuth\", \"Stack: Next.js + Drizzle\"), known pitfalls (errors the user already hit), and the stack fingerprint (top tools, file extensions, bash binaries). The response includes `markdown` — drop it verbatim into the next session's system prompt. Zero LLM in the loop; the primer is deterministically distilled from the local Qdrant index.\n\nCALL THIS AT TURN 0 of any Claude Code / Codex session. It is the difference between an agent that re-asks the user the same questions every session and one that resumes where past-you left off.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "cwd": {
+                            "type": "string",
+                            "description": "Absolute working directory for the new session. If omitted, uses the Memex process' own cwd (usually only useful in CLI smoke tests)."
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "default": 8,
+                            "description": "Max past sessions to mine. Caps the size of the markdown primer."
+                        }
+                    }
+                }
+            },
+            {
+                "name": "generate_wrapped_report",
+                "description": "**Memex Wrapped — engineering 'Spotify Wrapped'.** Returns a one-page corpus digest for the user's last `window_days` days (default 30, set to 0 for all-time). Aggregates the entire local Qdrant index into: top tools, top bash binaries, top file extensions, intent / arc / outcome distribution, repeated decisions (the 'I keep re-deciding the same thing' signal), debugging fingerprint, and cross-agent split when both Claude Code + Codex sessions are present. Zero LLM in the loop; deterministic aggregation. The response includes `markdown` formatted for screenshot sharing.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "window_days": {
+                            "type": "integer",
+                            "default": 30,
+                            "description": "Time window in days. 0 = all-time."
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "default": 32,
+                            "description": "Max sessions to deep-mine for repeated-decision detection."
+                        }
+                    }
+                }
             }
         ]
     })
@@ -484,6 +528,32 @@ async fn tool_call(state: &Arc<McpState>, params: Value) -> Result<Value> {
                 .ok_or_else(|| anyhow::anyhow!("path required"))?;
             let name = indexer::snapshot_export(std::path::Path::new(path)).await?;
             json!({ "snapshot_name": name, "path": path })
+        }
+        "get_project_memory" => {
+            // Resolve cwd from args; default to the Memex process cwd if the
+            // agent forgot to pass one (Claude Code typically supplies it via
+            // its tool_use input, but we don't want to hard-fail on omission).
+            let cwd_arg = args
+                .get("cwd")
+                .and_then(|v| v.as_str())
+                .map(std::path::PathBuf::from);
+            let cwd = companion::resolve_cwd_arg(cwd_arg.as_deref())?;
+            let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(8) as usize;
+            let qdrant = state.qdrant().await?;
+            let embedder = state.embedder().await?;
+            let primer =
+                companion::compose_memory_primer(&qdrant, &embedder, &cwd, limit).await?;
+            serde_json::to_value(primer)?
+        }
+        "generate_wrapped_report" => {
+            let window_days =
+                args.get("window_days").and_then(|v| v.as_u64()).unwrap_or(30) as u32;
+            let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(32) as usize;
+            let qdrant = state.qdrant().await?;
+            // Wrapped is payload-only — no embedder needed. (Codex P2-a.)
+            let report =
+                wrapped::compose_wrapped(&qdrant, window_days, limit).await?;
+            serde_json::to_value(report)?
         }
         other => return Err(anyhow::anyhow!("unknown tool: {other}")),
     };
