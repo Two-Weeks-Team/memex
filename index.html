@@ -1,0 +1,921 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Memex — Your AI session history as a navigable spatial memory</title>
+  <meta name="description" content="Time Machine for ~/.claude/projects. Six Qdrant primitives wired into one non-chatbot UI. Built for Qdrant Vector Space Day 2026." />
+  <meta property="og:title" content="Memex — non-chatbot UI for AI session history" />
+  <meta property="og:description" content="Six Qdrant primitives. Zero LLM at runtime. Built for VSD 2026." />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://sgwannabe.github.io/memex/" />
+  <link rel="icon" type="image/png" href="docs/img/topology.png" />
+  <style>
+    :root {
+      --bg-0: #0f0f12;
+      --bg-1: #16161a;
+      --bg-2: #1c1c1e;
+      --bg-3: #232325;
+      --bg-glass: rgba(255, 255, 255, 0.04);
+      --bg-glass-hi: rgba(255, 255, 255, 0.08);
+      --border: rgba(255, 255, 255, 0.10);
+      --border-strong: rgba(255, 255, 255, 0.20);
+      --fg: rgba(255, 255, 255, 0.96);
+      --fg-2: rgba(255, 255, 255, 0.62);
+      --fg-3: rgba(255, 255, 255, 0.40);
+      --accent: #0a84ff;
+      --accent-soft: rgba(10, 132, 255, 0.18);
+      --magenta: #bf5af2;
+      --green: #30d158;
+      --yellow: #ffd60a;
+      --red: #ff453a;
+      --sans: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Pretendard Variable", "Inter", system-ui, sans-serif;
+      --mono: "SF Mono", "JetBrains Mono", ui-monospace, monospace;
+      color-scheme: dark;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0; padding: 0;
+      background: var(--bg-0);
+      color: var(--fg);
+      font-family: var(--sans);
+      -webkit-font-smoothing: antialiased;
+      line-height: 1.55;
+    }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    code, pre { font-family: var(--mono); }
+
+    /* --- ambient background ---------------------------------------- */
+    body::before {
+      content: "";
+      position: fixed; inset: 0; pointer-events: none; z-index: -1;
+      background:
+        radial-gradient(ellipse 80% 60% at 50% -10%, rgba(10, 132, 255, 0.22), transparent 60%),
+        radial-gradient(ellipse 60% 50% at 100% 20%, rgba(191, 90, 242, 0.16), transparent 60%),
+        radial-gradient(ellipse 60% 60% at 0% 70%, rgba(48, 209, 88, 0.10), transparent 60%);
+    }
+
+    /* --- nav -------------------------------------------------------- */
+    nav.top {
+      position: sticky; top: 0; z-index: 50;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 14px 28px;
+      background: rgba(15, 15, 18, 0.72);
+      backdrop-filter: saturate(160%) blur(14px);
+      border-bottom: 1px solid var(--border);
+    }
+    nav.top .brand {
+      display: flex; align-items: center; gap: 10px;
+      font-weight: 700; letter-spacing: 0.3px; font-size: 15px;
+    }
+    nav.top .brand-dot {
+      width: 12px; height: 12px; border-radius: 50%;
+      background: linear-gradient(135deg, var(--magenta) 0%, var(--accent) 100%);
+      box-shadow: 0 0 18px rgba(191, 90, 242, 0.55);
+    }
+    nav.top .links { display: flex; gap: 22px; font-size: 13px; color: var(--fg-2); }
+    nav.top .links a { color: var(--fg-2); }
+    nav.top .links a:hover { color: var(--fg); text-decoration: none; }
+    nav.top .badge {
+      display: inline-flex; align-items: center; gap: 6px;
+      font-family: var(--mono); font-size: 11px;
+      padding: 4px 10px; border-radius: 999px;
+      background: var(--accent-soft); color: var(--accent);
+      border: 1px solid rgba(10, 132, 255, 0.35);
+    }
+
+    /* --- container -------------------------------------------------- */
+    .wrap { max-width: 1160px; margin: 0 auto; padding: 0 28px; }
+
+    /* --- hero ------------------------------------------------------- */
+    section.hero {
+      padding: 96px 0 64px;
+      text-align: center;
+    }
+    .hero .eyebrow {
+      display: inline-flex; align-items: center; gap: 6px;
+      font-family: var(--mono); font-size: 11.5px;
+      color: var(--magenta);
+      padding: 5px 12px; border-radius: 999px;
+      background: rgba(191, 90, 242, 0.10);
+      border: 1px solid rgba(191, 90, 242, 0.32);
+      margin-bottom: 22px;
+    }
+    .hero h1 {
+      font-size: clamp(40px, 8vw, 84px);
+      line-height: 1.02;
+      margin: 0 0 18px;
+      letter-spacing: -0.02em;
+      font-weight: 700;
+      background: linear-gradient(180deg, #ffffff 0%, rgba(255, 255, 255, 0.6) 110%);
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+    }
+    .hero .tagline {
+      font-size: clamp(18px, 2.4vw, 24px);
+      color: var(--fg-2);
+      max-width: 720px; margin: 0 auto 18px;
+      line-height: 1.4;
+    }
+    .hero .lede {
+      font-size: 15px; color: var(--fg-3);
+      max-width: 720px; margin: 0 auto 36px;
+    }
+    .hero .lede em { color: var(--fg-2); font-style: italic; }
+    .hero .cta {
+      display: inline-flex; gap: 12px; flex-wrap: wrap; justify-content: center;
+    }
+    .btn {
+      display: inline-flex; align-items: center; gap: 8px;
+      font-family: var(--sans); font-weight: 600; font-size: 14px;
+      padding: 11px 20px; border-radius: 10px;
+      border: 1px solid var(--border);
+      background: var(--bg-glass);
+      color: var(--fg);
+      text-decoration: none !important;
+      cursor: pointer;
+      transition: transform 80ms ease, background 160ms ease, border-color 160ms ease;
+    }
+    .btn:hover { background: var(--bg-glass-hi); border-color: var(--border-strong); transform: translateY(-1px); }
+    .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .btn.primary:hover { background: #1a90ff; }
+    .btn .arrow { font-size: 14px; opacity: 0.8; }
+
+    /* --- MCP badge under the hero CTAs ---------------------------- */
+    .mcp-badge {
+      margin: 22px auto 0;
+      max-width: 720px;
+      text-align: left;
+      border: 1px solid rgba(120, 220, 180, 0.32);
+      background: rgba(120, 220, 180, 0.06);
+      border-radius: 12px;
+      padding: 12px 16px;
+      color: var(--fg-2);
+      font-size: 13.5px;
+    }
+    .mcp-badge[open] { background: rgba(120, 220, 180, 0.10); }
+    .mcp-badge summary {
+      cursor: pointer;
+      list-style: none;
+      display: flex; align-items: center; gap: 10px;
+      font-weight: 500;
+    }
+    .mcp-badge summary::-webkit-details-marker { display: none; }
+    .mcp-badge summary strong { color: rgb(150, 240, 210); font-weight: 600; }
+    .mcp-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: rgb(120, 220, 180);
+      box-shadow: 0 0 0 4px rgba(120, 220, 180, 0.18);
+      flex: 0 0 8px;
+    }
+    .mcp-badge .mcp-cmd { margin-top: 12px; }
+    .mcp-badge pre {
+      background: rgba(0, 0, 0, 0.32);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 12px;
+      font-size: 12.5px;
+      overflow-x: auto;
+      color: var(--fg);
+    }
+    .mcp-badge code { font-family: var(--mono, ui-monospace, SFMono-Regular, monospace); }
+    .mcp-badge .mcp-tools {
+      margin: 10px 0 0;
+      font-size: 12.5px;
+      line-height: 1.55;
+      color: var(--fg-2);
+    }
+    .mcp-badge .mcp-tools code {
+      background: rgba(255, 255, 255, 0.06);
+      padding: 1px 6px;
+      border-radius: 4px;
+    }
+
+    /* --- hero screenshots strip ------------------------------------ */
+    .shots {
+      margin: 56px auto 0;
+      display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px;
+      max-width: 1080px;
+    }
+    .shots .shot {
+      position: relative;
+      border-radius: 14px; overflow: hidden;
+      border: 1px solid var(--border);
+      background: var(--bg-2);
+      box-shadow: 0 22px 60px rgba(0, 0, 0, 0.55);
+      transition: transform 280ms ease, border-color 280ms ease;
+    }
+    .shots .shot:hover { transform: translateY(-4px); border-color: var(--border-strong); }
+    .shots .shot img { display: block; width: 100%; height: auto; }
+    .shots .shot .cap {
+      position: absolute; left: 12px; bottom: 12px; right: 12px;
+      font-family: var(--sans); font-size: 11.5px; color: var(--fg);
+      padding: 6px 10px; border-radius: 7px;
+      background: rgba(15, 15, 18, 0.72);
+      border: 1px solid var(--border-strong);
+      backdrop-filter: blur(8px);
+    }
+
+    /* --- "not a chatbot" anchor ------------------------------------ */
+    section.not-bot {
+      padding: 96px 0 32px;
+    }
+    .not-bot .vsd-quote {
+      max-width: 760px; margin: 0 auto 36px;
+      padding: 22px 28px;
+      border-left: 3px solid var(--magenta);
+      background: linear-gradient(90deg, rgba(191, 90, 242, 0.08) 0%, transparent 100%);
+      border-radius: 0 14px 14px 0;
+      font-size: 17px; line-height: 1.55;
+    }
+    .not-bot .vsd-quote .src {
+      display: block; margin-top: 10px;
+      font-family: var(--mono); font-size: 11.5px; color: var(--fg-3);
+    }
+    .not-bot table.contrast {
+      width: 100%; max-width: 980px; margin: 0 auto;
+      border-collapse: collapse;
+      font-size: 14px;
+    }
+    .not-bot table.contrast th,
+    .not-bot table.contrast td {
+      padding: 13px 18px;
+      text-align: left;
+      vertical-align: top;
+      border-bottom: 1px solid var(--border);
+    }
+    .not-bot table.contrast th {
+      font-family: var(--mono); font-size: 11px;
+      font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px;
+      color: var(--fg-3);
+    }
+    .not-bot table.contrast th:last-child {
+      color: var(--accent);
+    }
+    .not-bot table.contrast td:first-child { color: var(--fg-3); }
+    .not-bot table.contrast td:last-child { color: var(--fg); font-weight: 500; }
+
+    /* --- features grid --------------------------------------------- */
+    section.features { padding: 64px 0; }
+    section h2 {
+      font-size: clamp(28px, 4vw, 40px);
+      letter-spacing: -0.015em;
+      margin: 0 0 6px;
+      font-weight: 700;
+    }
+    section h2 .num {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 36px; height: 36px; border-radius: 50%;
+      background: linear-gradient(135deg, var(--magenta) 0%, var(--accent) 100%);
+      color: white; font-size: 17px; font-weight: 700;
+      margin-right: 12px; vertical-align: -6px;
+    }
+    section .h-sub {
+      font-size: 15px; color: var(--fg-2);
+      margin: 0 0 36px;
+      max-width: 720px;
+    }
+    .grid {
+      display: grid; gap: 18px;
+      grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    }
+    .card {
+      position: relative;
+      padding: 22px 22px 24px;
+      background: var(--bg-2);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      transition: transform 200ms ease, border-color 200ms ease;
+    }
+    .card:hover { transform: translateY(-3px); border-color: var(--border-strong); }
+    .card .icon {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 40px; height: 40px; border-radius: 10px;
+      font-size: 20px;
+      background: var(--bg-glass-hi);
+      border: 1px solid var(--border);
+      margin-bottom: 14px;
+    }
+    .card h3 {
+      margin: 0 0 4px; font-size: 17px; font-weight: 600;
+    }
+    .card .qprim {
+      display: block; font-family: var(--mono); font-size: 10.5px;
+      color: var(--accent); margin-bottom: 12px;
+      letter-spacing: 0.2px;
+    }
+    .card p { margin: 0; color: var(--fg-2); font-size: 13.5px; line-height: 1.55; }
+    .card .badge-new {
+      position: absolute; top: 14px; right: 14px;
+      font-family: var(--mono); font-size: 9.5px;
+      padding: 2px 8px; border-radius: 999px;
+      background: linear-gradient(135deg, var(--magenta) 0%, var(--accent) 100%);
+      color: #fff; font-weight: 700;
+      letter-spacing: 0.4px;
+    }
+
+    /* --- predict spotlight ----------------------------------------- */
+    section.predict {
+      padding: 64px 0;
+    }
+    .spotlight {
+      display: grid; grid-template-columns: 1.1fr 1fr; gap: 36px;
+      align-items: center;
+      padding: 36px;
+      background: linear-gradient(135deg, rgba(191, 90, 242, 0.12) 0%, rgba(10, 132, 255, 0.06) 100%);
+      border: 1px solid rgba(191, 90, 242, 0.32);
+      border-radius: 18px;
+    }
+    .spotlight h3 {
+      font-size: clamp(22px, 3vw, 30px);
+      margin: 0 0 10px;
+      letter-spacing: -0.01em;
+    }
+    .spotlight p { color: var(--fg-2); font-size: 14.5px; margin: 0 0 16px; }
+    .spotlight ul { color: var(--fg-2); font-size: 14px; padding-left: 18px; margin: 0; }
+    .spotlight ul li { margin-bottom: 6px; }
+    .spotlight .demo-card {
+      padding: 18px;
+      background: rgba(15, 15, 18, 0.72);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      box-shadow: 0 18px 50px rgba(0, 0, 0, 0.55);
+    }
+    .spotlight .demo-card .row {
+      display: grid; grid-template-columns: 28px 1fr;
+      gap: 10px; padding: 10px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .spotlight .demo-card .row:last-child { border-bottom: none; }
+    .spotlight .demo-card .rank {
+      width: 28px; height: 28px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-family: var(--mono); font-weight: 700; font-size: 12px;
+      background: linear-gradient(135deg, var(--magenta), var(--accent));
+      color: white;
+    }
+    .spotlight .demo-card .head { font-size: 12px; }
+    .spotlight .demo-card .head strong { color: var(--fg); }
+    .spotlight .demo-card .head .meta { font-family: var(--mono); color: var(--fg-3); font-size: 10.5px; }
+    .spotlight .demo-card .ex {
+      margin-top: 5px;
+      font-family: var(--mono); font-size: 11px;
+      padding: 5px 8px; border-radius: 5px;
+      background: rgba(0, 0, 0, 0.35); color: var(--fg);
+      display: block;
+    }
+    .spotlight .demo-card .src {
+      margin-top: 4px;
+      font-size: 10.5px; color: var(--fg-3);
+    }
+
+    /* --- architecture ---------------------------------------------- */
+    section.arch {
+      padding: 64px 0;
+    }
+    .arch-box {
+      padding: 28px;
+      background: var(--bg-2);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      font-family: var(--mono); font-size: 12px;
+      color: var(--fg-2);
+      overflow-x: auto;
+      white-space: pre;
+      line-height: 1.5;
+    }
+
+    /* --- install ---------------------------------------------------- */
+    section.install { padding: 64px 0; }
+    .steps {
+      display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px;
+    }
+    .step {
+      padding: 22px;
+      background: var(--bg-2);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+    }
+    .step .step-num {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 26px; height: 26px; border-radius: 50%;
+      background: var(--accent-soft); color: var(--accent);
+      font-family: var(--mono); font-weight: 700; font-size: 13px;
+      margin-bottom: 10px;
+    }
+    .step h4 { margin: 0 0 6px; font-size: 15px; font-weight: 600; }
+    .step p { margin: 0 0 12px; color: var(--fg-2); font-size: 13px; }
+    .step pre {
+      margin: 0;
+      padding: 12px 14px;
+      background: rgba(0, 0, 0, 0.40);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-size: 12px; line-height: 1.55;
+      color: var(--fg);
+      overflow-x: auto;
+    }
+
+    /* --- run it your way (app vs server) --------------------------- */
+    section.run { padding: 64px 0; }
+    .run-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin-top: 8px; }
+    .run-card {
+      position: relative; padding: 24px;
+      background: var(--bg-2); border: 1px solid var(--border); border-radius: 16px;
+    }
+    .run-card.featured {
+      background: linear-gradient(135deg, rgba(10, 132, 255, 0.10) 0%, rgba(191, 90, 242, 0.08) 100%);
+      border-color: rgba(10, 132, 255, 0.34);
+    }
+    .run-card .rc-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+    .run-card .rc-head .ic { font-size: 22px; }
+    .run-card h3 { margin: 0; font-size: 18px; font-weight: 650; }
+    .run-card .rc-sub { color: var(--fg-2); font-size: 13.5px; margin: 0 0 14px; line-height: 1.5; }
+    .run-card .rc-sub em { color: var(--fg); font-style: normal; font-weight: 600; }
+    .run-card pre {
+      margin: 0 0 14px; padding: 12px 14px;
+      background: rgba(0, 0, 0, 0.42); border: 1px solid var(--border);
+      border-radius: 9px; font-size: 12.5px; line-height: 1.6; color: var(--fg); overflow-x: auto;
+    }
+    .run-card pre .c { color: var(--fg-3); }
+    .run-card pre .p { color: var(--green); }
+    .chiprow { display: flex; flex-wrap: wrap; gap: 7px; }
+    .chip {
+      font-family: var(--mono); font-size: 11px; padding: 4px 9px; border-radius: 999px;
+      background: var(--bg-glass-hi); border: 1px solid var(--border); color: var(--fg-2);
+    }
+    .chip.on { color: var(--green); border-color: rgba(48, 209, 88, 0.34); background: rgba(48, 209, 88, 0.08); }
+    .run-shots {
+      margin-top: 22px; display: grid; grid-template-columns: 1.5fr 1fr; gap: 14px;
+    }
+    .run-shots .shot {
+      position: relative; border-radius: 14px; overflow: hidden;
+      border: 1px solid var(--border); background: var(--bg-2);
+      box-shadow: 0 22px 60px rgba(0, 0, 0, 0.5);
+      transition: transform 280ms ease, border-color 280ms ease;
+    }
+    .run-shots .shot:hover { transform: translateY(-4px); border-color: var(--border-strong); }
+    .run-shots .shot img { display: block; width: 100%; height: auto; }
+    .run-shots .shot .cap {
+      position: absolute; left: 12px; bottom: 12px; right: 12px;
+      font-size: 11.5px; color: var(--fg);
+      padding: 6px 10px; border-radius: 7px;
+      background: rgba(15, 15, 18, 0.74);
+      border: 1px solid var(--border-strong);
+      backdrop-filter: blur(8px);
+    }
+
+    /* --- footer ----------------------------------------------------- */
+    footer {
+      margin-top: 96px;
+      padding: 36px 28px;
+      border-top: 1px solid var(--border);
+      text-align: center;
+      color: var(--fg-3);
+      font-size: 12.5px;
+    }
+    footer a { color: var(--fg-2); }
+    footer .credits {
+      margin-top: 8px; font-family: var(--mono); font-size: 11px;
+    }
+
+    @media (max-width: 760px) {
+      .shots { grid-template-columns: 1fr; }
+      .spotlight { grid-template-columns: 1fr; padding: 24px; }
+      .steps { grid-template-columns: 1fr; }
+      .run-grid { grid-template-columns: 1fr; }
+      .run-shots { grid-template-columns: 1fr; }
+      nav.top .links { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <nav class="top">
+    <div class="brand">
+      <span class="brand-dot"></span> Memex
+      <span class="badge" style="margin-left:8px">Qdrant VSD 2026</span>
+    </div>
+    <div class="links">
+      <a href="#features">Features</a>
+      <a href="#predict">Predict</a>
+      <a href="#run">Run</a>
+      <a href="#install">Install</a>
+      <a href="https://github.com/Two-Weeks-Team/memex" target="_blank" rel="noopener">GitHub ↗</a>
+    </div>
+  </nav>
+
+  <section class="hero">
+    <div class="wrap">
+      <div class="eyebrow">🗄️ Anthropic이 잊어도 Memex는 기억합니다</div>
+      <h1>Your AI session history<br>survives Anthropic's silent migrations.</h1>
+      <p class="tagline">
+        Claude Code rewrites its session storage every few months
+        <strong style="color:var(--fg)">without announcement</strong> and
+        auto-updates silently delete the old files
+        (<a href="https://github.com/anthropics/claude-code/issues/41591" target="_blank" rel="noopener">#41591</a> ·
+        <a href="https://github.com/anthropics/claude-code/issues/54907" target="_blank" rel="noopener">#54907</a> ·
+        <a href="https://github.com/anthropics/claude-code/issues/48782" target="_blank" rel="noopener">#48782</a>).
+        Memex reads both the legacy <code>~/.claude/transcripts/</code>
+        and modern <code>~/.claude/projects/</code> paths, indexes them
+        into a local Qdrant you own, and gives you a snapshot button.
+      </p>
+      <p class="lede">
+        <em>Vannevar Bush imagined the original
+        <a href="https://en.wikipedia.org/wiki/Memex" target="_blank" rel="noopener">Memex</a>
+        in 1945 — a personal knowledge machine built on associative trails,
+        not search boxes.</em> Eighty years later this is its desktop reincarnation —
+        wrapped in a non-chatbot UI powered by six Qdrant primitives.
+      </p>
+      <div class="cta">
+        <a class="btn primary" href="https://github.com/Two-Weeks-Team/memex" target="_blank" rel="noopener">
+          View on GitHub <span class="arrow">↗</span>
+        </a>
+        <a class="btn" href="#run">
+          Run it <span class="arrow">↓</span>
+        </a>
+        <a class="btn" href="#predict">
+          See predict in action <span class="arrow">→</span>
+        </a>
+      </div>
+
+      <details class="mcp-badge">
+        <summary>
+          <span class="mcp-dot"></span>
+          <strong>Works as an MCP server</strong>
+          — connect any AI agent (Claude Code, Codex, Cursor) to your local memex
+        </summary>
+        <div class="mcp-cmd">
+          <pre><code># one-time wiring — any MCP-aware AI agent can now call Memex tools
+claude mcp add memex /path/to/memex/src-tauri/target/release/memex mcp
+
+# or let Memex print the exact line for your machine
+memex install-mcp --run</code></pre>
+          <p class="mcp-tools">
+            9 tools exposed: <code>find_similar_sessions</code> ·
+            <code>find_similar_error</code> ·
+            <code>predict_next_action</code> ·
+            <code>mix_similar_sessions</code> ·
+            <code>get_session_summary</code> ·
+            <code>get_session_turn</code> ·
+            <code>list_recent_sessions</code> ·
+            <code>analyze_corpus_topology</code> ·
+            <code>snapshot_export</code>.
+            All stay 100 % local — no telemetry, no LLM call inside the server.
+          </p>
+        </div>
+      </details>
+
+      <div class="shots">
+        <div class="shot">
+          <img src="docs/img/stack.png" alt="Time Machine layered card stack" />
+          <span class="cap">🪟 Time Machine stack</span>
+        </div>
+        <div class="shot">
+          <img src="docs/img/topology.png" alt="3D Topology galaxy with cluster labels" />
+          <span class="cap">🌌 Topology galaxy</span>
+        </div>
+        <div class="shot">
+          <img src="docs/img/replay.png" alt="Replay engine — turn-by-turn animation" />
+          <span class="cap">⏯ Replay engine</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="not-bot">
+    <div class="wrap">
+      <h2>Why this isn't a chatbot</h2>
+      <p class="h-sub">Qdrant Vector Space Day 2026's prompt is unusually direct:</p>
+
+      <div class="vsd-quote">
+        <strong>"Think Outside the Bot."</strong> Forget the classical RAG
+        chatbot. Reimagine vector search beyond conversational interfaces —
+        <em>multi-modal apps, intelligent recommendations, advanced vector
+        search.</em>
+        <span class="src">— Qdrant VSD 2026 hackathon prompt</span>
+      </div>
+
+      <table class="contrast">
+        <thead>
+          <tr>
+            <th>The obvious RAG-chatbot version of this</th>
+            <th>What Memex does instead</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>A text box asking "what session am I looking for?"</td>
+            <td>A 3D <strong>Time Machine card deck</strong> showing every past session — ↑↓/wheel to time-travel.</td>
+          </tr>
+          <tr>
+            <td>Embed + retrieve + LLM-summarize a session.</td>
+            <td><strong>Replay</strong> the session turn-by-turn with Bash terminals, Edit diffs, Read snippets — exactly as you saw them live.</td>
+          </tr>
+          <tr>
+            <td>"Have I seen this error before?" → RAG → LLM → text answer.</td>
+            <td>A banner slides in with the past session whose <strong>error named-vector</strong> neighborhood matches — zero LLM calls.</td>
+          </tr>
+          <tr>
+            <td>"What's the shape of my work?" → LLM writes a paragraph.</td>
+            <td><strong>3D topology galaxy</strong> from Qdrant's Distance Matrix API, with auto-labeled clusters and cross-project bridge edges.</td>
+          </tr>
+          <tr>
+            <td>"What should I do next?" → LLM completion + tool-use.</td>
+            <td><strong>Predict next-action</strong> — embed the active session, find similar past sessions in Qdrant, surface what past-you did from a comparable position. No LLM.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="features" id="features">
+    <div class="wrap">
+      <h2><span class="num">6</span>Qdrant primitives, six surfaces</h2>
+      <p class="h-sub">
+        Each surface in Memex maps to a different Qdrant primitive — together
+        they cover named vectors → matrix sampling → discovery → payload
+        filtering → snapshots → recommendation. None of these are the
+        "embed-and-summarize" loop of classical RAG.
+      </p>
+
+      <div class="grid">
+        <div class="card">
+          <div class="icon">🪟</div>
+          <h3>Time Machine stack</h3>
+          <span class="qprim">payload-only scroll · no vectors</span>
+          <p>Boot the app and every past session appears as a 3D layered card deck. Arrow keys time-travel. No search box. Ever.</p>
+        </div>
+
+        <div class="card">
+          <div class="icon">🌌</div>
+          <h3>Topology galaxy</h3>
+          <span class="qprim">Distance Matrix API · search_matrix_pairs</span>
+          <p>WebGL scene of your corpus. Force-directed cluster auto-labels ("code + shell · Bash×1350 Edit×1032"). Yellow bridges = ideas that jumped between projects.</p>
+        </div>
+
+        <div class="card">
+          <div class="icon">🧪</div>
+          <h3>Mix &amp; Match</h3>
+          <span class="qprim">Discovery API · ContextInputPair</span>
+          <p>Drop sessions as positives + negatives. Qdrant returns sessions near the positives and far from the negatives. Recommendation, not retrieval.</p>
+        </div>
+
+        <div class="card">
+          <div class="icon">🔔</div>
+          <h3>Proactive recall</h3>
+          <span class="qprim">error named-vector + has_errors filter</span>
+          <p>While you work in another Claude Code session, Memex watches for fresh tool errors. Match a past resolution? A banner slides in with the link.</p>
+        </div>
+
+        <div class="card">
+          <span class="badge-new">NEW</span>
+          <div class="icon">🔮</div>
+          <h3>Predict next-action</h3>
+          <span class="qprim">content vector + neighbor pivot walk</span>
+          <p>Embed your last few turns, find K similar past sessions, locate the pivot turn, walk forward — surface what past-you did next. Ranked by frequency × similarity.</p>
+        </div>
+
+        <div class="card">
+          <div class="icon">⏯</div>
+          <h3>Replay engine</h3>
+          <span class="qprim">payload source_path · on-demand re-parse</span>
+          <p>Turn-by-turn animation of any past session with Bash terminals, Edit -/+ diffs, Read snippets. ⏮ ⏯ ⏭ controls, 1×/2×/4×/8×.</p>
+        </div>
+
+        <div class="card">
+          <div class="icon">🔍</div>
+          <h3>Lens slider</h3>
+          <span class="qprim">5 named vectors per point · parallel query</span>
+          <p>The "advanced vector search" axis — intentionally last. Five named vectors (content, tool, path, error, code), weighted by sliders. Per-vector contribution chips on every hit.</p>
+        </div>
+
+        <div class="card">
+          <div class="icon">📦</div>
+          <h3>Snapshot</h3>
+          <span class="qprim">Qdrant HTTP snapshot API</span>
+          <p>One portable file holding your entire indexed memory. Export, archive, share, restore on another machine.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="predict" id="predict">
+    <div class="wrap">
+      <div class="spotlight">
+        <div>
+          <h3>🔮 What past-you did next</h3>
+          <p>
+            The killer surface for a hackathon themed
+            <em>"intelligent recommendations"</em>. Click any session — Memex
+            queries the corpus for similar past sessions, finds the conversational
+            pivot in each one, walks <code>horizon</code> turns forward, and
+            aggregates the tool calls.
+          </p>
+          <ul>
+            <li><strong>Zero LLM</strong> — pure vector neighbors + tool-call frequency.</li>
+            <li>Cards rank by <code>frequency × similarity</code>.</li>
+            <li>Each pick links back to the <em>exact</em> source-turn-index — click to Replay it.</li>
+            <li>Mines your own engineering history as ground truth.</li>
+          </ul>
+        </div>
+        <div class="demo-card">
+          <div class="row">
+            <div class="rank">1</div>
+            <div>
+              <div class="head">
+                🖥 <strong>Bash</strong>
+                <span class="meta">· 67% · sim 65%</span>
+              </div>
+              <code class="ex">cargo build --release</code>
+              <div class="src">● project-redesign · turn #486 →</div>
+            </div>
+          </div>
+          <div class="row">
+            <div class="rank">2</div>
+            <div>
+              <div class="head">
+                ✏️ <strong>Edit</strong>
+                <span class="meta">· 33% · sim 64%</span>
+              </div>
+              <code class="ex">src-tauri/Cargo.toml</code>
+              <div class="src">● project-tool-a · turn #312 →</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="arch">
+    <div class="wrap">
+      <h2>Architecture</h2>
+      <p class="h-sub">
+        One desktop binary. One local Qdrant. Zero network calls after install.
+        Your <code>~/.claude/projects/**/*.jsonl</code> never leaves the machine.
+      </p>
+      <div class="arch-box">~/.claude/projects/  ──[ walkdir + serde_json ]──▶  parser.rs
+                                                       │
+                                                       ▼ 5 string extracts
+                                            ┌──────────────────────────┐
+                                            │ indexer.rs               │
+                                            │  fastembed BGE-small     │
+                                            │  qdrant-client 1.18      │
+                                            │  predict_next_actions()  │
+                                            └────────┬─────────────────┘
+                                                     │ gRPC / HTTP
+                                                     ▼
+                                            ┌──────────────────────────┐
+                                            │ local Qdrant 1.18        │
+                                            │ 5 named vectors × point  │
+                                            │ payload-indexed metadata │
+                                            └──────────────────────────┘
+
+                                            ↑ Tauri 2 webview ──▶ vanilla JS UI
+                                            ↑ commands.rs ── thin IPC wrappers</div>
+    </div>
+  </section>
+
+  <section class="run" id="run">
+    <div class="wrap">
+      <h2>Run it your way</h2>
+      <p class="h-sub">
+        The same Rust core and the same six Qdrant primitives — two ways to run.
+        Take the native macOS app, or the new <strong>single Docker image</strong>
+        that bundles Qdrant, the web UI, a JSON API, and an MCP server in one
+        container.
+      </p>
+
+      <div class="run-grid">
+        <div class="run-card">
+          <div class="rc-head"><span class="ic">🖥</span><h3>Desktop app · macOS</h3></div>
+          <p class="rc-sub">
+            A real window, OS notifications, and <em>live</em> proactive recall
+            that watches your sessions as you work.
+          </p>
+          <pre><span class="c"># build from source (Apple Silicon)</span>
+<span class="p">$</span> npm install &amp;&amp; npm run tauri build
+<span class="p">$</span> open src-tauri/target/release/bundle/macos/Memex.app</pre>
+          <div class="chiprow">
+            <span class="chip on">native UX</span>
+            <span class="chip on">live recall</span>
+            <span class="chip on">OS notifications</span>
+            <span class="chip">macOS only</span>
+          </div>
+        </div>
+
+        <div class="run-card featured">
+          <span class="badge-new">NEW</span>
+          <div class="rc-head"><span class="ic">🐳</span><h3>Server · one Docker image</h3></div>
+          <p class="rc-sub">
+            Qdrant + web UI + JSON API + MCP in <em>one</em> container. The
+            embedding model is pre-baked and the corpus auto-indexes on boot, so
+            it runs <em>fully offline</em>.
+          </p>
+          <pre><span class="c"># one command — Qdrant boots inside the image</span>
+<span class="p">$</span> docker run -p 8765:8765 memex-allinone
+<span class="c"># browser UI · JSON API · MCP — all on :8765</span></pre>
+          <div class="chiprow">
+            <span class="chip on">any OS (browser)</span>
+            <span class="chip on">JSON API</span>
+            <span class="chip on">MCP over HTTP</span>
+            <span class="chip on">offline</span>
+            <span class="chip on">non-root</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="run-shots">
+        <div class="shot">
+          <img src="docs/img/web/web-timemachine.png" alt="Memex web UI in a browser — Time Machine deck, Lens sliders, and Predict panel, served over HTTP" loading="lazy" />
+          <span class="cap">🌐 The whole UI in a browser — zero install</span>
+        </div>
+        <div class="shot">
+          <img src="docs/img/web/web-topology.png" alt="Topology galaxy rendered in the browser over HTTP" loading="lazy" />
+          <span class="cap">🌌 Topology, served over HTTP</span>
+        </div>
+      </div>
+
+      <details class="mcp-badge" style="margin-top:22px">
+        <summary>
+          <span class="mcp-dot"></span>
+          <strong>Connect any agent over MCP — two transports</strong>
+          — HTTP/SSE for the server, or stdio inside the container
+        </summary>
+        <div class="mcp-cmd">
+          <pre><code># remote MCP over HTTP (recommended for the server)
+claude mcp add --transport http memex-web http://localhost:8765/mcp
+
+# …or stdio, the same binary inside the running container
+claude mcp add memex-web -- docker exec -i memex-allinone memex mcp</code></pre>
+          <p class="mcp-tools">
+            The same 9 tools on both transports · 100 % local · no LLM inside the
+            server. Full run guide →
+            <a href="https://github.com/Two-Weeks-Team/memex/blob/main/deploy/web/README.md" target="_blank" rel="noopener">deploy/web/README.md</a>.
+          </p>
+        </div>
+      </details>
+    </div>
+  </section>
+
+  <section class="install" id="install">
+    <div class="wrap">
+      <h2>Install the desktop app</h2>
+      <p class="h-sub">
+        macOS 11+ (Apple Silicon recommended). Tested on macOS 26.5 / arm64.
+        Linux + Windows builds are roadmap items.
+      </p>
+      <div class="steps">
+        <div class="step">
+          <div class="step-num">1</div>
+          <h4>Clone &amp; install JS deps</h4>
+          <pre>gh repo clone Two-Weeks-Team/memex ~/memex
+cd ~/memex
+npm install</pre>
+        </div>
+        <div class="step">
+          <div class="step-num">2</div>
+          <h4>Start Qdrant locally</h4>
+          <pre># Binary (arm64 macOS):
+mkdir -p .qdrant && curl -sL \
+  https://github.com/qdrant/qdrant/releases/download/v1.18.1/qdrant-aarch64-apple-darwin.tar.gz \
+  | tar xz -C .qdrant
+./.qdrant/qdrant &amp;</pre>
+        </div>
+        <div class="step">
+          <div class="step-num">3</div>
+          <h4>Index <code>~/.claude/projects</code></h4>
+          <pre>cargo build --release --manifest-path src-tauri/Cargo.toml
+./src-tauri/target/release/memex scan --index
+# ~130 MB BGE-small ONNX downloads on first run, cached.</pre>
+        </div>
+        <div class="step">
+          <div class="step-num">4</div>
+          <h4>Launch the app</h4>
+          <pre>npm run tauri build
+open src-tauri/target/release/bundle/macos/Memex.app</pre>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <div>
+      <a href="https://github.com/Two-Weeks-Team/memex">GitHub</a> ·
+      <a href="https://github.com/Two-Weeks-Team/memex/blob/main/LICENSE">Apache 2.0</a> ·
+      <a href="https://github.com/Two-Weeks-Team/memex/blob/main/docs/architecture.md">Architecture</a> ·
+      <a href="https://github.com/Two-Weeks-Team/memex/blob/main/docs/qdrant-features.md">Qdrant features</a> ·
+      <a href="https://github.com/Two-Weeks-Team/memex/blob/main/deploy/web/README.md">Server variant</a>
+    </div>
+    <div class="credits">
+      © 2026 · Built for
+      <a href="https://qdrant.tech/blog/vector-space-day-sf-2026/" target="_blank" rel="noopener">Qdrant Vector Space Day 2026</a>
+      on
+      <a href="https://tauri.app">Tauri 2</a> ·
+      <a href="https://qdrant.tech">Qdrant 1.18</a> ·
+      <a href="https://github.com/Anush008/fastembed-rs">fastembed-rs</a>
+    </div>
+  </footer>
+</body>
+</html>
