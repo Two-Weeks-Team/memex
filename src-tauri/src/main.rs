@@ -7,6 +7,8 @@ use std::process::ExitCode;
 const CLI_SUBCOMMANDS: &[&str] = &[
     "scan", "search", "lens", "mix", "topology", "recall", "predict", "snapshot",
     "serve", "warm-embedder", "mcp", "install-mcp", "memory", "wrapped",
+    // PR #8 agent-integration surfaces.
+    "install", "reindex", "loop-check", "codex-notify",
     "help", "--help", "-h",
 ];
 

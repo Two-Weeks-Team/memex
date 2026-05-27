@@ -12,16 +12,12 @@ use anyhow::{Context, Result};
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
-    response::{
-        sse::{Event, KeepAlive, Sse},
-        Html, IntoResponse, Response,
-    },
+    response::{Html, IntoResponse, Response},
     routing::{get, post},
     Json, Router,
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
-use tower_http::cors::CorsLayer;
 use tower_http::services::ServeDir;
 
 use crate::{crud, indexer, lens, mcp, parser, retrieval, schema, sec};
@@ -49,6 +45,27 @@ type ApiResult = Result<Json<Value>, (StatusCode, String)>;
 
 fn err500<E: std::fmt::Display>(e: E) -> (StatusCode, String) {
     (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:#}"))
+}
+
+// PR6-D — input clamps. Unbounded `limit` / `sample` / `per_point` from the
+// query string let a single request ask Qdrant for an arbitrarily large result
+// set / distance matrix → a cheap memory + CPU DoS. Clamp every user-supplied
+// count to a sane ceiling at the handler boundary.
+const MAX_LIMIT: u64 = 200;
+const MAX_SAMPLE: u32 = 500;
+const MAX_PER_POINT: u32 = 20;
+
+#[inline]
+fn clamp_limit(n: u64) -> u64 {
+    n.clamp(1, MAX_LIMIT)
+}
+#[inline]
+fn clamp_sample(n: u32) -> u32 {
+    n.clamp(1, MAX_SAMPLE)
+}
+#[inline]
+fn clamp_per_point(n: u32) -> u32 {
+    n.clamp(1, MAX_PER_POINT)
 }
 
 /// Start the web service. Qdrant must be reachable (the Docker entrypoint waits
@@ -101,7 +118,11 @@ pub async fn serve(port: u16, ui_dir: PathBuf) -> Result<()> {
         // Generic Tauri-command bridge: the browser UI's __TAURI__ shim posts
         // here so the existing frontend works unchanged over HTTP.
         .route("/api/invoke/{cmd}", post(invoke_handler))
-        .route("/mcp", post(mcp_post).get(mcp_sse));
+        // PR6-E: only `POST /mcp` (JSON-RPC) is kept — that's what
+        // `claude mcp add --transport http` uses. The previous `GET /mcp` SSE
+        // route was a non-compliant readiness ping no client consumed; it's
+        // removed along with its handler/imports.
+        .route("/mcp", post(mcp_post));
 
     let app = Router::new()
         .merge(api)
@@ -113,7 +134,10 @@ pub async fn serve(port: u16, ui_dir: PathBuf) -> Result<()> {
         .route("/index.html", get(index_html))
         .route("/dashboard.html", get(dashboard_html))
         .fallback_service(ServeDir::new(&ui_dir).append_index_html_on_directories(true))
-        .layer(CorsLayer::permissive())
+        // PR6-A: NO `CorsLayer::permissive()`. The browser UI is served
+        // same-origin from this very server, so it needs no CORS headers;
+        // `permissive()` (Access-Control-Allow-Origin: *) would let ANY website
+        // the user visits read the entire indexed corpus via fetch(). Removed.
         .with_state(state);
 
     let addr = format!("0.0.0.0:{port}");
@@ -152,7 +176,8 @@ fn default_limit() -> u64 {
 }
 
 async fn search(State(s): State<WebState>, Query(q): Query<SearchQ>) -> ApiResult {
-    let hits = indexer::search_content(s.qdrant.as_ref(), s.embedder.as_ref(), &q.q, q.limit)
+    let limit = clamp_limit(q.limit);
+    let hits = indexer::search_content(s.qdrant.as_ref(), s.embedder.as_ref(), &q.q, limit)
         .await
         .map_err(err500)?;
     Ok(Json(json!({ "query": q.q, "hits": hits })))
@@ -180,7 +205,7 @@ async fn lens(State(s): State<WebState>, Json(body): Json<LensReq>) -> ApiResult
         s.embedder.as_ref(),
         &body.query,
         &weights,
-        body.limit,
+        clamp_limit(body.limit),
         60,
     )
     .await
@@ -189,7 +214,7 @@ async fn lens(State(s): State<WebState>, Json(body): Json<LensReq>) -> ApiResult
 }
 
 async fn recall(State(s): State<WebState>, Query(q): Query<SearchQ>) -> ApiResult {
-    let hits = indexer::recall(s.qdrant.as_ref(), s.embedder.as_ref(), &q.q, q.limit)
+    let hits = indexer::recall(s.qdrant.as_ref(), s.embedder.as_ref(), &q.q, clamp_limit(q.limit))
         .await
         .map_err(err500)?;
     Ok(Json(json!({ "error_text": q.q, "hits": hits })))
@@ -210,9 +235,14 @@ fn default_per_point() -> u32 {
 }
 
 async fn topology(State(s): State<WebState>, Query(q): Query<TopoQ>) -> ApiResult {
-    let topo = indexer::topology(s.qdrant.as_ref(), q.sample, q.per_point, None)
-        .await
-        .map_err(err500)?;
+    let topo = indexer::topology(
+        s.qdrant.as_ref(),
+        clamp_sample(q.sample),
+        clamp_per_point(q.per_point),
+        None,
+    )
+    .await
+    .map_err(err500)?;
     Ok(Json(serde_json::to_value(topo).map_err(err500)?))
 }
 
@@ -230,7 +260,7 @@ async fn mix(State(s): State<WebState>, Json(body): Json<MixReq>) -> ApiResult {
     if body.pos.is_empty() && body.neg.is_empty() {
         return Err((StatusCode::BAD_REQUEST, "provide at least one pos or neg session id".into()));
     }
-    let hits = indexer::mix_match(s.qdrant.as_ref(), &body.pos, &body.neg, body.limit)
+    let hits = indexer::mix_match(s.qdrant.as_ref(), &body.pos, &body.neg, clamp_limit(body.limit))
         .await
         .map_err(err500)?;
     Ok(Json(json!({ "hits": hits })))
@@ -243,7 +273,13 @@ struct IndexReq {
 }
 
 async fn index_path(State(s): State<WebState>, Json(body): Json<IndexReq>) -> ApiResult {
-    let path = PathBuf::from(&body.path);
+    // PR6-B: the caller-supplied path is re-scanned + each session's source
+    // jsonl re-parsed, so it MUST live inside the `sec` sandbox
+    // (~/.claude/projects or ~/.codex/sessions). Reject anything else with 403
+    // before touching the filesystem — otherwise a request could index (and
+    // thereby exfiltrate via search) arbitrary directories.
+    let path = sec::validate_session_path(std::path::Path::new(&body.path))
+        .map_err(|e| (StatusCode::FORBIDDEN, format!("path rejected: {e:#}")))?;
     let sessions = tokio::task::spawn_blocking(move || parser::scan_dir(&path))
         .await
         .map_err(|e| err500(format!("scan task panicked: {e}")))?
@@ -277,15 +313,6 @@ async fn mcp_post(State(s): State<WebState>, Json(body): Json<Value>) -> impl ax
         // Notification (no id) — JSON-RPC says no response body.
         None => StatusCode::ACCEPTED.into_response(),
     }
-}
-
-/// GET /mcp — minimal SSE stream so the endpoint is reachable for SSE-style
-/// clients; server→client streaming beyond a readiness ping is not used.
-async fn mcp_sse() -> Sse<impl futures::Stream<Item = Result<Event, std::convert::Infallible>>> {
-    let stream = futures::stream::once(async {
-        Ok(Event::default().event("ready").data("memex mcp sse ready"))
-    });
-    Sse::new(stream).keep_alive(KeepAlive::default())
 }
 
 // ---- Generic Tauri-command bridge (browser UI <-> HTTP) ------------------
@@ -418,7 +445,14 @@ async fn dispatch_invoke(s: &WebState, cmd: &str, args: Value) -> ApiResult {
             ok_json(parser::parse_session(&validated).map_err(err500)?)
         }
         "list_sessions" => {
-            let root = a_str(&args, "path").map(PathBuf::from).unwrap_or_else(web_scan_root);
+            // PR6-C: a user-supplied `path` is sandbox-validated (403 on
+            // reject); absent → the default scan root (trusted, set by the
+            // operator via MEMEX_SCAN_ROOT).
+            let root = match a_str(&args, "path") {
+                Some(p) => sec::validate_session_path(std::path::Path::new(&p))
+                    .map_err(|e| (StatusCode::FORBIDDEN, format!("path rejected: {e:#}")))?,
+                None => web_scan_root(),
+            };
             let limit = a_usize(&args, "limit").unwrap_or(60);
             let mut sessions = tokio::task::spawn_blocking(move || parser::scan_dir(&root))
                 .await
@@ -445,7 +479,13 @@ async fn dispatch_invoke(s: &WebState, cmd: &str, args: Value) -> ApiResult {
             }))
         }
         "refresh_index" => {
-            let root = a_str(&args, "path").map(PathBuf::from).unwrap_or_else(web_scan_root);
+            // PR6-C: same sandbox-validation as list_sessions for a
+            // user-supplied path; default scan root otherwise.
+            let root = match a_str(&args, "path") {
+                Some(p) => sec::validate_session_path(std::path::Path::new(&p))
+                    .map_err(|e| (StatusCode::FORBIDDEN, format!("path rejected: {e:#}")))?,
+                None => web_scan_root(),
+            };
             let sessions = tokio::task::spawn_blocking(move || parser::scan_dir(&root))
                 .await
                 .map_err(|e| err500(format!("scan panicked: {e}")))?
@@ -494,6 +534,21 @@ async fn dispatch_invoke(s: &WebState, cmd: &str, args: Value) -> ApiResult {
             let path = dir.join(format!("memex-snapshot-{ts}.snapshot"));
             let name = indexer::snapshot_export(&path).await.map_err(err500)?;
             ok_json(json!({ "name": name, "path": path.display().to_string() }))
+        }
+        // Companion "Cold Start Killer" — the headline #7 surface. The browser
+        // UI (Companion modal / `memex://companion`) invokes this; without a web
+        // dispatcher arm it 404'd, leaving the feature broken in the Docker
+        // variant (frontend gap analysis). Mirrors the Tauri command; the web
+        // server warms the embedder at startup, so the non-lazy path is fine.
+        "compose_memory_primer" => {
+            let cwd_path = a_str(&args, "cwd").filter(|s| !s.is_empty()).map(PathBuf::from);
+            let resolved = crate::companion::resolve_cwd_arg(cwd_path.as_deref()).map_err(err500)?;
+            let limit = a_usize(&args, "limit").unwrap_or(8);
+            ok_json(
+                crate::companion::compose_memory_primer(q, e, &resolved, limit)
+                    .await
+                    .map_err(err500)?,
+            )
         }
         other => Err((StatusCode::NOT_FOUND, format!("unknown command: {other}"))),
     }

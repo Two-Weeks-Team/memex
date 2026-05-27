@@ -1,0 +1,37 @@
+{
+  "//": "Memex hooks template. `memex install --hooks` structurally MERGES this block into your gitignored .claude/settings.local.json, replacing __MEMEX_HOOKS_DIR__ with the absolute hooks path and STRIPPING this `//` key. NOT committed as active config (THR-01). The MEMEX_HOOK=<id> env prefix is the idempotency sentinel (install scans for `MEMEX_HOOK=` to find/replace only Memex's own hook groups) AND relies on Claude Code running the `command` string via `sh -c` so the `KEY=VALUE cmd` prefix is honored.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          { "type": "command", "command": "MEMEX_HOOK=session-start bash __MEMEX_HOOKS_DIR__/session-start.sh", "timeout": 5 }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "matcher": "",
+        "hooks": [
+          { "type": "command", "command": "MEMEX_HOOK=user-prompt-submit bash __MEMEX_HOOKS_DIR__/user-prompt-submit.sh", "timeout": 5 }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          { "type": "command", "command": "MEMEX_HOOK=post-tool-use bash __MEMEX_HOOKS_DIR__/post-tool-use.sh", "timeout": 3 }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "matcher": "",
+        "hooks": [
+          { "type": "command", "command": "MEMEX_HOOK=session-end bash __MEMEX_HOOKS_DIR__/session-end.sh", "timeout": 10 }
+        ]
+      }
+    ]
+  }
+}

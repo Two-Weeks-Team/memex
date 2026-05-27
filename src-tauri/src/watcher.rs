@@ -97,18 +97,15 @@ const PRIMER_DEBOUNCE: Duration = Duration::from_secs(60 * 60 * 24);
 const PRIMER_LIMIT: usize = 8;
 
 /// **Loop Breaker** — active-session "stuck" detection thresholds.
-/// Trigger when the user has fired ≥ this many tool errors in the most
-/// recent `LOOP_RECENT_WINDOW` turns AND the session has at least
-/// `LOOP_MIN_TURNS` turns total (so we have enough history to look at).
 ///
-/// Exposed `pub` so integration tests and tooling can assert against the
-/// same threshold production uses — prevents the drift Quality review
-/// flagged (M2).
-pub const LOOP_MIN_TURNS: usize = 12;
-/// Window of most-recent turns the error-count gate looks at.
-pub const LOOP_RECENT_WINDOW: usize = 10;
-/// Errors-in-window threshold that flips the banner.
-pub const LOOP_ERROR_THRESHOLD: usize = 3;
+/// The canonical definitions now live in the ungated `loopcheck` module so the
+/// headless CLI surfaces (`memex loop-check`, `memex codex-notify`) can reach
+/// them without pulling in Tauri. We re-export them here so existing callers
+/// — including PR #7's `tests/loop_breaker_integration.rs`, which imports them
+/// via `memex_lib::watcher::{…}` — keep compiling unchanged.
+pub use crate::loopcheck::{
+    error_count_in_window, is_stuck, LOOP_ERROR_THRESHOLD, LOOP_MIN_TURNS, LOOP_RECENT_WINDOW,
+};
 /// Per-session debounce so the watcher doesn't yell "you're stuck" every
 /// tick while the user is still working. 20 minutes — long enough to
 /// avoid noise, short enough to re-surface if a second loop kicks in.
@@ -666,7 +663,7 @@ async fn maybe_fire_primer(
     // (still-empty) decisions back into the result.
     let primer = crate::companion::compose_memory_primer_excluding(
         qdrant,
-        embedder,
+        Some(embedder),
         std::path::Path::new(&cwd),
         PRIMER_LIMIT,
         std::slice::from_ref(&session.session_id),
@@ -729,15 +726,12 @@ async fn maybe_fire_loop_breaker(
     debounce: &Arc<AsyncMutex<HashMap<String, SystemTime>>>,
     session: &Session,
 ) -> anyhow::Result<bool> {
-    if session.turns.len() < LOOP_MIN_TURNS {
-        return Ok(false);
-    }
-
-    // Count tool errors inside the last LOOP_RECENT_WINDOW turns.
-    let recent_count = error_count_in_window(session, LOOP_RECENT_WINDOW);
-    if recent_count < LOOP_ERROR_THRESHOLD {
-        return Ok(false);
-    }
+    // Pure min-turns + error-count-in-window gate, shared verbatim with the
+    // headless `memex loop-check` CLI (loopcheck::is_stuck).
+    let recent_count = match is_stuck(session) {
+        Some(ctx) => ctx.recent_errors,
+        None => return Ok(false),
+    };
 
     // Debounce.
     let key = session.session_id.clone();
@@ -821,18 +815,6 @@ async fn maybe_fire_loop_breaker(
     );
 
     Ok(true)
-}
-
-/// Count `tool_result.is_error=true` events in the most recent `window`
-/// turns of `session`. O(window) — used by Loop Breaker.
-fn error_count_in_window(session: &Session, window: usize) -> usize {
-    let n = session.turns.len();
-    let start = n.saturating_sub(window);
-    session.turns[start..]
-        .iter()
-        .flat_map(|t| t.tool_results.iter())
-        .filter(|r| r.is_error)
-        .count()
 }
 
 /// Surface a system notification. We go exclusively through

@@ -540,9 +540,24 @@ async fn tool_call(state: &Arc<McpState>, params: Value) -> Result<Value> {
             let cwd = companion::resolve_cwd_arg(cwd_arg.as_deref())?;
             let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(8) as usize;
             let qdrant = state.qdrant().await?;
-            let embedder = state.embedder().await?;
-            let primer =
-                companion::compose_memory_primer(&qdrant, &embedder, &cwd, limit).await?;
+            // PR7-A — lazy embedder. First compose a LOCAL-ONLY primer (no
+            // embedder): the common case is resuming a directory that already
+            // has indexed sessions, served entirely from the project_name
+            // keyword scroll — so we never pay the ~130MB BGE-small load and
+            // the primer works offline / cold-start. Only when no local
+            // project matched do we lazily init the embedder and recompose
+            // with the cross-project semantic-neighbor pass.
+            let primer = {
+                let local =
+                    companion::compose_memory_primer_lazy(&qdrant, None, &cwd, limit).await?;
+                if local.matched_local_project {
+                    local
+                } else {
+                    let embedder = state.embedder().await?;
+                    companion::compose_memory_primer_lazy(&qdrant, Some(&embedder), &cwd, limit)
+                        .await?
+                }
+            };
             serde_json::to_value(primer)?
         }
         "generate_wrapped_report" => {
@@ -588,22 +603,20 @@ fn qdrant_value_to_json(v: qdrant_client::qdrant::Value) -> Value {
 }
 
 fn default_projects_root() -> PathBuf {
-    if let Ok(home) = std::env::var("HOME") {
-        let mut p = PathBuf::from(home);
-        p.push(".claude");
-        p.push("projects");
-        p
+    // WIN-01: use `dirs::home_dir()` rather than `env::var("HOME")` — Windows
+    // has no HOME (it uses %USERPROFILE%), so the env-var read returned an
+    // empty corpus there. `dirs` resolves the platform-canonical home.
+    if let Some(home) = dirs::home_dir() {
+        home.join(".claude").join("projects")
     } else {
         PathBuf::from(".claude/projects")
     }
 }
 
 fn default_transcripts_root() -> PathBuf {
-    if let Ok(home) = std::env::var("HOME") {
-        let mut p = PathBuf::from(home);
-        p.push(".claude");
-        p.push("transcripts");
-        p
+    // WIN-01: see default_projects_root() above.
+    if let Some(home) = dirs::home_dir() {
+        home.join(".claude").join("transcripts")
     } else {
         PathBuf::from(".claude/transcripts")
     }

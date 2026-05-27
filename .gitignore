@@ -62,6 +62,11 @@ real-claude-output.txt
 # MCP / tooling scratch (Playwright snapshots, console logs)
 .playwright-mcp/
 
+# `memex install` writes timestamped backups of any config it modifies
+# (.mcp.json, settings.local.json, AGENTS.md, config.toml). Intentional, but
+# local-only — never track them.
+*.memex-bak-*
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
