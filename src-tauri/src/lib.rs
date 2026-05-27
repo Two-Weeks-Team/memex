@@ -1,6 +1,8 @@
 pub mod cli;
 pub mod codex_parser;
+#[cfg(feature = "gui")]
 pub mod commands;
+pub mod companion;
 pub mod crud;
 pub mod embed_late;
 pub mod embed_pool;
@@ -17,20 +19,27 @@ pub mod retrieval;
 pub mod schema;
 pub mod sec;
 pub mod snapshot;
+pub mod summary;
+#[cfg(feature = "gui")]
 pub mod watcher;
+pub mod wrapped;
+#[cfg(feature = "web")]
+pub mod web;
 
-use std::path::PathBuf;
-use std::sync::Arc;
-use std::time::Duration;
+#[cfg(feature = "gui")]
+use std::{path::PathBuf, sync::Arc, time::Duration};
 
+#[cfg(feature = "gui")]
 use tauri::{
     menu::{Menu, MenuItem},
     tray::TrayIconBuilder,
     Manager,
 };
 
+#[cfg(feature = "gui")]
 use crate::commands::{AppState, AppStateArc};
 
+#[cfg(feature = "gui")]
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -130,11 +139,16 @@ pub fn run() {
             // P2 KA-01/02/05 — FormulaQuery-backed lens with score breakdown
             commands::lens_search_v2,
             commands::prompt_history_stats,
+            // Memex Companion — Cold Start Killer.
+            commands::compose_memory_primer,
+            // Memex Wrapped — engineering "Spotify Wrapped".
+            commands::compose_wrapped,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
 
+#[cfg(feature = "gui")]
 fn default_projects_root() -> PathBuf {
     if let Ok(home) = std::env::var("HOME") {
         let mut p = PathBuf::from(home);

@@ -29,18 +29,24 @@ tauri-build = { version = "2", features = [] }
 # `.dmg` that ships without Inspector. That's how `.dmg`s released to
 # users should be built (production hygiene + notarization-friendly).
 [features]
-default = ["devtools"]
-devtools = ["tauri/devtools"]
+# `gui` = the macOS Tauri desktop app (default). `web` = the headless
+# server variant (axum HTTP UI/API + HTTP MCP) used by the single Docker
+# image; it links NO Tauri/WebKit so it builds on a slim Linux image.
+# `devtools` keeps the WebKit Inspector in the GUI (see note above).
+default = ["gui", "devtools"]
+gui = ["dep:tauri", "dep:tauri-plugin-opener", "dep:tauri-plugin-deep-link", "dep:tauri-plugin-notification"]
+devtools = ["tauri?/devtools"]
+web = ["dep:axum", "dep:tower-http"]
 
 [dependencies]
-tauri = { version = "2", features = ["tray-icon"] }
-tauri-plugin-opener = "2"
+tauri = { version = "2", features = ["tray-icon"], optional = true }
+tauri-plugin-opener = { version = "2", optional = true }
 # P8 — memex:// deep links route to one of the 5 WOW surfaces. The plugin
 # registers the scheme via Info.plist (macOS) and Manifest (Windows/Linux)
 # and emits a `deep-link://new-url` event back to the webview, which the
 # frontend listens for and dispatches to the matching tab.
-tauri-plugin-deep-link = "2"
-tauri-plugin-notification = "2"
+tauri-plugin-deep-link = { version = "2", optional = true }
+tauri-plugin-notification = { version = "2", optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 walkdir = "2.5"
@@ -69,6 +75,10 @@ lru = "0.12"
 # in sec.rs + snapshot.rs are honest about what they rely on. Gemini review
 # on PR #2.
 dirs = "5"
+# `web` feature only — headless HTTP server (UI + JSON API + HTTP MCP) for the
+# single Docker image. Pure-Rust, no system libs, so it builds on slim Linux.
+axum = { version = "0.8", optional = true }
+tower-http = { version = "0.6", features = ["fs", "trace", "cors"], optional = true }
 
 [dev-dependencies]
 pretty_assertions = "1"

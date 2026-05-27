@@ -16,6 +16,11 @@
 //!   - list_recent_sessions
 //!   - analyze_corpus_topology
 //!   - snapshot_export
+//!   - **get_project_memory** — Cold Start Killer. Synthesizes a memory
+//!     primer for the current working directory, distilling past decisions,
+//!     pitfalls, and stack fingerprint from semantically-related past
+//!     sessions. Drop the returned markdown into the agent's system message
+//!     at session start and the agent stops starting cold.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -26,8 +31,10 @@ use serde_json::{json, Value};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::Mutex as AsyncMutex;
 
+use crate::companion;
 use crate::indexer::{self, Embedder, LensWeights};
 use crate::parser;
+use crate::wrapped;
 
 const SERVER_NAME: &str = "memex";
 const SERVER_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -61,7 +68,8 @@ struct JsonRpcError {
 }
 
 /// Shared lazy state — same lazy-init pattern as commands::AppState.
-struct McpState {
+/// Public so the `web` HTTP MCP endpoint can share it via `SharedMcpState`.
+pub struct McpState {
     qdrant: AsyncMutex<Option<Arc<qdrant_client::Qdrant>>>,
     embedder: AsyncMutex<Option<Arc<Embedder>>>,
 }
@@ -163,6 +171,63 @@ pub async fn run() -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Shared, lazily-initialized MCP state, reusable across transports
+/// (stdio in `run()` above, and the HTTP `/mcp` endpoint in `web.rs`).
+pub type SharedMcpState = Arc<McpState>;
+
+/// Create a fresh shared MCP state (Qdrant + embedder init on first use).
+pub fn new_shared_state() -> SharedMcpState {
+    Arc::new(McpState::new())
+}
+
+/// Handle one JSON-RPC request value and return the response value, reusing the
+/// exact same `dispatch` as the stdio transport so HTTP MCP exposes identical
+/// tools. Returns `None` for notifications (no `id`), per the JSON-RPC spec.
+pub async fn handle_rpc_value(state: &SharedMcpState, body: Value) -> Option<Value> {
+    let req: JsonRpcRequest = match serde_json::from_value(body) {
+        Ok(r) => r,
+        Err(e) => {
+            return Some(json!({
+                "jsonrpc": "2.0",
+                "id": Value::Null,
+                "error": { "code": -32700, "message": format!("parse error: {e}") }
+            }))
+        }
+    };
+    if req.jsonrpc != "2.0" {
+        return Some(json!({
+            "jsonrpc": "2.0",
+            "id": req.id.unwrap_or(Value::Null),
+            "error": { "code": -32600, "message": "invalid request: jsonrpc must be \"2.0\"" }
+        }));
+    }
+    let id = req.id.clone();
+    let is_notification = id.is_none();
+    let result = dispatch(state, &req.method, req.params).await;
+    if is_notification {
+        return None;
+    }
+    let response = match result {
+        Ok(value) => JsonRpcResponse {
+            jsonrpc: "2.0",
+            id: id.unwrap_or(Value::Null),
+            result: Some(value),
+            error: None,
+        },
+        Err(e) => JsonRpcResponse {
+            jsonrpc: "2.0",
+            id: id.unwrap_or(Value::Null),
+            result: None,
+            error: Some(JsonRpcError {
+                code: -32000,
+                message: format!("{e:#}"),
+                data: None,
+            }),
+        },
+    };
+    Some(serde_json::to_value(response).unwrap_or(Value::Null))
 }
 
 async fn dispatch(state: &Arc<McpState>, method: &str, params: Value) -> Result<Value> {
@@ -300,6 +365,43 @@ fn tools_catalog() -> Value {
                     },
                     "required": ["path"]
                 }
+            },
+            {
+                "name": "get_project_memory",
+                "description": "**Memex Cold Start Killer.** Given a working directory, returns a ready-to-inject memory primer for the agent. Mines past sessions in that codebase (or semantically similar projects) and surfaces: original intents, committed decisions (\"I'll use NextAuth\", \"Stack: Next.js + Drizzle\"), known pitfalls (errors the user already hit), and the stack fingerprint (top tools, file extensions, bash binaries). The response includes `markdown` — drop it verbatim into the next session's system prompt. Zero LLM in the loop; the primer is deterministically distilled from the local Qdrant index.\n\nCALL THIS AT TURN 0 of any Claude Code / Codex session. It is the difference between an agent that re-asks the user the same questions every session and one that resumes where past-you left off.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "cwd": {
+                            "type": "string",
+                            "description": "Absolute working directory for the new session. If omitted, uses the Memex process' own cwd (usually only useful in CLI smoke tests)."
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "default": 8,
+                            "description": "Max past sessions to mine. Caps the size of the markdown primer."
+                        }
+                    }
+                }
+            },
+            {
+                "name": "generate_wrapped_report",
+                "description": "**Memex Wrapped — engineering 'Spotify Wrapped'.** Returns a one-page corpus digest for the user's last `window_days` days (default 30, set to 0 for all-time). Aggregates the entire local Qdrant index into: top tools, top bash binaries, top file extensions, intent / arc / outcome distribution, repeated decisions (the 'I keep re-deciding the same thing' signal), debugging fingerprint, and cross-agent split when both Claude Code + Codex sessions are present. Zero LLM in the loop; deterministic aggregation. The response includes `markdown` formatted for screenshot sharing.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "window_days": {
+                            "type": "integer",
+                            "default": 30,
+                            "description": "Time window in days. 0 = all-time."
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "default": 32,
+                            "description": "Max sessions to deep-mine for repeated-decision detection."
+                        }
+                    }
+                }
             }
         ]
     })
@@ -405,10 +507,10 @@ async fn tool_call(state: &Arc<McpState>, params: Value) -> Result<Value> {
                 sessions.extend(legacy);
             }
             sessions.sort_by(|a, b| b.start_time.cmp(&a.start_time));
-            let summaries: Vec<crate::commands::SessionSummary> = sessions
+            let summaries: Vec<crate::summary::SessionSummary> = sessions
                 .into_iter()
                 .take(limit)
-                .map(crate::commands::SessionSummary::from)
+                .map(crate::summary::SessionSummary::from)
                 .collect();
             serde_json::to_value(summaries)?
         }
@@ -426,6 +528,32 @@ async fn tool_call(state: &Arc<McpState>, params: Value) -> Result<Value> {
                 .ok_or_else(|| anyhow::anyhow!("path required"))?;
             let name = indexer::snapshot_export(std::path::Path::new(path)).await?;
             json!({ "snapshot_name": name, "path": path })
+        }
+        "get_project_memory" => {
+            // Resolve cwd from args; default to the Memex process cwd if the
+            // agent forgot to pass one (Claude Code typically supplies it via
+            // its tool_use input, but we don't want to hard-fail on omission).
+            let cwd_arg = args
+                .get("cwd")
+                .and_then(|v| v.as_str())
+                .map(std::path::PathBuf::from);
+            let cwd = companion::resolve_cwd_arg(cwd_arg.as_deref())?;
+            let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(8) as usize;
+            let qdrant = state.qdrant().await?;
+            let embedder = state.embedder().await?;
+            let primer =
+                companion::compose_memory_primer(&qdrant, &embedder, &cwd, limit).await?;
+            serde_json::to_value(primer)?
+        }
+        "generate_wrapped_report" => {
+            let window_days =
+                args.get("window_days").and_then(|v| v.as_u64()).unwrap_or(30) as u32;
+            let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(32) as usize;
+            let qdrant = state.qdrant().await?;
+            // Wrapped is payload-only — no embedder needed. (Codex P2-a.)
+            let report =
+                wrapped::compose_wrapped(&qdrant, window_days, limit).await?;
+            serde_json::to_value(report)?
         }
         other => return Err(anyhow::anyhow!("unknown tool: {other}")),
     };

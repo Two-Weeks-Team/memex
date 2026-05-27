@@ -1,0 +1,21 @@
+# Keep the Docker build context small. The web image only needs src-tauri
+# sources, src/ UI, examples/sample-corpus, and deploy/web/ — never build
+# artifacts or local data.
+.git
+node_modules
+src-tauri/target
+target
+dist
+dist-ssr
+.qdrant
+storage
+qdrant_storage
+snapshots
+.fastembed_cache
+.memex
+tests/e2e/screenshots
+docs/img
+*.dmg
+*.snapshot
+.DS_Store
+claudedocs
