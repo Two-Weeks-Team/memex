@@ -6,7 +6,7 @@ use std::process::ExitCode;
 
 const CLI_SUBCOMMANDS: &[&str] = &[
     "scan", "search", "lens", "mix", "topology", "recall", "predict", "snapshot",
-    "mcp", "install-mcp",
+    "serve", "warm-embedder", "mcp", "install-mcp",
     "help", "--help", "-h",
 ];
 
@@ -58,7 +58,17 @@ fn main() -> ExitCode {
             }
         }
     } else {
-        memex_lib::run();
-        ExitCode::SUCCESS
+        #[cfg(feature = "gui")]
+        {
+            memex_lib::run();
+            ExitCode::SUCCESS
+        }
+        #[cfg(not(feature = "gui"))]
+        {
+            eprintln!(
+                "memex: headless (web) build — no GUI. Use a subcommand, e.g. `memex serve` or `memex mcp` (see `memex --help`)."
+            );
+            ExitCode::FAILURE
+        }
     }
 }

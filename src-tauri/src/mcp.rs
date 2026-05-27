@@ -61,7 +61,8 @@ struct JsonRpcError {
 }
 
 /// Shared lazy state — same lazy-init pattern as commands::AppState.
-struct McpState {
+/// Public so the `web` HTTP MCP endpoint can share it via `SharedMcpState`.
+pub struct McpState {
     qdrant: AsyncMutex<Option<Arc<qdrant_client::Qdrant>>>,
     embedder: AsyncMutex<Option<Arc<Embedder>>>,
 }
@@ -163,6 +164,63 @@ pub async fn run() -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Shared, lazily-initialized MCP state, reusable across transports
+/// (stdio in `run()` above, and the HTTP `/mcp` endpoint in `web.rs`).
+pub type SharedMcpState = Arc<McpState>;
+
+/// Create a fresh shared MCP state (Qdrant + embedder init on first use).
+pub fn new_shared_state() -> SharedMcpState {
+    Arc::new(McpState::new())
+}
+
+/// Handle one JSON-RPC request value and return the response value, reusing the
+/// exact same `dispatch` as the stdio transport so HTTP MCP exposes identical
+/// tools. Returns `None` for notifications (no `id`), per the JSON-RPC spec.
+pub async fn handle_rpc_value(state: &SharedMcpState, body: Value) -> Option<Value> {
+    let req: JsonRpcRequest = match serde_json::from_value(body) {
+        Ok(r) => r,
+        Err(e) => {
+            return Some(json!({
+                "jsonrpc": "2.0",
+                "id": Value::Null,
+                "error": { "code": -32700, "message": format!("parse error: {e}") }
+            }))
+        }
+    };
+    if req.jsonrpc != "2.0" {
+        return Some(json!({
+            "jsonrpc": "2.0",
+            "id": req.id.unwrap_or(Value::Null),
+            "error": { "code": -32600, "message": "invalid request: jsonrpc must be \"2.0\"" }
+        }));
+    }
+    let id = req.id.clone();
+    let is_notification = id.is_none();
+    let result = dispatch(state, &req.method, req.params).await;
+    if is_notification {
+        return None;
+    }
+    let response = match result {
+        Ok(value) => JsonRpcResponse {
+            jsonrpc: "2.0",
+            id: id.unwrap_or(Value::Null),
+            result: Some(value),
+            error: None,
+        },
+        Err(e) => JsonRpcResponse {
+            jsonrpc: "2.0",
+            id: id.unwrap_or(Value::Null),
+            result: None,
+            error: Some(JsonRpcError {
+                code: -32000,
+                message: format!("{e:#}"),
+                data: None,
+            }),
+        },
+    };
+    Some(serde_json::to_value(response).unwrap_or(Value::Null))
 }
 
 async fn dispatch(state: &Arc<McpState>, method: &str, params: Value) -> Result<Value> {
@@ -405,10 +463,10 @@ async fn tool_call(state: &Arc<McpState>, params: Value) -> Result<Value> {
                 sessions.extend(legacy);
             }
             sessions.sort_by(|a, b| b.start_time.cmp(&a.start_time));
-            let summaries: Vec<crate::commands::SessionSummary> = sessions
+            let summaries: Vec<crate::summary::SessionSummary> = sessions
                 .into_iter()
                 .take(limit)
-                .map(crate::commands::SessionSummary::from)
+                .map(crate::summary::SessionSummary::from)
                 .collect();
             serde_json::to_value(summaries)?
         }

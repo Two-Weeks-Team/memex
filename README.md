@@ -45,6 +45,7 @@
 | **Built for** | [Qdrant Vector Space Day 2026](https://qdrant.tech) — *"Think Outside the Bot."* All code authored during the hackathon build period (May 2026). |
 | **Qdrant role** | **Load-bearing, not a sidecar** — five distinct Qdrant primitives *are* the product. **No chatbot, no LLM at runtime.** |
 | **Landing page** | [sgwannabe.github.io/memex](https://sgwannabe.github.io/memex/) (static single-file, no JS) |
+| **Server variant** | Run Memex headless as a **single Docker image** — Qdrant + web UI/API + MCP in one container, usable from the Claude CLI → [deploy/web/README.md](deploy/web/README.md) |
 
 ### 🧑‍⚖️ Judge path in 5 steps
 
