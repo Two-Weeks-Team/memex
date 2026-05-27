@@ -9,12 +9,23 @@ _memex_primer() {
   { [ -d "$PWD/.git" ] || [ -d "$PWD/.claude" ]; } || return 0
   if command -v timeout >/dev/null 2>&1; then
     timeout 2 memex memory --cwd "$PWD" --hook shell 2>/dev/null || return 0
+  elif command -v gtimeout >/dev/null 2>&1; then
+    gtimeout 2 memex memory --cwd "$PWD" --hook shell 2>/dev/null || return 0
   else
     memex memory --cwd "$PWD" --hook shell 2>/dev/null || return 0
   fi
 }
-# Prepend our function once (idempotent), preserving any existing PROMPT_COMMAND.
-case ";${PROMPT_COMMAND:-};" in
-  *";_memex_primer;"*) ;;
-  *) PROMPT_COMMAND="_memex_primer;${PROMPT_COMMAND:-}" ;;
-esac
+# Register our function once (idempotent), preserving any existing PROMPT_COMMAND.
+# Bash 5.1+ allows PROMPT_COMMAND to be an array; a string assignment would
+# destroy it (and any other registered hooks: starship, autojump, venv, …).
+if declare -p PROMPT_COMMAND 2>/dev/null | grep -q 'declare -a'; then
+  case " ${PROMPT_COMMAND[*]} " in
+    *" _memex_primer "*) ;;
+    *) PROMPT_COMMAND=(_memex_primer "${PROMPT_COMMAND[@]}") ;;
+  esac
+else
+  case ";${PROMPT_COMMAND:-};" in
+    *";_memex_primer;"*) ;;
+    *) PROMPT_COMMAND="_memex_primer;${PROMPT_COMMAND:-}" ;;
+  esac
+fi

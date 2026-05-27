@@ -21,7 +21,7 @@
 </p>
 
 <p>
-<a href="https://sgwannabe.github.io/memex/"><b>🌐 Landing page</b></a> ·
+<a href="https://two-weeks-team.github.io/memex/"><b>🌐 Landing page</b></a> ·
 <a href="#-seven-surfaces-zero-chat-windows"><b>Surfaces</b></a> ·
 <a href="#-what-you-can-do-with-memex"><b>Use cases</b></a> ·
 <a href="#-quick-start"><b>Quick start</b></a> ·
@@ -44,7 +44,7 @@
 | **License** | [Apache-2.0](LICENSE) |
 | **Built for** | [Qdrant Vector Space Day 2026](https://qdrant.tech) — *"Think Outside the Bot."* All code authored during the hackathon build period (May 2026). |
 | **Qdrant role** | **Load-bearing, not a sidecar** — five distinct Qdrant primitives *are* the product. **No chatbot, no LLM at runtime.** |
-| **Landing page** | [sgwannabe.github.io/memex](https://sgwannabe.github.io/memex/) (static single-file, no JS) |
+| **Landing page** | [two-weeks-team.github.io/memex](https://two-weeks-team.github.io/memex/) (static single-file, no JS) |
 | **Server variant** | Run Memex headless as a **single Docker image** — Qdrant + web UI/API + MCP in one container, usable from the Claude CLI → [deploy/web/README.md](deploy/web/README.md) |
 
 ### 🧑‍⚖️ Judge path in 5 steps
@@ -747,7 +747,7 @@ This is a **hackathon MVP** built for [Qdrant Vector Space Day 2026](https://qdr
 - ✅ 🎁 **Engineering Wrapped** — `compose_wrapped(window_days)` + MCP `generate_wrapped_report` + `memex wrapped` CLI (8 unit tests, datetime-indexed range scroll ordered by recency, truncation-disclosed)
 - ✅ 🔁 **Loop Breaker** — watcher stuck-detection (≥3 errors / 10 turns) + macOS notification + `loop-breaker-ready` event + frontend banner (3 unit tests + 5 integration tests)
 - ✅ 📦 Snapshot export/import via Qdrant HTTP API
-- ✅ 🌐 Public landing page at [sgwannabe.github.io/memex](https://sgwannabe.github.io/memex/) (single-file `index.html`, no JS)
+- ✅ 🌐 Public landing page at [two-weeks-team.github.io/memex](https://two-weeks-team.github.io/memex/) (single-file `index.html`, no JS)
 - ✅ Lazy AppState init — self-heals if Qdrant is started after Memex
 - ✅ EROFS fix — fastembed cache + working-dir-on-launch for the bundled `.app`
 - ✅ Honest duplicate-sessionId detection in indexer reporting

@@ -10,6 +10,8 @@ _memex_primer() {
   # `--hook shell` = plain markdown, ANSI-stripped (THR-07); memex rate-limits per cwd.
   if command -v timeout >/dev/null 2>&1; then
     timeout 2 memex memory --cwd "$dir" --hook shell 2>/dev/null || return 0
+  elif command -v gtimeout >/dev/null 2>&1; then
+    gtimeout 2 memex memory --cwd "$dir" --hook shell 2>/dev/null || return 0
   else
     memex memory --cwd "$dir" --hook shell 2>/dev/null || return 0
   fi

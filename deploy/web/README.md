@@ -9,7 +9,7 @@ browsers.
 |---|---|---|
 | Web UI (static) | `/` | **8765** |
 | JSON API | `/api/*` | 8765 |
-| MCP over HTTP | `/mcp` (POST JSON-RPC, GET SSE) | 8765 |
+| MCP over HTTP | `/mcp` (POST JSON-RPC) | 8765 |
 | Qdrant (inside the image) | REST `/readyz` + dashboard / gRPC | 6333 / 6334 |
 
 ## Build & run (one image)
@@ -87,7 +87,7 @@ cargo run --release --manifest-path src-tauri/Cargo.toml \
 
 The web binary compiles with `--no-default-features --features web`: the
 `tauri`/WebKit dependencies are gated behind the default `gui` feature, so this
-build links neither and runs on `debian:bookworm-slim`. The macOS app build
+build links neither and runs on `debian:trixie-slim`. The macOS app build
 (`cargo build --release`, default features) is unchanged.
 
 ## Browser UI

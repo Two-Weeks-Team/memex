@@ -34,7 +34,7 @@
 | 1 | **Platform reach** | macOS 11+ only; Tauri/WebKit; arm64 binary (`Mach-O 64-bit arm64`) | Any Docker host (Linux container); UI is any modern browser on any OS | App: `file …/release/memex → Mach-O arm64`. Web: same source builds `--no-default-features --features web` → Linux ELF in image (§A) |
 | 2 | **Install friction** | `git clone` → `npm install` → `cargo build` → `npm run tauri build` → Gatekeeper bypass (adhoc-signed, **not notarized**) | **one command**: `docker run -p 8765:8765 memex-allinone`; embedding model **pre-baked**, corpus auto-indexed on boot | Web: `auto-indexed 12/12 session(s)` in logs; health OK ~4 s after run (§B). App: INSTALL.md Gatekeeper steps |
 | 3 | **Remote / multi-client** | Single local user, one machine, in-process IPC only | HTTP JSON API + MCP-over-HTTP → many clients/agents, remotable over a network | Web: `curl http://host:8765/api/*` from any client; HTTP `/mcp` JSON-RPC (§C). App: Tauri IPC is in-window only |
-| 4 | **MCP transports** | **stdio only** (`memex mcp`) | **stdio *and* HTTP/SSE** — same 9 tools, same `dispatch()` | Web: HTTP `tools/list`=9 + `tools/call`; stdio (`docker exec -i … memex mcp`) `tools/list`=9 + `tools/call` (§C). Both transports proven |
+| 4 | **MCP transports** | **stdio only** (`memex mcp`) | **stdio *and* HTTP** (`POST /mcp` JSON-RPC) — same 11 tools, same `dispatch()` | Web: HTTP `tools/list`=11 + `tools/call`; stdio (`docker exec -i … memex mcp`) `tools/list`=11 + `tools/call` (§C). Both transports proven |
 | 5 | **JSON API / automation** | None (no HTTP surface) | `/api/health,search,lens,mix,topology,recall,index` + generic `/api/invoke/{cmd}` | Web: every surface returns real JSON (§D / e2e-evidence). App: none |
 | 6 | **Offline / self-containment** | Needs a separately-installed local Qdrant + first-run ~130 MB model download | Qdrant **inside** the image; model pre-baked; runs with **zero network** | Web: `docker run --network none` → all surfaces answer; external DNS blocked (§B). App: model downloads on first scan |
 | 7 | **Deployment / shareability** | Per-machine manual build; no artifact to hand off | Build once → push to any registry → `docker run` anywhere; CI-buildable | Web: single 556 MB image; multi-stage Dockerfile. App: no shippable artifact |
@@ -113,7 +113,7 @@ docker exec m cat /proc/1/comm        # tini             (proper init)
 docker exec m curl -fsS localhost:8765/api/health    # {"qdrant":true,"status":"ok"}
 docker exec m curl -fsS --max-time 4 https://huggingface.co   # fails: no network → self-contained
 
-# §C  MCP, both transports, 9 tools
+# §C  MCP, both transports, 11 tools
 docker exec m curl -fsS -X POST localhost:8765/mcp -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'   # HTTP
 docker exec -i m memex mcp <<<'{"jsonrpc":"2.0","id":1,"method":"tools/list"}'                            # stdio
 

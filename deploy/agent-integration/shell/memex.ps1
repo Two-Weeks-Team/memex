@@ -6,7 +6,7 @@ if (-not $Global:_MemexInstalled) {
     $Global:_MemexInstalled = $true
     $Global:_MemexLastPwd = ""
     # Capture any existing prompt so we chain through it rather than replacing it.
-    $Global:_MemexOriginalPrompt = if (Test-Path Function:\prompt) { (Get-Content Function:\prompt -Raw) } else { $null }
+    $Global:_MemexOriginalPrompt = if (Test-Path Function:\prompt) { (Get-Command prompt).ScriptBlock } else { $null }
     function global:prompt {
         if ($PWD.Path -ne $Global:_MemexLastPwd) {
             $Global:_MemexLastPwd = $PWD.Path
@@ -16,7 +16,7 @@ if (-not $Global:_MemexInstalled) {
                 }
             }
         }
-        if ($Global:_MemexOriginalPrompt) { & ([ScriptBlock]::Create($Global:_MemexOriginalPrompt)) }
+        if ($Global:_MemexOriginalPrompt) { & $Global:_MemexOriginalPrompt }
         else { "PS $($executionContext.SessionState.Path.CurrentLocation)$('>' * ($nestedPromptLevel + 1)) " }
     }
 }

@@ -38,6 +38,38 @@ pub const COLLECTION: &str = "memex_sessions";
 pub const EMBED_DIM: u64 = 384;
 pub const VECTORS: &[&str] = &["content", "tool", "path", "error", "code"];
 
+/// THR-05 — process-wide secret-redaction switch. Defaults to ON: every
+/// vector extract built by [`session_extracts`] is run through
+/// [`crate::redact::redact_secrets`] before it is embedded or stored, so
+/// Bearer tokens / `sk-…` keys / PEM blocks / `key=`-shaped secrets never
+/// reach Qdrant. The `--redact` flag on `scan` / `reindex` flips this (the
+/// flag defaults to `true`, so passing `--redact=false` is the only way to
+/// opt out — useful only for redaction-fixture tests).
+static REDACTION_ENABLED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(true);
+
+/// Enable/disable index-time secret redaction process-wide. Called once from
+/// the CLI before a scan/reindex begins.
+pub fn set_redaction_enabled(on: bool) {
+    REDACTION_ENABLED.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// True when index-time redaction is active (the default).
+pub fn redaction_enabled() -> bool {
+    REDACTION_ENABLED.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Apply the redactor to an extract string when redaction is enabled; pass it
+/// through untouched otherwise. Kept here (not inlined) so every extract path
+/// funnels through one place.
+fn maybe_redact(s: String) -> String {
+    if redaction_enabled() {
+        crate::redact::redact_secrets(&s)
+    } else {
+        s
+    }
+}
+
 const MAX_CHARS_PER_VECTOR: usize = 6_000;
 const EMBED_BATCH: usize = 32;
 
@@ -131,10 +163,60 @@ fn default_fastembed_cache_dir() -> std::path::PathBuf {
     }
 }
 
-/// Connect to local Qdrant (default `http://localhost:6334` gRPC).
+/// Bounded connect/request timeout for the Qdrant client. The gRPC default is
+/// effectively unbounded, so a down or unreachable Qdrant would hang every
+/// agent hook (`memex memory`, `memex recall`, …) until the OS TCP timeout —
+/// blocking the agent for tens of seconds. With this bound a dead engine fails
+/// in well under 1.5s p95 and the fail-open hook shell exits 0. (qa TOP risk.)
+const QDRANT_CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(800);
+const QDRANT_REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(800);
+
+/// Validate `MEMEX_QDRANT_URL` against an SSRF allowlist (THR-06): only a
+/// loopback host (`localhost` / `127.0.0.1` / `::1`) is permitted. Cloud
+/// metadata endpoints (`169.254.169.254`, `metadata.google.internal`, …) and
+/// arbitrary remote hosts are rejected so a tampered env var can't turn the
+/// indexer into a request forge against internal infrastructure.
+fn validate_qdrant_url(url: &str) -> Result<()> {
+    // Extract the host portion: strip scheme, then take up to the next
+    // `/`, `:` (port) or `@` (userinfo, which we also reject as non-local).
+    let after_scheme = url.split("://").nth(1).unwrap_or(url);
+    if after_scheme.contains('@') {
+        anyhow::bail!(
+            "MEMEX_QDRANT_URL must point at localhost — userinfo/credentials in the URL are not allowed: {url}"
+        );
+    }
+    let authority = after_scheme
+        .split('/')
+        .next()
+        .unwrap_or(after_scheme);
+    // Drop the port. IPv6 literals are bracketed (`[::1]:6334`).
+    let host = if let Some(rest) = authority.strip_prefix('[') {
+        // `[::1]:6334` → `::1`
+        rest.split(']').next().unwrap_or(rest)
+    } else {
+        authority.split(':').next().unwrap_or(authority)
+    };
+    let host_lower = host.to_ascii_lowercase();
+    let is_local = matches!(
+        host_lower.as_str(),
+        "localhost" | "127.0.0.1" | "::1" | "0.0.0.0"
+    ) || host_lower.starts_with("127.");
+    if !is_local {
+        anyhow::bail!(
+            "MEMEX_QDRANT_URL host {host:?} is not loopback — only localhost/127.0.0.1/::1 are allowed (SSRF guard, THR-06). Got: {url}"
+        );
+    }
+    Ok(())
+}
+
+/// Connect to local Qdrant (default `http://localhost:6334` gRPC) with a
+/// bounded timeout (fail-fast) and an SSRF allowlist on `MEMEX_QDRANT_URL`.
 pub async fn connect() -> Result<Qdrant> {
     let url = std::env::var("MEMEX_QDRANT_URL").unwrap_or_else(|_| "http://localhost:6334".into());
+    validate_qdrant_url(&url)?;
     Qdrant::from_url(&url)
+        .connect_timeout(QDRANT_CONNECT_TIMEOUT)
+        .timeout(QDRANT_REQUEST_TIMEOUT)
         .build()
         .with_context(|| format!("connecting to qdrant at {url}"))
 }
@@ -184,12 +266,18 @@ pub fn session_extracts(session: &Session) -> [(String, String); 5] {
     let path = build_path(session);
     let error = build_error(session);
     let code = build_code(session);
+    // THR-05 — scrub secrets out of every extract BEFORE it is embedded /
+    // stored. `turn.text` flows into `content`/`error`/`code`;
+    // `tool_results[].content` flows into `error`; tool inputs (which can
+    // carry `curl -H "Bearer …"` etc.) flow into `tool`/`path`/`code`. All
+    // five funnel through `maybe_redact` so no secret reaches Qdrant. `cap()`
+    // caps per-vector length for the embedder after redaction.
     [
-        ("content".into(), cap(&content)),
-        ("tool".into(), cap(&tool)),
-        ("path".into(), cap(&path)),
-        ("error".into(), cap(&error)),
-        ("code".into(), cap(&code)),
+        ("content".into(), cap(&maybe_redact(content))),
+        ("tool".into(), cap(&maybe_redact(tool))),
+        ("path".into(), cap(&maybe_redact(path))),
+        ("error".into(), cap(&maybe_redact(error))),
+        ("code".into(), cap(&maybe_redact(code))),
     ]
 }
 
@@ -1978,4 +2066,49 @@ pub async fn snapshot_import(src: &Path) -> Result<()> {
         .await?
         .error_for_status()?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn validate_qdrant_url_allows_loopback() {
+        assert!(validate_qdrant_url("http://localhost:6334").is_ok());
+        assert!(validate_qdrant_url("http://127.0.0.1:6334").is_ok());
+        assert!(validate_qdrant_url("http://127.1.2.3:6334").is_ok());
+        assert!(validate_qdrant_url("http://[::1]:6334").is_ok());
+        assert!(validate_qdrant_url("https://localhost").is_ok());
+    }
+
+    #[test]
+    fn validate_qdrant_url_rejects_metadata_ip() {
+        // GCP/AWS/Azure link-local metadata endpoint — the classic SSRF target.
+        assert!(validate_qdrant_url("http://169.254.169.254/").is_err());
+        assert!(validate_qdrant_url("http://metadata.google.internal").is_err());
+    }
+
+    #[test]
+    fn validate_qdrant_url_rejects_remote_host() {
+        assert!(validate_qdrant_url("http://evil.example.com:6334").is_err());
+        assert!(validate_qdrant_url("http://10.0.0.5:6334").is_err());
+        assert!(validate_qdrant_url("http://192.168.1.10:6334").is_err());
+    }
+
+    #[test]
+    fn validate_qdrant_url_rejects_userinfo() {
+        // `user@host` userinfo can smuggle a non-local host past a naive parser.
+        assert!(validate_qdrant_url("http://localhost@evil.com:6334").is_err());
+    }
+
+    #[test]
+    fn redaction_toggle_round_trips() {
+        // Default is ON.
+        assert!(redaction_enabled());
+        set_redaction_enabled(false);
+        assert!(!redaction_enabled());
+        // Restore default so we don't leak state into other tests in-process.
+        set_redaction_enabled(true);
+        assert!(redaction_enabled());
+    }
 }

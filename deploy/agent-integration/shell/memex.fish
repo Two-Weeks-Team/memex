@@ -6,6 +6,8 @@ function _memex_primer --on-variable PWD
     test -d "$PWD/.git"; or test -d "$PWD/.claude"; or return 0
     if command -v timeout >/dev/null 2>&1
         timeout 2 memex memory --cwd "$PWD" --hook shell 2>/dev/null; or return 0
+    else if command -v gtimeout >/dev/null 2>&1
+        gtimeout 2 memex memory --cwd "$PWD" --hook shell 2>/dev/null; or return 0
     else
         memex memory --cwd "$PWD" --hook shell 2>/dev/null; or return 0
     end
