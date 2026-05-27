@@ -45,7 +45,7 @@
 | **Built for** | [Qdrant Vector Space Day 2026](https://qdrant.tech) — *"Think Outside the Bot."* All code authored during the hackathon build period (May 2026). |
 | **Qdrant role** | **Load-bearing, not a sidecar** — five distinct Qdrant primitives *are* the product. **No chatbot, no LLM at runtime.** |
 | **Landing page** | [two-weeks-team.github.io/memex](https://two-weeks-team.github.io/memex/) (static single-file, no JS) |
-| **Server variant** | Run Memex headless as a **single Docker image** — Qdrant + web UI/API + MCP in one container, usable from the Claude CLI → [deploy/web/README.md](deploy/web/README.md) |
+| **Server variant** | Run Memex headless as a **single Docker image** — Qdrant + web UI/API + MCP + Prometheus `/metrics` in one container, usable from the Claude CLI → [deploy/web/README.md](deploy/web/README.md) |
 
 ### 🧑‍⚖️ Judge path in 5 steps
 
@@ -217,22 +217,25 @@ ColBERT v2 inline citations are on the roadmap; [`fastembed-rs`](https://github.
 
 ## 🧠 MCP integration — Memex as a memory layer for any AI agent
 
-Memex ships its own [**Model Context Protocol**](https://modelcontextprotocol.io) server (stdio JSON-RPC, hand-rolled, zero external runtime). Once you `claude mcp add memex …` once, every Claude Code session — and any other MCP-aware client (Codex, Cursor, …) — can call into your local session corpus mid-conversation. No new network calls, no third-party SaaS.
+Memex ships its own [**Model Context Protocol**](https://modelcontextprotocol.io) server (stdio JSON-RPC, hand-rolled, zero external runtime). Once you wire it up, every Claude Code session — and any other MCP-aware client (Codex, Cursor, …) — can call into your local session corpus mid-conversation. No new network calls, no third-party SaaS.
+
+**Three ways to wire it up**, pick whichever matches your workflow:
 
 ```bash
-# one-time wiring — point Claude Code at the same memex binary you already run
+# A) Project-level auto-pickup — clone the repo and Claude Code picks up `.mcp.json` on its own
+#    (a committed file at the repo root, one-time trust prompt, zero per-machine config)
+
+# B) One-binary installer — wires .mcp.json + hooks + Codex + Cursor + shell primer all at once
+memex install all                  # everything
+memex install claude --hooks       # Claude Code only, with proactive hooks
+memex install all --dry-run        # preview without writing
+
+# C) Manual one-liner — old-school stdio registration
 claude mcp add memex /path/to/memex/src-tauri/target/release/memex mcp
-
-claude mcp list
-#  memex: /…/memex mcp - ✓ Connected
+memex install-mcp --run            # generates + runs the above for your machine
 ```
 
-…or print the exact command for your machine:
-
-```bash
-memex install-mcp           # echoes the `claude mcp add …` line
-memex install-mcp --run     # actually runs it
-```
+Full agent-integration story — including the 4 Claude Code hooks (SessionStart / UserPromptSubmit / PostToolUse / SessionEnd) and the Codex / Cursor / shell snippets — is documented in the [🪝 Agent integration](#-agent-integration-no-plugin) section below and in [`docs/agent-integration.md`](docs/agent-integration.md).
 
 The server exposes **11 tools** mapping directly to the same Qdrant primitives that power the desktop UI:
 
@@ -246,7 +249,7 @@ The server exposes **11 tools** mapping directly to the same Qdrant primitives t
 | `get_session_turn(session_id, turn_index)` | A single turn, re-parsed from source jsonl — full text + tool calls + tool results. |
 | `list_recent_sessions(limit?)` | Most-recent-first walk of `~/.claude/projects` — works even before Qdrant is fully warm. |
 | `analyze_corpus_topology(sample?, per_point?)` | MST of session content vectors, per-project auto-labels, cross-project bridges, and gap insights. |
-| `snapshot_export(path)` | Server-side snapshot of the entire collection to a portable `.snapshot` file. |
+| `snapshot_export(path)` | Server-side snapshot of the entire collection to a portable `.snapshot` file. Also exposed as `POST /api/snapshot/export` on the headless `web` build — bumps the `memex_snapshot_bytes` Prometheus gauge. |
 | `get_project_memory(cwd?, limit?)` <kbd>NEW</kbd> | **Cold Start Killer.** Mines past sessions for `cwd` and returns a ready-to-inject memory primer (decisions, pitfalls, stack fingerprint) as markdown. Drop into a new session's system prompt at turn 0. See [Companion family](#-companion-family--agent-memory-layer) below. |
 | `generate_wrapped_report(window_days?, limit?)` <kbd>NEW</kbd> | **Engineering Wrapped.** Corpus-wide digest for the last *N* days: top tools/binaries/languages, intent / arc / outcome mix, repeated decisions, debugging fingerprint, cross-agent split. Screenshot-friendly markdown. |
 
@@ -398,6 +401,58 @@ When fired:
 The "Show pivot" button deep-links into the matched past session's Replay engine at the exact turn where the loop got broken — the user sees the resolution play out as it happened.
 
 Same `predict_next_actions` infrastructure as surface #5 (Predict next-action), reframed: instead of "past-you usually does X next from this position", Loop Breaker says "past-you was stuck like this and *unstuck* by doing X". Zero LLM, ≤ 2 s on a 70-session corpus.
+
+The hook surface (see § Agent integration below) re-fires the same detection on every Bash `PostToolUse`, with a **cross-process atomic debounce** so the GUI banner and the Claude Code hook never double-fire for the same stuck session.
+
+---
+
+## 🪝 Agent integration (no plugin)
+
+The MCP surface is a *pull* posture — the agent calls a tool when it decides to. Agent integration adds the *push* posture: hooks that automatically inject memory at the right moments. No Claude Code plugin required.
+
+| Mechanism | Posture | Cross-agent | Files |
+|---|---|---|---|
+| **Raw MCP registration** (stdio + HTTP) | pull | Claude / Codex / Cursor | committed [`/.mcp.json`](.mcp.json) · `codex/config.toml.snippet` · `cursor/mcp.json.snippet` |
+| **Claude Code hooks** (4 events) | **push (proactive)** | Claude Code | `deploy/agent-integration/hooks/*.sh` + `settings.local.json.template` |
+| **Codex MCP + notify + AGENTS.md** | push (weak) | Codex | `deploy/agent-integration/codex/*` |
+| **Shell primer on `cd`** | push (human) | any shell | `deploy/agent-integration/shell/memex.{zsh,bash,fish,ps1}` |
+
+### One command wires everything
+
+```bash
+memex install all                  # claude + codex + cursor + shell
+memex install claude --hooks       # Claude Code only, with proactive hooks
+memex install codex                # Codex MCP block + notify + AGENTS.md
+memex install all --dry-run        # preview every change without writing
+memex install uninstall            # idempotent removal of every memex-tagged block
+```
+
+Install is **structural, not textual**: JSON hook groups carry a `MEMEX_HOOK=<id>` sentinel, line-based files use fenced `# >>> memex >>>` markers — re-running converges, foreign hooks are never touched, and `uninstall` removes only Memex's own blocks. Every modified file is written atomically (temp + rename) with a timestamped backup.
+
+### The 4 Claude Code hooks
+
+| Hook | Fires | What Memex does |
+|---|---|---|
+| **SessionStart** | session begins / resumes / clears | injects a Companion **primer** (past intents, decisions, pitfalls) as factual context, ~200–500 tokens |
+| **UserPromptSubmit** | every prompt | if a past session is relevant enough, injects a short recall note (relevance-gated — silence is the default, over-injection is the #1 reason users disable hooks) |
+| **PostToolUse** (Bash) | after a Bash tool result | on a repeated-error stuck pattern, injects "what past-you ran next" (Loop Breaker), with cross-process atomic debounce so the GUI banner and the hook share a single 20 min suppression window |
+| **SessionEnd** | session ends | reindexes the just-finished session so next time is fresh (detached via `nohup` + `disown`, non-blocking) |
+
+All four hooks are **fail-open and bounded** — every script wraps `memex` in `timeout` and `|| exit 0`, so a slow / dead engine NEVER blocks the session. SessionStart caps at 2 s, UserPromptSubmit at 1 s (Claude Code's hard 30 s budget per prompt).
+
+### Why hooks are NOT committed (security)
+
+A committed `.claude/settings.json` that shells out runs **arbitrary code on clone**, and `claude -p` (non-interactive) disables Claude Code's trust prompt entirely — so the hook scripts execute the moment someone runs the CLI in your repo, no consent required (THR-01).
+
+Only [`/.mcp.json`](.mcp.json) is committed. The hook *content* lives in `deploy/agent-integration/hooks/` for inspection, but actual installation goes into the **gitignored** `.claude/settings.local.json` via opt-in `memex install --hooks` — per-developer, reversible, structurally-merged with foreign hooks preserved.
+
+Also baked in:
+
+- **Index-time secret redaction** (THR-05) — Bearer tokens, `sk-…` keys, Slack / GitHub / AWS keys, PEM blocks, and `key=value`-shaped secrets are scrubbed before embedding so they never reach Qdrant payload or the vector index. 11 unit tests cover each pattern class. Opt-out via `--redact=false` (test fixtures only).
+- **SSRF allowlist** (THR-06) — `MEMEX_QDRANT_URL` validator rejects anything but loopback (`localhost` / `127.0.0.1` / `::1`); cloud metadata IPs (`169.254.169.254`, `metadata.google.internal`) and userinfo URLs are explicitly denied. 4 unit tests.
+- **Cross-platform paths** (WIN-01) — every path resolution funnels through `dirs::home_dir` / `dirs::cache_dir` / `std::env::split_paths`, so Windows drive letters (`C:\corpus`) and missing `$HOME` no longer break the installer.
+
+Read more in [`docs/agent-integration.md`](docs/agent-integration.md) or [`deploy/agent-integration/README.md`](deploy/agent-integration/README.md).
 
 ---
 
@@ -634,10 +689,22 @@ memex mix --pos <session_id> --neg <session_id>
 memex topology --sample 80 --per-point 6 --out topo.json
 memex recall "Tauri build failed missing icons"
 memex predict <session_id> --last-n 3 --horizon 3 --neighbors 8
-memex memory  --cwd "$(pwd)" --limit 8           # NEW · Cold Start Killer (Companion)
-memex wrapped --window-days 30                   # NEW · Engineering Wrapped
+memex memory  --cwd "$(pwd)" --limit 8           # Cold Start Killer (Companion)
+memex wrapped --window-days 30                   # Engineering Wrapped
 memex snapshot export ./memex.snapshot
 memex snapshot import ./memex.snapshot
+
+# Agent integration (PR #8) — wire Memex into Claude Code / Codex / Cursor / shell
+memex install all [--scope user|project] [--hooks] [--dry-run]   # one-shot installer
+memex install uninstall                          # remove every memex-tagged block
+memex reindex --cwd "$(pwd)"                     # SessionEnd hook + manual refresh
+memex loop-check --hook post-tool-use            # Loop Breaker (reads hook JSON on stdin)
+memex codex-notify "$@"                          # Codex notify hook (turn-complete payload)
+memex install-mcp [--run]                        # legacy: print/run `claude mcp add memex …`
+
+# Server variant entry points (PR #6 — `web` feature only)
+memex serve   --port 8765 --ui-dir src          # headless UI + JSON API + HTTP MCP
+memex warm-embedder                              # pre-bake BGE-small for the Docker image
 ```
 
 Run `memex --help` for the full surface; each subcommand has `--help` too.
@@ -652,9 +719,14 @@ flowchart TB
         jsonl["<session-uuid>.jsonl<br>append-only"]
     end
 
-    subgraph app["Memex.app · Tauri 2"]
-        webview["Webview (HTML/CSS/JS)<br>Time Machine stack · 3D topology · replay · banner"]
-        rustcore["Rust core<br>parser.rs · indexer.rs<br>commands.rs · cli.rs"]
+    subgraph agents["Claude Code · Codex · Cursor"]
+        hooks["hooks/*.sh<br>(SessionStart · UserPromptSubmit ·<br>PostToolUse · SessionEnd)"]
+        mcpclient["MCP client<br>(.mcp.json auto-pickup)"]
+    end
+
+    subgraph app["Memex (Tauri 2 GUI · web · CLI · MCP)"]
+        webview["Webview (HTML/CSS/JS)<br>Time Machine · topology · replay · banner"]
+        rustcore["Rust core<br>parser · indexer · companion · wrapped<br>loopcheck · redact · hook · install"]
         webview <-- "Tauri IPC<br>invoke('lens_search', …)" --> rustcore
     end
 
@@ -663,15 +735,19 @@ flowchart TB
     end
 
     fs -- walkdir + serde_json --> rustcore
-    rustcore -- "fastembed BGE-small<br>+ qdrant-client gRPC" --> coll
+    rustcore -- "fastembed BGE-small<br>+ qdrant-client gRPC<br>(secrets redacted pre-embed)" --> coll
     rustcore -. "reqwest HTTP<br>(snapshots only)" .-> coll
+    hooks -- "memex … --hook X<br>(stdio JSON envelope)" --> rustcore
+    mcpclient -- "MCP stdio · HTTP /mcp" --> rustcore
 ```
 
 Each session becomes **one point** with **five named vectors** (`content`, `tool`, `path`, `error`, `code`) all dense 384-d BGE-small. The payload carries only metadata — replay re-parses the JSONL on demand so Qdrant stays lean.
 
 Deeper reading:
-- [`docs/architecture.md`](docs/architecture.md) — data flow, schema, design trade-offs
-- [`docs/qdrant-features.md`](docs/qdrant-features.md) — engineer's tour of each of the 5 features
+- [`docs/architecture.md`](docs/architecture.md) — data flow, schema, design trade-offs (+ 3 mermaid sequence diagrams for query/index/recall paths)
+- [`docs/qdrant-features.md`](docs/qdrant-features.md) — engineer's tour of the v3 schema: 5 dense + 2 sparse + 1 multivector slot per point, Formula fusion, TurboQuant bits-2 quantization, per-lens HNSW
+- [`docs/wired-but-dormant.md`](docs/wired-but-dormant.md) — honest status board (`wired:on` / `wired:off` / `not-wired`) of every Qdrant 1.18 capability we've plumbed
+- [`docs/benchmarks.md`](docs/benchmarks.md) — reproduce recipe + (illustrative — see file) latency / recall numbers per lens
 - [`docs/memex/PLAN.md`](docs/memex/PLAN.md) — original 8-phase implementation plan
 
 ---
@@ -691,7 +767,7 @@ Deeper reading:
 <td><b>Backend</b></td>
 <td>
 
-`Rust 1.88` · [`tauri 2`](https://tauri.app) · [`qdrant-client 1.18`](https://github.com/qdrant/rust-client) · [`fastembed 5`](https://github.com/Anush008/fastembed-rs) (BGE-small-en-v1.5) · [`petgraph 0.6`](https://github.com/petgraph/petgraph) for MST · [`tokio`](https://tokio.rs) · `walkdir` · `serde` · `regex`
+`Rust 1.88` · [`tauri 2`](https://tauri.app) · [`qdrant-client 1.18`](https://github.com/qdrant/rust-client) · [`fastembed 5`](https://github.com/Anush008/fastembed-rs) (BGE-small-en-v1.5) · [`petgraph 0.6`](https://github.com/petgraph/petgraph) for MST · [`tokio`](https://tokio.rs) · [`axum 0.8`](https://github.com/tokio-rs/axum) + [`tower-http`](https://github.com/tower-rs/tower-http) for the headless `web` feature · [`dirs`](https://github.com/dirs-dev/dirs-rs) for cross-platform paths · `walkdir` · `serde` · `regex`
 
 </td>
 </tr>
@@ -743,15 +819,26 @@ This is a **hackathon MVP** built for [Qdrant Vector Space Day 2026](https://qdr
 - ✅ 🔮 **Predict next-action** — neighbor-vector pivot walk + tool-call aggregation
 - ✅ ⏯ Replay engine with Bash / Edit-diff / Read / Task tool visualizations at 1×–8×
 - ✅ 🔍 Lens slider (multi-named-vector weighted search) — the "advanced vector search" axis
-- ✅ 🧠 **Cold Start Killer** — `compose_memory_primer(cwd)` + MCP `get_project_memory` + `memex memory` CLI + watcher auto-fire on new session (27 unit tests, multi-language EN+KR heuristics, indirect-injection-safe markdown)
-- ✅ 🎁 **Engineering Wrapped** — `compose_wrapped(window_days)` + MCP `generate_wrapped_report` + `memex wrapped` CLI (8 unit tests, datetime-indexed range scroll ordered by recency, truncation-disclosed)
-- ✅ 🔁 **Loop Breaker** — watcher stuck-detection (≥3 errors / 10 turns) + macOS notification + `loop-breaker-ready` event + frontend banner (3 unit tests + 5 integration tests)
-- ✅ 📦 Snapshot export/import via Qdrant HTTP API
+- ✅ 🧠 **Cold Start Killer** — `compose_memory_primer(cwd)` + MCP `get_project_memory` + `memex memory` CLI + watcher auto-fire on new session (**31 unit tests**, multi-language EN+KR heuristics, indirect-injection-safe markdown, self-referential MCP-tool noise filter)
+- ✅ 🎁 **Engineering Wrapped** — `compose_wrapped(window_days)` + MCP `generate_wrapped_report` + `memex wrapped` CLI (**13 unit tests**, datetime-indexed range scroll ordered by recency, truncation-disclosed, **Qdrant Facets API fast path** for the 4 indexed payload fields with scroll-based reconciliation fallback — T3.1)
+- ✅ 🔁 **Loop Breaker** — watcher stuck-detection (≥3 errors / 10 turns) + macOS notification + `loop-breaker-ready` event + frontend banner (**14 unit tests** between `loopcheck` + `watcher` + **5 integration tests**, cross-process atomic file-debounce shared with the hook surface)
+- ✅ 🪝 **Agent integration** (PR #8) — `memex install` one-shot wires up 4 Claude Code hooks (SessionStart / UserPromptSubmit / PostToolUse / SessionEnd) + committed `.mcp.json` + Codex `notify` + Cursor MCP + shell primer (**11 install + 7 hook unit tests**, structural JSON merge with `MEMEX_HOOK=` sentinel, atomic writes + timestamped backups)
+- ✅ 🛡 **Index-time secret redaction** (THR-05) — Bearer / `sk-` / Slack `xox?-` / GitHub `ghp_` / AWS `AKIA` / PEM private-key / `key=value` patterns scrubbed before embedding so secrets never reach Qdrant payload or vectors (**11 unit tests**, opt-out via `--redact=false`)
+- ✅ 🔒 **SSRF allowlist** (THR-06) — `MEMEX_QDRANT_URL` validator allows loopback only; rejects cloud metadata IPs (`169.254.169.254`, `metadata.google.internal`) and userinfo URLs (**14 sec unit tests** total)
+- ✅ 🪟 **Cross-platform paths** (WIN-01) — `dirs::home_dir` / `dirs::cache_dir` / `std::env::split_paths` replace bare `$HOME` reads + `:`-split, so Windows drive letters (`C:\corpus`) work end-to-end
+- ✅ 🐳 **Server variant** (PR #6) — single Docker image bundling Qdrant + axum web (UI + JSON API + HTTP MCP at `/mcp`) in one container, BGE-small pre-baked at build; see [`deploy/web/`](deploy/web/)
+- ✅ 📊 **Prometheus `/metrics`** (PR #12 T3.2) — 8 metric families on the headless `web` build: `memex_queries_total`, `memex_recall_polls_total`, `memex_errors_recalled_total`, `memex_points_indexed_total`, `memex_snapshot_bytes`, `memex_embedder_call_seconds`, `memex_mcp_calls_total`, `memex_process_uptime_seconds`. Scrape directly from the Docker container alongside `/api/health`.
+- ✅ 🎯 **Multivector rerank on by default** (PR #12 T3.3) — `LensWeights::default().content_late` flipped from `0.0` → `0.25` in BOTH `lens::` and `indexer::` (REV-8 caught the cross-struct drift). Every search now activates the ColBERT-style late-interaction lane as a rerank-only nudge without dominating dense lenses.
+- ✅ 📦 Snapshot export/import via Qdrant HTTP API — `POST /api/snapshot/export` on the web variant (PR #12 REV-14 — `memex_snapshot_bytes` metric now live-tracked)
 - ✅ 🌐 Public landing page at [two-weeks-team.github.io/memex](https://two-weeks-team.github.io/memex/) (single-file `index.html`, no JS)
 - ✅ Lazy AppState init — self-heals if Qdrant is started after Memex
+- ✅ Bounded gRPC connect / request timeouts (800 ms) — dead Qdrant fails p95 < 1.5 s instead of hanging the agent hook
+- ✅ Web handler input clamps (`MAX_LIMIT=200`, `MAX_SAMPLE=500`, `MAX_PER_POINT=20`) — cheap DoS prevention at the HTTP boundary
 - ✅ EROFS fix — fastembed cache + working-dir-on-launch for the bundled `.app`
 - ✅ Honest duplicate-sessionId detection in indexer reporting
 - ✅ `Memex.app` + `.dmg` for macOS arm64 — [downloadable on the v0.1.0 release](https://github.com/Two-Weeks-Team/memex/releases/latest)
+
+**Test totals** — **268 lib unit tests** across 8+ modules + **5 integration tests** (Loop Breaker pipeline) + **8 Playwright E2E specs** (Qdrant uplift: Q7/Q8 cards, RelevanceFeedback playground, hybrid lane visualizer, prefers-reduced-motion). All four CI checks green (Linux build/test · web feature headless · frontend config · agent-integration shell+JSON lint).
 
 **Deferred to post-MVP**
 
