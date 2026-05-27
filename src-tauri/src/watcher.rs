@@ -738,6 +738,12 @@ async fn maybe_fire_loop_breaker(
     // both means the GUI banner + the Claude Code hook can't double-fire
     // for the same session — whichever surface stamps first suppresses
     // the other for the 20-min window (PR #8 follow-up #2).
+    //
+    // This is a CHEAP pre-check: skip the expensive `predict_next_actions`
+    // call if we already know a recent stamp exists. The actual atomic
+    // reservation happens after predict succeeds, just before emit
+    // (`try_reserve_fire`, see below) — fixes the watcher↔hook race
+    // codex flagged on PR #9.
     let key = session.session_id.clone();
     {
         let g = debounce.lock().await;
@@ -779,14 +785,18 @@ async fn maybe_fire_loop_breaker(
         return Ok(false);
     }
 
-    // Reserve debounce slot in BOTH the in-memory map and the on-disk
-    // touch-file so the headless hook also sees the suppression (PR #8
-    // follow-up #2).
+    // ATOMIC reservation right before emit. Race-free against the
+    // headless `memex loop-check` hook running concurrently — both can
+    // pass the cheap pre-check above and the expensive predict call,
+    // but only one wins the `O_CREAT | O_EXCL` claim. The loser returns
+    // here without emitting (codex PR #9 C-1).
+    if !crate::loopcheck::try_reserve_fire(&key) {
+        return Ok(false);
+    }
     {
         let mut g = debounce.lock().await;
         g.insert(key.clone(), SystemTime::now());
     }
-    crate::loopcheck::mark_fired_for_session(&key);
 
     let top = &ctx.predictions[0];
     let project = session.project_name.as_deref().unwrap_or("?");

@@ -257,28 +257,28 @@ fn is_boilerplate_line(line: &str) -> bool {
     // Self-referential bootstrap noise (PR #8 follow-up #3): when Memex
     // is being demoed / dogfooded, user turns frequently look like
     //   "Call the memex MCP tool get_project_memory with cwd=…"
-    //   "Show me the markdown primer it returned"
     //   "Run the mcp__memex__find_similar_sessions tool"
     // These are *test queries about Memex itself*, not real engineering
-    // intent. Without this filter the primer ends up echoing Memex's
-    // own bootstrap turns as "Past intents in this area", which is
-    // confusing for any judge / new user inspecting the demo.
+    // intent — they'd otherwise surface as "Past intents in this area"
+    // and make the primer look like it's echoing its own bootstrap.
     //
-    // Matches anywhere in the first 80 chars (the snippet we already
-    // lowered above), not just prefix: the noise tends to land mid-line
-    // after agent quoting.
+    // **Filter requires an explicit invocation marker** (codex PR #9 C-2):
+    // bare tool names ("get_project_memory") are NOT enough — that would
+    // false-positive on legitimate Memex-dev intents like "Fix
+    // get_project_memory so it resolves cwd". An invocation phrase OR
+    // the `mcp__memex__` prefix must be present.
+    //
+    // Matches anywhere in the first 80 chars (the snippet already
+    // lowered above) — the noise often lands mid-line after agent
+    // quoting.
     const SELF_REF_NOISE: &[&str] = &[
+        // Definite MCP invocation prefixes / phrases.
         "mcp__memex__",
         "call the memex mcp",
         "memex mcp tool",
-        "memex's mcp",
-        "get_project_memory",
-        "find_similar_sessions",
-        "find_similar_error",
-        "predict_next_action",
-        "generate_wrapped_report",
-        "analyze_corpus_topology",
-        "snapshot_export",
+        "memex's mcp tool",
+        "the memex mcp tool",
+        "the mcp memex tool",
     ];
     if SELF_REF_NOISE.iter().any(|n| lower_head.contains(n)) {
         return true;
@@ -1710,9 +1710,12 @@ OAuth 로그인을 이 프로젝트에 붙여줘.";
     /// PR #8 follow-up #3 — self-referential MCP-tool turns appearing in
     /// the corpus (Memex demo / dogfood sessions) must be filtered so the
     /// primer doesn't echo "Call the memex MCP tool" / `mcp__memex__*` as
-    /// the user's past intent.
+    /// the user's past intent. Codex PR #9 C-2 tightened the filter to
+    /// require an explicit invocation marker so bare tool-name mentions
+    /// in legitimate Memex-dev sessions don't get false-positive filtered.
     #[test]
     fn boilerplate_line_skips_self_referential_memex_mcp_noise() {
+        // POSITIVES — explicit MCP invocation phrases / prefixes:
         assert!(is_boilerplate_line(
             "Call the memex MCP tool get_project_memory with cwd=/Users/demo/acme"
         ));
@@ -1720,13 +1723,27 @@ OAuth 로그인을 이 프로젝트에 붙여줘.";
             "Run mcp__memex__find_similar_sessions and show the top 3"
         ));
         assert!(is_boilerplate_line(
-            "Use predict_next_action to figure out what comes next"
-        ));
-        assert!(is_boilerplate_line(
             "memex MCP tool generate_wrapped_report with window=30"
         ));
-        // Real engineering intents must STILL pass through — the filter
-        // must not bleed into legitimate Memex feature discussions.
+        assert!(is_boilerplate_line(
+            "Use the memex MCP tool predict_next_action"
+        ));
+
+        // NEGATIVES — these MUST pass through (codex PR #9 C-2):
+        //   1) bare tool names in real Memex-dev intents
+        assert!(
+            !is_boilerplate_line("Fix get_project_memory so it resolves cwd properly"),
+            "bare tool name in dev intent must not be filtered"
+        );
+        assert!(
+            !is_boilerplate_line("Refactor predict_next_action to use batch API"),
+            "bare tool name in refactor intent must not be filtered"
+        );
+        assert!(
+            !is_boilerplate_line("Add an integration test for find_similar_sessions"),
+            "bare tool name in test intent must not be filtered"
+        );
+        //   2) unrelated Memex-feature discussions
         assert!(!is_boilerplate_line("Add a button to the Companion modal"));
         assert!(!is_boilerplate_line("Memex needs better Korean tokenization"));
     }

@@ -163,6 +163,12 @@ pub fn should_fire_for_session(session_id: &str) -> bool {
 /// suppress further emits. Best-effort: I/O failure is logged-but-ignored
 /// so a missing stamp doesn't break the hook output (which the agent has
 /// already received by the time we mark).
+///
+/// **Race-prone**: this is a non-atomic "create or truncate". Two
+/// processes both calling `should_fire → predict → mark_fired` can each
+/// pass the pre-check, both fire, then both stamp. Use
+/// [`try_reserve_fire`] instead when the caller is on the critical path
+/// that decides emit vs. skip (PR #9 codex C-1).
 pub fn mark_fired_for_session(session_id: &str) {
     let path = debounce_path(session_id);
     // Ensure the cache dir exists before we try to write — `debounce_dir`
@@ -179,6 +185,62 @@ pub fn mark_fired_for_session(session_id: &str) {
             path.display()
         );
     }
+}
+
+/// **Atomic check-and-reserve** — the race-free primitive callers should
+/// use right before emit. Returns `true` when this caller won the
+/// reservation (must emit); `false` when another process reserved it OR
+/// a recent stamp still suppresses (must skip).
+///
+/// The two surfaces that share the Loop Breaker (GUI watcher and the
+/// hook one-shot) each do an expensive `predict_next_actions` call
+/// between the cheap `should_fire_for_session` pre-check and the actual
+/// emit. Without an atomic reserve there's a check-time/use-time window:
+/// both pass `should_fire`, both predict in parallel, both `mark_fired`,
+/// both emit. (codex PR #9 C-1.)
+///
+/// Semantics:
+///   - If a stamp exists and its mtime is within `LOOP_DEBOUNCE_SECS` →
+///     return `false` (someone else reserved recently).
+///   - Else: remove any stale stamp (older than debounce) and attempt
+///     `OpenOptions::create_new` — only one process can succeed; the
+///     loser sees `AlreadyExists` and returns `false`.
+///
+/// On any I/O error (cache dir unwriteable, permissions, etc.) we
+/// fail-CLOSED here: return `false` so we don't double-emit. This is the
+/// inverse of the fail-open posture in [`should_fire_for_session`] — at
+/// the emit boundary, "skip" is the safer default than "fire."
+pub fn try_reserve_fire(session_id: &str) -> bool {
+    let path = debounce_path(session_id);
+
+    // Phase 1: peek at any existing stamp. If it's fresh, refuse.
+    if let Ok(meta) = std::fs::metadata(&path) {
+        if let Ok(mtime) = meta.modified() {
+            if let Ok(elapsed) = std::time::SystemTime::now().duration_since(mtime) {
+                if elapsed.as_secs() < LOOP_DEBOUNCE_SECS {
+                    return false;
+                }
+            }
+        }
+        // Stale stamp (older than debounce window) — remove so the next
+        // `create_new` can succeed.
+        let _ = std::fs::remove_file(&path);
+    }
+
+    // Phase 2: ensure parent dir exists (write path responsibility — see
+    // gemini PR #9 G-1/G-2).
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+
+    // Phase 3: atomic claim. `create_new(true)` translates to `O_CREAT |
+    // O_EXCL` on Unix and the equivalent on Windows — only one process
+    // wins on a given path.
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)
+        .is_ok()
 }
 
 #[cfg(test)]
@@ -333,5 +395,60 @@ mod tests {
         // Belt-and-suspenders: ensure no stale file from a prior run.
         let _ = std::fs::remove_file(debounce_path(&sid));
         assert!(should_fire_for_session(&sid));
+    }
+
+    // ----- PR #9 codex C-1 — atomic check-and-reserve --------------
+
+    #[test]
+    fn try_reserve_fire_wins_first_call_blocks_subsequent() {
+        let sid = format!(
+            "memex-test-reserve-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        );
+        let _ = std::fs::remove_file(debounce_path(&sid));
+
+        // First call wins atomically.
+        assert!(
+            try_reserve_fire(&sid),
+            "first try_reserve_fire on a fresh session should win"
+        );
+        // Subsequent calls within the debounce window lose — this is the
+        // primitive that fixes the watcher↔hook race window.
+        assert!(
+            !try_reserve_fire(&sid),
+            "second try_reserve_fire within debounce must lose"
+        );
+        assert!(
+            !try_reserve_fire(&sid),
+            "third try_reserve_fire within debounce must lose"
+        );
+
+        // Cleanup
+        let _ = std::fs::remove_file(debounce_path(&sid));
+    }
+
+    #[test]
+    fn try_reserve_fire_after_should_fire_is_consistent() {
+        // The cheap pre-check and the atomic reserve must agree on a
+        // fresh session: both say "fire."
+        let sid = format!(
+            "memex-test-reserve-consistency-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        );
+        let _ = std::fs::remove_file(debounce_path(&sid));
+
+        assert!(should_fire_for_session(&sid));
+        assert!(try_reserve_fire(&sid));
+        // After reserve: both refuse.
+        assert!(!should_fire_for_session(&sid));
+        assert!(!try_reserve_fire(&sid));
+
+        let _ = std::fs::remove_file(debounce_path(&sid));
     }
 }

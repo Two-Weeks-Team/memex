@@ -580,9 +580,12 @@ fn cmd_loop_check(cwd: Option<PathBuf>, hook: String) -> Result<()> {
     // Windows via `dirs::cache_dir`). One file per session; mtime IS the
     // last-fired timestamp. Re-using `loopcheck::LOOP_DEBOUNCE_SECS`
     // (canonical 20-min window — same the GUI watcher uses) keeps the two
-    // surfaces in sync (concern #2 also covers the GUI+hook double-fire:
-    // both honor the SAME debounce file so they suppress each other).
-    if !crate::loopcheck::should_fire_for_session(&active.session_id) {
+    // surfaces in sync.
+    //
+    // `try_reserve_fire` is the RACE-FREE primitive (atomic O_CREAT|O_EXCL):
+    // a concurrent GUI watcher predict-then-emit cycle won't double-fire
+    // because only one process wins the create_new claim. (codex PR #9 C-1.)
+    if !crate::loopcheck::try_reserve_fire(&active.session_id) {
         return Ok(());
     }
 
@@ -599,8 +602,6 @@ past session broke out of a comparable position.\n",
         stuck.recent_errors, stuck.recent_window, tool,
     );
     crate::hook::emit(event, &body);
-    // Stamp AFTER emit so a failed emit doesn't suppress the next try.
-    crate::loopcheck::mark_fired_for_session(&active.session_id);
     Ok(())
 }
 
