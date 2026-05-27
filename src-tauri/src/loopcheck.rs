@@ -105,11 +105,26 @@ pub fn is_stuck(session: &Session) -> Option<StuckContext> {
 /// Returns the directory where Loop Breaker debounce touch-files live.
 /// `$XDG_CACHE_HOME/memex/loopcheck` on Unix, `%LOCALAPPDATA%\memex\loopcheck`
 /// on Windows. Creates the directory if it doesn't exist.
+/// Resolve the debounce directory path WITHOUT creating it. Read-only —
+/// `should_fire_for_session` runs on the hook hot path (every Bash
+/// PostToolUse), so we don't want a `create_dir_all` syscall there.
+/// Creation is deferred to `mark_fired_for_session` (the write path).
+///
+/// When `dirs::cache_dir()` returns `None` (no XDG / no platform cache),
+/// fall back to a **user-scoped** subdirectory under `temp_dir()` so
+/// multiple users on the same host don't collide on `/tmp/memex/loopcheck`
+/// (where the FIRST user to write owns the dir and subsequent users hit
+/// EACCES). Suggested by gemini-code-assist on PR #9.
 fn debounce_dir() -> std::path::PathBuf {
-    let base = dirs::cache_dir().unwrap_or_else(std::env::temp_dir);
-    let dir = base.join("memex").join("loopcheck");
-    let _ = std::fs::create_dir_all(&dir);
-    dir
+    if let Some(base) = dirs::cache_dir() {
+        return base.join("memex").join("loopcheck");
+    }
+    let user = std::env::var("USER")
+        .or_else(|_| std::env::var("USERNAME"))
+        .unwrap_or_else(|_| "default".to_string());
+    std::env::temp_dir()
+        .join(format!("memex-{user}"))
+        .join("loopcheck")
 }
 
 /// Sanitize a session_id into a filename-safe stem. session_ids are
@@ -150,6 +165,11 @@ pub fn should_fire_for_session(session_id: &str) -> bool {
 /// already received by the time we mark).
 pub fn mark_fired_for_session(session_id: &str) {
     let path = debounce_path(session_id);
+    // Ensure the cache dir exists before we try to write — `debounce_dir`
+    // no longer eagerly creates it on the read path (gemini PR #9 G-1).
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
     // `File::create` with truncate=true updates the mtime even when the
     // file already exists. Empty payload is intentional — mtime IS the
     // signal.
