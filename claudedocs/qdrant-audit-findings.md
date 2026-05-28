@@ -217,3 +217,53 @@ These are left open for the implementation phase to discover:
 ## §11 · This audit is the source of truth
 
 For the next session, **`qdrant-improvement-goal.md` §3 (the `/goal` text) explicitly references this doc as its baseline**. Any change in code reality must update §1–§7 first, then the goal text updates accordingly.
+
+---
+
+## §12 · Drift since 2026-05-28 (re-verified by P0 AUDIT during qdrant-uplift goal)
+
+**Re-verification timestamp**: 2026-05-28 (same day, P0 AUDIT pass against branch `feat/qdrant-uplift` cut from `0b5df38`).
+
+### §1 row "Qdrant server" — file path drift (DOC-LEVEL, NOT CODE-LEVEL)
+
+| Field | Original §1 claim | Actual on disk | Status |
+|---|---|---|---|
+| Source path for Qdrant pin | `deploy/web/docker-compose.yml` | `./docker-compose.yml` (root, services.qdrant.image) **AND** `deploy/web/Dockerfile` (multi-stage `FROM qdrant/qdrant:v1.18.1 AS qdrant`) | Pin value `v1.18.1` UNCHANGED; only the documented path was wrong |
+
+`deploy/web/` contains: `Dockerfile`, `entrypoint.sh`, `README.md` — no `docker-compose.yml`. The all-in-one image is built standalone with `docker build -t memex-allinone -f deploy/web/Dockerfile .` (no compose); the optional dev-time Qdrant container is launched from the root `docker-compose.yml`.
+
+**Action for goal tasks**: T1.4 + T5.1 doc updates should reference `./docker-compose.yml` and `deploy/web/Dockerfile` correctly. No code change needed for the pin itself.
+
+### §3 row "RelevanceFeedback" — line-number drift (negligible)
+
+| Field | Original §3 claim | Actual on disk | Status |
+|---|---|---|---|
+| Frontend location | `src/main.js:2894-2895` (`👍`/`👎`) | `src/main.js:2895-2897` (`👍 more like this` / `👎 less` buttons inline) → click handler at `src/main.js:2907` → `applyRelevanceFeedback()` at `src/main.js:2916` → `invoke("relevance_feedback", ...)` at `src/main.js:2925` | Functionality intact; line numbers shifted ±2-3 (likely from a small earlier edit) |
+
+Backend chain confirmed intact:
+- `src-tauri/src/commands.rs:918` — `pub async fn relevance_feedback(…)` Tauri command
+- `src-tauri/src/web.rs:397` — HTTP route `"relevance_feedback"` in MCP/JSON-API dispatcher
+- `src-tauri/src/lib.rs:142` — Tauri command registered in invoke_handler
+
+**Action for goal tasks**: T2.13 (RelevanceFeedback playground on landing) — code path is fully wired, the playground is a *visualization of* the existing flow, not new wiring.
+
+### Items A · C · D · E · F · H · I · J — confirmed UNCHANGED
+
+| ID | Expected | Actual | Status |
+|---|---|---|---|
+| A | `qdrant-client = 1.18.0` in `Cargo.lock` | `name = "qdrant-client"` / `version = "1.18.0"` | ✓ CONFIRMED |
+| C | `LensWeights::default().content_late = 0.0` | `content_late: 0.0,` at `lens.rs:140` | ✓ CONFIRMED — T3.3 still needed |
+| D | `active_sparse_specs` gates on `w.path>0 / w.tool>0` | `lens.rs:427-432` exact match | ✓ CONFIRMED — sparse ACTIVE by default |
+| E | `wrapped.rs::scroll_window` still scrolls | `wrapped.rs:475` `async fn scroll_window` + `wrapped.rs:529` `.scroll(builder)` | ✓ CONFIRMED — T3.1 (Facets replacement) still needed |
+| F | `web.rs` only has `/api/health` | `web.rs:111` `.route("/api/health", get(health))` — no `/metrics` | ✓ CONFIRMED — T3.2 (`/metrics`) still needed |
+| H | Arch SVG STORE-band says `BINARY-QUANTIZED` | `index.html:984` text-anchor "5 × 384-D · COSINE · BINARY-QUANTIZED HNSW PER VECTOR" | ✓ CONFIRMED — T1.1 still needed |
+| I | Q1 card has `binary-quantized` wording | `index.html` Q1 `<p class="qd-what">` includes "binary-quantized HNSW index" | ✓ CONFIRMED — T1.1 still needed |
+| J | SDK 1.18 Facet builder | `~/.cargo/registry/src/.../qdrant-client-1.18.0/tests/snippet_tests/test_facets.rs` present | ✓ CONFIRMED — T3.1 has SDK support |
+
+### Net effect on goal task list
+
+- **All 27 atomic tasks remain valid**. No task is invalidated by drift.
+- **T1.4 / T5.1 docs**: must reference correct paths (`./docker-compose.yml`, `deploy/web/Dockerfile`) — minor scope clarification, no new work.
+- **All other tasks**: proceed as specified in `qdrant-improvement-goal.md` §2.
+
+**P0 GATE PASSED — 10/10 confirmed (8 unchanged, 2 doc-only drift reconciled here).**

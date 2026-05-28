@@ -509,6 +509,87 @@ footer .fine{ margin-top:42px; padding-top:22px; border-top:1px solid var(--line
 .qd-grid.qd-revealed .qd[data-q="Q6"] .qd-viz svg .q6step:nth-of-type(6){ transition-delay:1.55s; }
 .qd-grid.qd-revealed .qd[data-q="Q6"] .qd-viz svg .q6step:nth-of-type(7){ transition-delay:1.80s; }
 
+/* Q7 — Server-side scoring pipeline (Formula · Prefetch · RRF · MMR · RelevanceFeedback) */
+.qd[data-q="Q7"] .qd-viz svg .q7lane{ stroke-dasharray:140; stroke-dashoffset:140; transition:stroke-dashoffset .7s ease; }
+.qd-grid.qd-revealed .qd[data-q="Q7"] .qd-viz svg .q7lane{ stroke-dashoffset:0; }
+.qd-grid.qd-revealed .qd[data-q="Q7"] .qd-viz svg .q7lane:nth-of-type(1){ transition-delay:.18s; }
+.qd-grid.qd-revealed .qd[data-q="Q7"] .qd-viz svg .q7lane:nth-of-type(2){ transition-delay:.26s; }
+.qd-grid.qd-revealed .qd[data-q="Q7"] .qd-viz svg .q7lane:nth-of-type(3){ transition-delay:.34s; }
+.qd-grid.qd-revealed .qd[data-q="Q7"] .qd-viz svg .q7lane:nth-of-type(4){ transition-delay:.42s; }
+.qd-grid.qd-revealed .qd[data-q="Q7"] .qd-viz svg .q7lane:nth-of-type(5){ transition-delay:.50s; }
+.qd[data-q="Q7"] .qd-viz svg .q7box{ opacity:0; transform:scale(.7); transform-origin:center; transition:opacity .5s ease, transform .5s cubic-bezier(.25,.8,.3,1); }
+.qd-grid.qd-revealed .qd[data-q="Q7"] .qd-viz svg .q7box{ opacity:1; transform:scale(1); }
+.qd-grid.qd-revealed .qd[data-q="Q7"] .qd-viz svg .q7box:nth-of-type(1){ transition-delay:.70s; }
+.qd-grid.qd-revealed .qd[data-q="Q7"] .qd-viz svg .q7box:nth-of-type(2){ transition-delay:.95s; }
+.qd-grid.qd-revealed .qd[data-q="Q7"] .qd-viz svg .q7box:nth-of-type(3){ transition-delay:1.20s; }
+.qd[data-q="Q7"] .qd-viz svg .q7arrow{ stroke-dasharray:30; stroke-dashoffset:30; transition:stroke-dashoffset .35s ease; }
+.qd-grid.qd-revealed .qd[data-q="Q7"] .qd-viz svg .q7arrow{ stroke-dashoffset:0; }
+.qd-grid.qd-revealed .qd[data-q="Q7"] .qd-viz svg .q7arrow:nth-of-type(1){ transition-delay:.85s; }
+.qd-grid.qd-revealed .qd[data-q="Q7"] .qd-viz svg .q7arrow:nth-of-type(2){ transition-delay:1.10s; }
+
+/* Q8 — Hybrid retrieval (dense + sparse + late-interaction lanes converging) */
+.qd[data-q="Q8"] .qd-viz svg .q8rail{ stroke-dasharray:200; stroke-dashoffset:200; transition:stroke-dashoffset .9s ease; }
+.qd-grid.qd-revealed .qd[data-q="Q8"] .qd-viz svg .q8rail{ stroke-dashoffset:0; }
+.qd-grid.qd-revealed .qd[data-q="Q8"] .qd-viz svg .q8rail:nth-of-type(1){ transition-delay:.20s; }
+.qd-grid.qd-revealed .qd[data-q="Q8"] .qd-viz svg .q8rail:nth-of-type(2){ transition-delay:.40s; }
+.qd-grid.qd-revealed .qd[data-q="Q8"] .qd-viz svg .q8rail:nth-of-type(3){ transition-delay:.60s; }
+.qd[data-q="Q8"] .qd-viz svg .q8node{ opacity:0; transform:scale(0); transform-origin:center; transition:opacity .35s ease, transform .35s cubic-bezier(.25,.8,.3,1); }
+.qd-grid.qd-revealed .qd[data-q="Q8"] .qd-viz svg .q8node{ opacity:1; transform:scale(1); }
+.qd-grid.qd-revealed .qd[data-q="Q8"] .qd-viz svg .q8node:nth-of-type(1){ transition-delay:1.10s; }
+.qd-grid.qd-revealed .qd[data-q="Q8"] .qd-viz svg .q8node:nth-of-type(2){ transition-delay:1.18s; }
+.qd-grid.qd-revealed .qd[data-q="Q8"] .qd-viz svg .q8node:nth-of-type(3){ transition-delay:1.26s; }
+.qd-grid.qd-revealed .qd[data-q="Q8"] .qd-viz svg .q8node:nth-of-type(4){ transition-delay:1.34s; }
+.qd-grid.qd-revealed .qd[data-q="Q8"] .qd-viz svg .q8node:nth-of-type(5){ transition-delay:1.42s; }
+
+/* Q8 internal hybrid lane visualizer (T2.14) */
+#qd-hybrid-viz{ margin-top:14px; padding:14px 16px; background:#06060c; border:1px solid #1a1a24; border-radius:10px; }
+#qd-hybrid-viz .qd-hyb-head{ font-size:11px; letter-spacing:.10em; text-transform:uppercase; color:#a0a0ad; margin:0 0 10px; font-weight:700; }
+#qd-hybrid-viz .qd-hyb-toggles{ display:flex; gap:8px; margin-bottom:12px; flex-wrap:wrap; }
+#qd-hybrid-viz .qd-hyb-tog{ font:600 11px ui-monospace,monospace; padding:6px 12px; border-radius:999px; border:1px solid; cursor:pointer; transition:opacity .2s ease, background .2s ease, transform .15s ease; }
+#qd-hybrid-viz .qd-hyb-tog[data-lane="dense"]{ color:#6cd6ff; border-color:#6cd6ff; background:rgba(108,214,255,.10); }
+#qd-hybrid-viz .qd-hyb-tog[data-lane="sparse"]{ color:#b5e48c; border-color:#b5e48c; background:rgba(181,228,140,.10); }
+#qd-hybrid-viz .qd-hyb-tog[data-lane="late"]{ color:#c792ea; border-color:#c792ea; background:rgba(199,146,234,.10); }
+#qd-hybrid-viz .qd-hyb-tog[aria-pressed="false"]{ opacity:.35; background:transparent; }
+#qd-hybrid-viz .qd-hyb-tog:hover{ transform:translateY(-1px); }
+#qd-hybrid-viz .qd-hyb-results{ list-style:none; padding:0; margin:0; counter-reset:hyb; }
+#qd-hybrid-viz .qd-hyb-row{ counter-increment:hyb; display:flex; align-items:center; padding:6px 10px; margin:3px 0; background:#0a0a14; border:1px solid #15151e; border-radius:7px; font-family:ui-monospace,monospace; font-size:11px; transition:transform .45s cubic-bezier(.2,.8,.25,1), background .25s ease; }
+#qd-hybrid-viz .qd-hyb-row::before{ content:counter(hyb); display:inline-block; min-width:22px; font-weight:700; color:#7a7a86; }
+#qd-hybrid-viz .qd-hyb-row.is-top{ background:#0e1419; border-color:rgba(255,214,10,.18); }
+#qd-hybrid-viz .qd-hyb-label{ flex:1; color:#cfcfd6; }
+#qd-hybrid-viz .qd-hyb-score{ font-weight:700; color:#cfa838; min-width:48px; text-align:right; }
+#qd-hybrid-viz .qd-hyb-tag{ display:inline-block; padding:1px 6px; margin-right:5px; border-radius:3px; font-size:9px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; opacity:.65; }
+#qd-hybrid-viz .qd-hyb-tag-dense{ color:#6cd6ff; background:rgba(108,214,255,.10); }
+#qd-hybrid-viz .qd-hyb-tag-sparse{ color:#b5e48c; background:rgba(181,228,140,.10); }
+#qd-hybrid-viz .qd-hyb-tag-late{ color:#c792ea; background:rgba(199,146,234,.10); }
+
+/* T2.13 RelevanceFeedback playground (after Q-grid) */
+.qd-fb-pg{ margin:24px 0 36px; padding:22px 24px; background:#06060c; border:1px solid #1a1a24; border-radius:14px; box-shadow:0 0 0 1px rgba(255,255,255,.02) inset; }
+.qd-fb-pg h4{ margin:0 0 6px; font-size:14px; font-weight:700; color:var(--fg); letter-spacing:.005em; display:flex; align-items:center; gap:10px; }
+.qd-fb-pg h4 .qd-fb-tag{ font-size:9.5px; letter-spacing:.10em; text-transform:uppercase; padding:2px 8px; border-radius:999px; background:rgba(255,214,10,.10); color:#cfa838; border:1px solid rgba(255,214,10,.25); }
+.qd-fb-pg .qd-fb-lede{ font-size:13.5px; color:var(--fg-mute); margin:0 0 16px; line-height:1.55; }
+.qd-fb-pg .qd-fb-flex{ display:grid; grid-template-columns:1.4fr 1fr; gap:18px; align-items:start; }
+@media (max-width:880px){ .qd-fb-pg .qd-fb-flex{ grid-template-columns:1fr; } }
+.qd-fb-cards{ list-style:none; padding:0; margin:0; counter-reset:fb; }
+.qd-fb-card{ counter-increment:fb; display:flex; align-items:center; padding:9px 12px; margin:6px 0; background:#0a0a14; border:1px solid #1c1c26; border-radius:8px; font-family:ui-monospace,monospace; font-size:11.5px; transition:transform .5s cubic-bezier(.2,.8,.25,1), background .25s ease, border-color .25s ease; }
+.qd-fb-card::before{ content:counter(fb); display:inline-block; min-width:24px; font-weight:700; color:#7a7a86; }
+.qd-fb-card.is-positive{ border-color:rgba(108,214,255,.35); background:#0d1219; }
+.qd-fb-card.is-negative{ border-color:rgba(255,107,122,.35); background:#180e10; opacity:.72; }
+.qd-fb-card .qd-fb-title{ flex:1; color:#cfcfd6; }
+.qd-fb-card .qd-fb-meta{ color:#7a7a86; margin-right:10px; font-size:10px; }
+.qd-fb-btns{ display:flex; gap:4px; }
+.qd-fb-btn{ font:600 14px ui-sans-serif,system-ui,sans-serif; padding:4px 10px; border-radius:999px; border:1px solid #2a2a3a; background:transparent; cursor:pointer; transition:transform .15s ease, background .2s ease, border-color .2s ease; }
+.qd-fb-btn:hover{ transform:translateY(-1px); background:rgba(255,255,255,.04); }
+.qd-fb-btn.is-on[data-feedback="up"]{ border-color:#6cd6ff; background:rgba(108,214,255,.12); }
+.qd-fb-btn.is-on[data-feedback="down"]{ border-color:#ff6b7a; background:rgba(255,107,122,.12); }
+.qd-fb-jsonbox{ background:#040408; border:1px solid #15151e; border-radius:8px; padding:12px 14px; font-family:ui-monospace,monospace; font-size:11px; color:#cfcfd6; max-height:280px; overflow:auto; }
+.qd-fb-jsonbox .lyr-l-a{ font-size:9.5px; letter-spacing:.10em; text-transform:uppercase; color:#7a7a86; display:block; margin-bottom:6px; }
+.qd-fb-jsonbox pre{ margin:0; white-space:pre-wrap; }
+
+/* T5.5 30-day adoption callout */
+.qd-30day{ display:flex; align-items:center; justify-content:space-between; gap:16px; margin:20px 0 0; padding:14px 20px; background:linear-gradient(135deg, rgba(255,214,10,.06), rgba(255,180,84,.04)); border:1px solid rgba(255,214,10,.22); border-radius:10px; font-size:13px; color:var(--fg); }
+.qd-30day strong{ color:#ffd60a; font-size:18px; font-weight:700; padding:0 4px; }
+.qd-30day .qd-30day-list{ color:var(--fg-mute); font-family:ui-monospace,monospace; font-size:11.5px; }
+
 /* Q2 playground formula result — smooth digit interpolation */
 .qd-fout{ display:inline-block; min-width:48px; text-align:right; }
 .qd-fout.recompute{ animation:foutpop .35s cubic-bezier(.2,.8,.3,1); }
@@ -955,9 +1036,9 @@ footer .fine{ margin-top:42px; padding-top:22px; border-top:1px solid var(--line
 
         <path class="trunk" d="M730 460 L730 502" marker-end="url(#ah)"/>
 
-        <!-- ═══════════ BAND 03 · STORE (y=500..830) — FEATURED ═══════════ -->
-        <rect x="20" y="500" width="1360" height="330" rx="14" fill="url(#featGlow)"/>
-        <rect class="band-x" x="20" y="500" width="1360" height="330" rx="14" fill="rgba(255,214,10,.018)" stroke="rgba(255,214,10,.12)"/>
+        <!-- ═══════════ BAND 03 · STORE (y=500..850) — FEATURED ═══════════ -->
+        <rect x="20" y="500" width="1360" height="350" rx="14" fill="url(#featGlow)"/>
+        <rect class="band-x" x="20" y="500" width="1360" height="350" rx="14" fill="rgba(255,214,10,.018)" stroke="rgba(255,214,10,.12)"/>
         <text class="lyr-n" x="40"  y="554" fill="#3a300d">03</text>
         <text class="lyr-l-a" x="40"  y="572">STORE</text>
         <text class="lyr-d" x="40"  y="592">the keystone —</text>
@@ -970,7 +1051,7 @@ footer .fine{ margin-top:42px; padding-top:22px; border-top:1px solid var(--line
         <text class="micro" x="40"  y="716">upserts</text>
 
         <g><!-- Qdrant featured card -->
-          <rect class="feat" x="140" y="520" width="1180" height="290" rx="14"/>
+          <rect class="feat" x="140" y="520" width="1180" height="322" rx="14"/>
           <line x1="148" y1="521" x2="1312" y2="521" stroke="#ffd60a" stroke-width="1" opacity=".30"/>
 
           <g transform="translate(160, 540)"><!-- hex icon (larger) -->
@@ -981,14 +1062,14 @@ footer .fine{ margin-top:42px; padding-top:22px; border-top:1px solid var(--line
           <text class="ttl-lg" x="200" y="560">Qdrant 1.18.1</text>
           <text class="sub" x="200" y="582" fill="#cfa838">collection memex_sessions · point_id = uuid_v5(session_id)</text>
 
-          <text class="pill-r" x="1300" y="558" text-anchor="end">5 × 384-D · COSINE · BINARY-QUANTIZED HNSW PER VECTOR</text>
+          <text class="pill-r" x="1300" y="558" text-anchor="end">5 × 384-D · COSINE · TURBOQUANT BITS-2 · 2× OVERSAMPLING · RESCORE</text>
           <text class="pill-r" x="1300" y="574" text-anchor="end" fill="#7a6a30">CLIENT · gRPC 1.18 · SNAPSHOTS OVER HTTP</text>
 
           <!-- 3 internal panels -->
           <!-- panel A: point schema -->
           <g><!-- schema panel -->
-            <rect class="panel-a" x="160" y="600" width="500" height="194" rx="9"/>
-            <text class="lyr-l-a" x="178" y="622">POINT SCHEMA</text>
+            <rect class="panel-a" x="160" y="600" width="500" height="226" rx="9"/>
+            <text class="lyr-l-a" x="178" y="622">POINT SCHEMA · 8 VECTOR SLOTS</text>
             <text class="micro" x="640" y="622" text-anchor="end" fill="#7a6a30">~1 KB / point</text>
 
             <g transform="translate(178, 638)" font-family="ui-monospace,Menlo,monospace">
@@ -1018,18 +1099,26 @@ footer .fine{ margin-top:42px; padding-top:22px; border-top:1px solid var(--line
               <text class="kw-c" x="86" y="90">[</text>
               <rect x="100" y="81" width="190" height="10" rx="2" fill="url(#cCode)" stroke="#c792ea" stroke-width=".6"/>
               <text class="kw-c" x="296" y="90">·384-d]</text>
-              <text class="kw-c" x="0"  y="106">}</text>
 
-              <text class="kw-k" x="0"  y="124">payload</text>
-              <text class="kw-c" x="56" y="124">: { project, branch, has_errors,</text>
-              <text class="kw-c" x="20" y="140">        source_path, started_at, … }</text>
+              <!-- 2 sparse + 1 multivector slots (T1.2: 8 total) -->
+              <text class="kw-k" x="20" y="104" opacity=".82">path_sparse</text>
+              <text class="kw-c" x="100" y="104" fill="#7a6a30">{idx,val}·IDF mod</text>
+              <text class="kw-k" x="20" y="118" opacity=".82">tool_sparse</text>
+              <text class="kw-c" x="100" y="118" fill="#7a6a30">{idx,val}·IDF mod</text>
+              <text class="kw-k" x="20" y="132" opacity=".68">content_late</text>
+              <text class="kw-c" x="100" y="132" fill="#5a4a2a">▦·MaxSim rerank (off by default)</text>
+              <text class="kw-c" x="0"  y="148">}</text>
+
+              <text class="kw-k" x="0"  y="166">payload</text>
+              <text class="kw-c" x="56" y="166">: { project, branch, has_errors,</text>
+              <text class="kw-c" x="20" y="180">        source_path, started_at, … }</text>
             </g>
           </g>
 
-          <!-- panel B: named vectors detail -->
+          <!-- panel B: 8 vector slots (5 dense + 2 sparse + 1 multivector) -->
           <g>
-            <rect class="panel-a" x="680" y="600" width="320" height="194" rx="9"/>
-            <text class="lyr-l-a" x="698" y="622">FIVE NAMED-VECTOR LENSES</text>
+            <rect class="panel-a" x="680" y="600" width="320" height="226" rx="9"/>
+            <text class="lyr-l-a" x="698" y="622">5 DENSE + 2 SPARSE + 1 MULTI</text>
             <g transform="translate(698, 632)">
               <g class="hov" data-tip="store-content" tabindex="0" role="button" focusable="true">
 <rect x="0"  y="6"  width="284" height="28" rx="6" fill="#091820" stroke="#6cd6ff" stroke-width="1"/>
@@ -1060,17 +1149,40 @@ footer .fine{ margin-top:42px; padding-top:22px; border-top:1px solid var(--line
 </g>
 
               <g class="hov" data-tip="store-code" tabindex="0" role="button" focusable="true">
-<rect x="0"  y="134" width="284" height="28" rx="6" fill="#1b1226" stroke="#c792ea" stroke-width="1"/>
-              <text class="chip"   x="12" y="150" fill="#c792ea">code</text>
-              <text class="chip-s" x="86" y="150" fill="#9272b0">identifiers</text>
-              <text class="micro"  x="272" y="150" text-anchor="end" fill="#9272b0">384-d</text>
+<rect x="0"  y="134" width="284" height="22" rx="6" fill="#1b1226" stroke="#c792ea" stroke-width="1"/>
+              <text class="chip"   x="12" y="149" fill="#c792ea">code</text>
+              <text class="chip-s" x="86" y="149" fill="#9272b0">identifiers</text>
+              <text class="micro"  x="272" y="149" text-anchor="end" fill="#9272b0">384-d</text>
+</g>
+
+              <!-- 2 sparse chips -->
+              <g class="hov" data-tip="store-path-sparse" tabindex="0" role="button" focusable="true">
+<rect x="0"  y="160" width="284" height="20" rx="6" fill="#0c0e07" stroke="#b5e48c" stroke-width=".7" stroke-dasharray="3 2" opacity=".88"/>
+              <text class="chip"   x="12" y="174" fill="#b5e48c" font-size="9.5">path_sparse</text>
+              <text class="chip-s" x="100" y="174" fill="#7da45d" font-size="8.5">IDF · hybrid lane</text>
+              <text class="micro"  x="272" y="174" text-anchor="end" fill="#7da45d" font-size="8">SPARSE</text>
+</g>
+
+              <g class="hov" data-tip="store-tool-sparse" tabindex="0" role="button" focusable="true">
+<rect x="0"  y="184" width="284" height="20" rx="6" fill="#100b07" stroke="#ffb454" stroke-width=".7" stroke-dasharray="3 2" opacity=".88"/>
+              <text class="chip"   x="12" y="198" fill="#ffb454" font-size="9.5">tool_sparse</text>
+              <text class="chip-s" x="100" y="198" fill="#a98750" font-size="8.5">IDF · hybrid lane</text>
+              <text class="micro"  x="272" y="198" text-anchor="end" fill="#a98750" font-size="8">SPARSE</text>
+</g>
+
+              <!-- 1 multivector chip (rerank-only, off by default) -->
+              <g class="hov" data-tip="store-content-late" tabindex="0" role="button" focusable="true">
+<rect x="0"  y="208" width="284" height="20" rx="6" fill="#0a0f17" stroke="#6cd6ff" stroke-width=".7" stroke-dasharray="1 2" opacity=".70"/>
+              <text class="chip"   x="12" y="222" fill="#6cd6ff" font-size="9.5" opacity=".88">content_late</text>
+              <text class="chip-s" x="100" y="222" fill="#7caec4" font-size="8.5">ColBERT MaxSim · rerank</text>
+              <text class="micro"  x="272" y="222" text-anchor="end" fill="#7caec4" font-size="8">OFF (T3.3)</text>
 </g>
             </g>
           </g>
 
           <!-- panel C: filters + snapshots -->
           <g>
-            <rect class="panel-a" x="1020" y="600" width="280" height="194" rx="9"/>
+            <rect class="panel-a" x="1020" y="600" width="280" height="226" rx="9"/>
             <text class="lyr-l-a" x="1038" y="622">INDEXED PAYLOAD KEYS</text>
             <g transform="translate(1038, 632)">
               <text class="kw-k" x="0"  y="14">has_errors</text>
@@ -1092,14 +1204,14 @@ footer .fine{ margin-top:42px; padding-top:22px; border-top:1px solid var(--line
           </g>
         </g>
 
-        <!-- STORE → 5 capabilities: reverse-manifold fan-out -->
-        <path class="trunk"  d="M730 830 L730 854"/>
-        <path class="branch" d="M256 854 L1204 854"/>
-        <path class="branch" d="M256 854 L256 884" marker-end="url(#ah)"/>
-        <path class="branch" d="M494 854 L494 884" marker-end="url(#ah)"/>
-        <path class="branch" d="M730 854 L730 884" marker-end="url(#ah)"/>
-        <path class="branch" d="M966 854 L966 884" marker-end="url(#ah)"/>
-        <path class="branch" d="M1204 854 L1204 884" marker-end="url(#ah)"/>
+        <!-- STORE → 5 capabilities: reverse-manifold fan-out (trunk shifted +20 to clear extended feat rect) -->
+        <path class="trunk"  d="M730 850 L730 866"/>
+        <path class="branch" d="M256 866 L1204 866"/>
+        <path class="branch" d="M256 866 L256 884" marker-end="url(#ah)"/>
+        <path class="branch" d="M494 866 L494 884" marker-end="url(#ah)"/>
+        <path class="branch" d="M730 866 L730 884" marker-end="url(#ah)"/>
+        <path class="branch" d="M966 866 L966 884" marker-end="url(#ah)"/>
+        <path class="branch" d="M1204 866 L1204 884" marker-end="url(#ah)"/>
 
         <!-- ═══════════ BAND 04 · QUERY (y=860..1140) ═══════════ -->
         <rect class="band-q" x="20" y="860" width="1360" height="280" rx="14"/>
@@ -1455,7 +1567,7 @@ footer .fine{ margin-top:42px; padding-top:22px; border-top:1px solid var(--line
       <!-- ──────────────── Q1 ──────────────── -->
       <article class="qd L-content" data-q="Q1">
         <div class="qd-viz">
-          <svg viewBox="0 0 320 144" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <svg viewBox="0 0 320 162" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
             <defs>
               <linearGradient id="q1bar" x1="0" y1="0" x2="1" y2="0">
                 <stop offset="0%" stop-color="currentColor" stop-opacity=".1"/>
@@ -1501,13 +1613,14 @@ footer .fine{ margin-top:42px; padding-top:22px; border-top:1px solid var(--line
             <!-- connector -->
             <path d="M228 72 L248 72" stroke="#3a3a44" stroke-width=".8" stroke-dasharray="2 2"/>
             <text x="40" y="138" font-family="ui-sans-serif,system-ui,sans-serif" font-size="9" fill="#a08a30" font-weight="700" letter-spacing=".12em">ONE POINT  ·  FIVE LENSES  ·  ONE PAYLOAD</text>
+            <text x="40" y="156" font-family="ui-monospace,monospace" font-size="7.5" fill="#7a6a30" letter-spacing=".06em">QUANT: TurboQuant bits-2 · 2× oversampling · rescore on</text>
           </svg>
         </div>
         <header>
           <span class="qd-no">Q1</span>
           <h3>Named vectors per point</h3>
         </header>
-        <p class="qd-what"><b>What it is.</b> One Qdrant point holds five named dense vectors — <code>content</code>, <code>tool</code>, <code>path</code>, <code>error</code>, <code>code</code>, each 384-d cosine BGE-small — stored as a single <code>VectorParamsMap</code>. Five orthogonal lenses on the same conversation, each with its own binary-quantized HNSW index.</p>
+        <p class="qd-what"><b>What it is.</b> One Qdrant point holds five named dense vectors — <code>content</code>, <code>tool</code>, <code>path</code>, <code>error</code>, <code>code</code>, each 384-d cosine BGE-small — stored as a single <code>VectorParamsMap</code>. Five orthogonal lenses on the same conversation, each with its own HNSW index quantized via <b>TurboQuant bits-2</b> (2-bit per dim) with <b>2× oversampling + rescore</b> — the compression is real, the accuracy holds.</p>
         <p class="qd-why"><b>Why it matters.</b> A single-vector store forces you to pick one "meaning". Five named vectors let us ask "what tools fired?" and "what files were touched?" as independent questions on the same point.</p>
 <pre><span class="c">// PointStruct: one id, many named vectors, one payload</span>
 PointStruct {
@@ -1568,7 +1681,7 @@ PointStruct {
           <span class="qd-no">Q2</span>
           <h3>Universal Query — weighted multi-vector scoring</h3>
         </header>
-        <p class="qd-what"><b>What it is.</b> The lens slider issues one Universal Query per non-zero weight via <code>QueryPointsBuilder.using("&lt;name&gt;")</code>, then blends per-vector scores with continuous weights. Not RRF: rank-based fusion ignores weights, so we compute <code>Σ(score<sub>i</sub> · w<sub>i</sub>) / Σ w<sub>i</sub></code> ourselves.</p>
+        <p class="qd-what"><b>What it is.</b> The lens slider issues a single Universal Query whose <code>prefetch</code> chain carries one lane per non-zero weight (5 dense + 2 sparse by default), fused server-side via <code>FusionMode::Formula</code> with <code>exp_decay</code> recency — one round-trip, not five. The playground above visualises the same weighted blend as <code>Σ(score<sub>i</sub> · w<sub>i</sub>) / Σ w<sub>i</sub></code> for clarity; the server runs the equivalent Formula on its side. Not RRF — RRF ignores weights. See <a href="#qdrant" class="qd-xref-inline">Q7</a> for the full server-side scoring stack (Formula · Prefetch · RRF · MMR · RelevanceFeedback).</p>
         <p class="qd-why"><b>Why it matters.</b> "Weight tool calls 2× more than prose" is a real, continuous knob. RRF can't say that.</p>
 <pre>QueryPointsBuilder::new(<span class="s">"memex_sessions"</span>)
   .query(embedded)
@@ -1876,24 +1989,200 @@ POST /collections/{c}/snapshots/upload?priority=snapshot</pre>
           <a class="qd-xref" href="#run" title="Jump to the Run section">▸ POWERS PORTABILITY</a>
         </p>
       </article>
+
+      <!-- ──────────────── Q7 — Server-side scoring (Formula · Prefetch · RRF · MMR · RelevanceFeedback) ──────────────── -->
+      <article class="qd L-content" data-q="Q7">
+        <div class="qd-viz">
+          <svg viewBox="0 0 320 144" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+            <text x="30" y="22" font-family="ui-sans-serif,system-ui,sans-serif" font-size="9" font-weight="700" fill="#6cd6ff" letter-spacing=".1em" opacity=".75">PREFETCH → FORMULA → MMR → TOP-K</text>
+            <!-- 5 prefetch lanes converging -->
+            <g stroke-linecap="round" fill="none">
+              <path class="q7lane" d="M14 38 Q70 38 110 60" stroke="#6cd6ff" stroke-width="1.4" opacity=".8"/>
+              <path class="q7lane" d="M14 52 Q70 52 110 64" stroke="#ffb454" stroke-width="1.4" opacity=".8"/>
+              <path class="q7lane" d="M14 66 L110 66" stroke="#b5e48c" stroke-width="1.4" opacity=".8"/>
+              <path class="q7lane" d="M14 80 Q70 80 110 70" stroke="#ff6b7a" stroke-width="1.4" opacity=".8"/>
+              <path class="q7lane" d="M14 94 Q70 94 110 74" stroke="#c792ea" stroke-width="1.4" opacity=".8"/>
+            </g>
+            <text class="kw-c" x="6" y="40" font-family="ui-monospace,monospace" font-size="8" fill="#6cd6ff">content</text>
+            <text class="kw-c" x="6" y="54" font-family="ui-monospace,monospace" font-size="8" fill="#ffb454">tool</text>
+            <text class="kw-c" x="6" y="68" font-family="ui-monospace,monospace" font-size="8" fill="#b5e48c">path</text>
+            <text class="kw-c" x="6" y="82" font-family="ui-monospace,monospace" font-size="8" fill="#ff6b7a">error</text>
+            <text class="kw-c" x="6" y="96" font-family="ui-monospace,monospace" font-size="8" fill="#c792ea">code</text>
+            <!-- box 1: Formula -->
+            <g class="q7box">
+              <rect x="110" y="46" width="58" height="36" rx="6" fill="#0a0a14" stroke="#ffd60a" stroke-width="1.2"/>
+              <text x="139" y="62" text-anchor="middle" font-family="ui-monospace,monospace" font-size="9" font-weight="700" fill="#ffd60a">FORMULA</text>
+              <text x="139" y="74" text-anchor="middle" font-family="ui-monospace,monospace" font-size="7.5" fill="#cfa838">·exp_decay</text>
+            </g>
+            <!-- arrow Formula → MMR -->
+            <path class="q7arrow" d="M168 64 L188 64" stroke="#ffd60a" stroke-width="1.5" fill="none" marker-end="url(#q7ah)"/>
+            <!-- box 2: MMR -->
+            <g class="q7box">
+              <rect x="188" y="46" width="50" height="36" rx="6" fill="#0a0a14" stroke="#c792ea" stroke-width="1.2"/>
+              <text x="213" y="62" text-anchor="middle" font-family="ui-monospace,monospace" font-size="9" font-weight="700" fill="#c792ea">MMR</text>
+              <text x="213" y="74" text-anchor="middle" font-family="ui-monospace,monospace" font-size="7.5" fill="#9272b0">·diversify</text>
+            </g>
+            <!-- arrow MMR → top-K -->
+            <path class="q7arrow" d="M238 64 L258 64" stroke="#c792ea" stroke-width="1.5" fill="none" marker-end="url(#q7ah)"/>
+            <!-- box 3: top-K result -->
+            <g class="q7box">
+              <rect x="258" y="46" width="56" height="36" rx="6" fill="#0d1419" stroke="#b5e48c" stroke-width="1.2"/>
+              <text x="286" y="62" text-anchor="middle" font-family="ui-monospace,monospace" font-size="9" font-weight="700" fill="#b5e48c">TOP-K</text>
+              <text x="286" y="74" text-anchor="middle" font-family="ui-monospace,monospace" font-size="7.5" fill="#7da45d">·20</text>
+            </g>
+            <!-- arrow defs -->
+            <defs>
+              <marker id="q7ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="4.5" markerHeight="4.5" orient="auto-start-reverse">
+                <path d="M0 0 L10 5 L0 10 z" fill="currentColor"/>
+              </marker>
+            </defs>
+            <!-- relevance feedback chip below -->
+            <g transform="translate(110, 100)">
+              <rect x="0" y="0" width="200" height="22" rx="4" fill="#06060c" stroke="#ffd60a" stroke-width=".7" stroke-dasharray="2 2" opacity=".75"/>
+              <text x="100" y="15" text-anchor="middle" font-family="ui-monospace,monospace" font-size="8" fill="#cfa838">👍/👎 → Query::RelevanceFeedback bias</text>
+            </g>
+            <text x="280" y="138" text-anchor="end" font-family="ui-monospace,monospace" font-size="8" fill="#7a7a86">one round-trip · no client re-rank</text>
+          </svg>
+        </div>
+        <header>
+          <span class="qd-no">Q7</span>
+          <h3>Server-side scoring — Formula · Prefetch · RRF · MMR · RelevanceFeedback</h3>
+        </header>
+        <p class="qd-what"><b>What it is.</b> Five Qdrant 1.18 primitives folded into a single query plan: a <code>prefetch</code> chain (one lane per non-zero weight — 5 dense + 2 sparse by default), fused server-side via <code>Query::new_formula</code> with <code>exp_decay</code> over <code>start_ts_dt</code>, optionally diversified by <code>MMR</code>, optionally biased by <code>Query::RelevanceFeedback</code> from 👍/👎 on prior results. Alternative fusion: <code>FusionMode::Rrf</code> (rank-based).</p>
+        <p class="qd-why"><b>Why it matters.</b> The naive approach is to fetch 1 000 raw points and re-rank in Rust. That hammers IO. Server-side Formula folds fusion + recency + diversity + feedback into one query plan; the client only sees the final top-K. One round-trip, no client re-score.</p>
+<pre>QueryPointsBuilder::new(<span class="s">"memex_sessions_v3"</span>)
+  .add_prefetch(<span class="c">/* 5 dense + 2 sparse lanes */</span>)
+  .query(Query::new_formula(formula_with_exp_decay))
+  .limit(20)
+<span class="c">// alternative: Query::Recommend, Query::RelevanceFeedback, FusionMode::Rrf</span></pre>
+        <p class="qd-ptr">
+          <a href="https://github.com/Two-Weeks-Team/memex/blob/main/src-tauri/src/lens.rs" target="_blank" rel="noopener">lens.rs::build_prefetches</a> · <a href="https://github.com/Two-Weeks-Team/memex/blob/main/docs/qdrant-features.md#7-server-side-scoring--formula--prefetch--rrf--mmr--relevancefeedback" target="_blank" rel="noopener">qdrant-features.md §7</a>
+          <a class="qd-xref" href="#architecture" title="Jump to the Architecture QUERY band">▸ POWERS QUERY</a>
+        </p>
+      </article>
+
+      <!-- ──────────────── Q8 — Hybrid retrieval (dense + sparse + ColBERT MaxSim) ──────────────── -->
+      <article class="qd L-path" data-q="Q8">
+        <div class="qd-viz">
+          <svg viewBox="0 0 320 144" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+            <text x="30" y="22" font-family="ui-sans-serif,system-ui,sans-serif" font-size="9" font-weight="700" fill="#b5e48c" letter-spacing=".1em" opacity=".75">3 RAILS → ONE RANKED LIST</text>
+            <!-- 3 horizontal rails converging into a single result list on the right -->
+            <g fill="none">
+              <path class="q8rail" d="M14 46 Q140 46 220 70" stroke="#6cd6ff" stroke-width="2" opacity=".88"/>
+              <path class="q8rail" d="M14 72 L220 72" stroke="#b5e48c" stroke-width="2" stroke-dasharray="3 2" opacity=".88"/>
+              <path class="q8rail" d="M14 98 Q140 98 220 74" stroke="#c792ea" stroke-width="2" stroke-dasharray="1 2" opacity=".70"/>
+            </g>
+            <!-- rail labels -->
+            <text x="6" y="40" font-family="ui-monospace,monospace" font-size="8" fill="#6cd6ff" font-weight="700">5 DENSE</text>
+            <text x="6" y="55" font-family="ui-monospace,monospace" font-size="7" fill="#7caec4">content · tool · path · error · code</text>
+            <text x="6" y="68" font-family="ui-monospace,monospace" font-size="8" fill="#b5e48c" font-weight="700">2 SPARSE</text>
+            <text x="6" y="83" font-family="ui-monospace,monospace" font-size="7" fill="#7da45d">path_sparse · tool_sparse · IDF</text>
+            <text x="6" y="96" font-family="ui-monospace,monospace" font-size="8" fill="#c792ea" font-weight="700">1 MULTI</text>
+            <text x="6" y="111" font-family="ui-monospace,monospace" font-size="7" fill="#9272b0">content_late · MaxSim rerank (off)</text>
+            <!-- ranked list on the right -->
+            <g transform="translate(224, 32)">
+              <rect class="q8node" x="0"  y="0"  width="84" height="14" rx="3" fill="#0d1419" stroke="#ffd60a" stroke-width=".8"/>
+              <text x="6" y="10" font-family="ui-monospace,monospace" font-size="8" font-weight="700" fill="#ffd60a">1 · 0.94</text>
+              <rect class="q8node" x="0"  y="18" width="84" height="14" rx="3" fill="#0a0a14" stroke="#23232c" stroke-width=".7"/>
+              <text x="6" y="28" font-family="ui-monospace,monospace" font-size="8" fill="#cfcfd6">2 · 0.87</text>
+              <rect class="q8node" x="0"  y="36" width="84" height="14" rx="3" fill="#0a0a14" stroke="#23232c" stroke-width=".7"/>
+              <text x="6" y="46" font-family="ui-monospace,monospace" font-size="8" fill="#cfcfd6">3 · 0.81</text>
+              <rect class="q8node" x="0"  y="54" width="84" height="14" rx="3" fill="#0a0a14" stroke="#23232c" stroke-width=".7"/>
+              <text x="6" y="64" font-family="ui-monospace,monospace" font-size="8" fill="#cfcfd6">4 · 0.76</text>
+              <rect class="q8node" x="0"  y="72" width="84" height="14" rx="3" fill="#0a0a14" stroke="#23232c" stroke-width=".7"/>
+              <text x="6" y="82" font-family="ui-monospace,monospace" font-size="8" fill="#cfcfd6">5 · 0.71</text>
+            </g>
+            <text x="280" y="138" text-anchor="end" font-family="ui-monospace,monospace" font-size="8" fill="#7a7a86">hybrid · server-side fused</text>
+          </svg>
+        </div>
+        <header>
+          <span class="qd-no">Q8</span>
+          <h3>Hybrid retrieval — dense + sparse + ColBERT late-interaction</h3>
+        </header>
+        <p class="qd-what"><b>What it is.</b> Eight vector slots in the v3 schema: <code>5 dense</code> (content, tool, path, error, code) + <code>2 sparse</code> (<code>path_sparse</code>, <code>tool_sparse</code> with <code>Modifier::Idf</code>) + <code>1 multivector</code> (<code>content_late</code> ColBERT MaxSim, rerank-only). Dense + sparse are <b>ACTIVE by default</b> (gated on <code>w.path &gt; 0</code> / <code>w.tool &gt; 0</code> in <code>lens.rs::active_sparse_specs</code>); <code>content_late</code> is wired but OFF (<code>LensWeights::default().content_late = 0.0</code>) — opt-in rerank lane, flippable to ~0.25 (T3.3).</p>
+        <p class="qd-why"><b>Why it matters.</b> Three orthogonal scoring signals in one prefetch chain, fused server-side. Dense handles paraphrase, sparse handles exact-identifier matching, late-interaction handles fine-grained position-aware matching. Each compensates for the others' blind spots.</p>
+        <div id="qd-hybrid-viz" role="group" aria-label="Hybrid lane visualizer — toggle dense / sparse / late to see the result list re-order">
+          <p class="qd-hyb-head">Toggle lanes → result list re-orders</p>
+          <div class="qd-hyb-toggles">
+            <button type="button" class="qd-hyb-tog" data-lane="dense" aria-pressed="true">Dense ON</button>
+            <button type="button" class="qd-hyb-tog" data-lane="sparse" aria-pressed="true">Sparse ON</button>
+            <button type="button" class="qd-hyb-tog" data-lane="late" aria-pressed="false">Late (rerank) OFF</button>
+          </div>
+          <ol class="qd-hyb-results">
+            <li class="qd-hyb-row" data-dense=".91" data-sparse=".74" data-late=".82"><span class="qd-hyb-tag qd-hyb-tag-dense">D</span><span class="qd-hyb-tag qd-hyb-tag-sparse">S</span><span class="qd-hyb-tag qd-hyb-tag-late">L</span><span class="qd-hyb-label">refactor: auth middleware (paraphrase + identifiers)</span><span class="qd-hyb-score">0.00</span></li>
+            <li class="qd-hyb-row" data-dense=".88" data-sparse=".42" data-late=".64"><span class="qd-hyb-tag qd-hyb-tag-dense">D</span><span class="qd-hyb-tag qd-hyb-tag-sparse">·</span><span class="qd-hyb-tag qd-hyb-tag-late">·</span><span class="qd-hyb-label">describe: ssr hydration tradeoffs (dense-only twin)</span><span class="qd-hyb-score">0.00</span></li>
+            <li class="qd-hyb-row" data-dense=".55" data-sparse=".90" data-late=".48"><span class="qd-hyb-tag qd-hyb-tag-dense">·</span><span class="qd-hyb-tag qd-hyb-tag-sparse">S</span><span class="qd-hyb-tag qd-hyb-tag-late">·</span><span class="qd-hyb-label">grep: <code>active_sparse_specs</code> implementation (lexical exact)</span><span class="qd-hyb-score">0.00</span></li>
+            <li class="qd-hyb-row" data-dense=".72" data-sparse=".68" data-late=".89"><span class="qd-hyb-tag qd-hyb-tag-dense">·</span><span class="qd-hyb-tag qd-hyb-tag-sparse">·</span><span class="qd-hyb-tag qd-hyb-tag-late">L</span><span class="qd-hyb-label">debug: ColBERT MaxSim threshold tuning (token-level)</span><span class="qd-hyb-score">0.00</span></li>
+            <li class="qd-hyb-row" data-dense=".66" data-sparse=".58" data-late=".52"><span class="qd-hyb-tag qd-hyb-tag-dense">·</span><span class="qd-hyb-tag qd-hyb-tag-sparse">·</span><span class="qd-hyb-tag qd-hyb-tag-late">·</span><span class="qd-hyb-label">discuss: hybrid retrieval pros &amp; cons</span><span class="qd-hyb-score">0.00</span></li>
+            <li class="qd-hyb-row" data-dense=".62" data-sparse=".77" data-late=".44"><span class="qd-hyb-tag qd-hyb-tag-dense">·</span><span class="qd-hyb-tag qd-hyb-tag-sparse">S</span><span class="qd-hyb-tag qd-hyb-tag-late">·</span><span class="qd-hyb-label">trace: <code>FieldType::Sparse</code> in <code>schema.rs</code></span><span class="qd-hyb-score">0.00</span></li>
+            <li class="qd-hyb-row" data-dense=".49" data-sparse=".83" data-late=".39"><span class="qd-hyb-tag qd-hyb-tag-dense">·</span><span class="qd-hyb-tag qd-hyb-tag-sparse">S</span><span class="qd-hyb-tag qd-hyb-tag-late">·</span><span class="qd-hyb-label">log: indexer attaching <code>tool_sparse</code> indices</span><span class="qd-hyb-score">0.00</span></li>
+            <li class="qd-hyb-row" data-dense=".42" data-sparse=".34" data-late=".91"><span class="qd-hyb-tag qd-hyb-tag-dense">·</span><span class="qd-hyb-tag qd-hyb-tag-sparse">·</span><span class="qd-hyb-tag qd-hyb-tag-late">L</span><span class="qd-hyb-label">explain: MaxSim vs late-interaction (deep token rerank)</span><span class="qd-hyb-score">0.00</span></li>
+          </ol>
+        </div>
+<pre>SparseVectorsConfig { map: {
+  <span class="s">"path_sparse"</span>: SparseVectorParams { modifier: <span class="kw-v">Idf</span>, .. },
+  <span class="s">"tool_sparse"</span>: SparseVectorParams { modifier: <span class="kw-v">Idf</span>, .. } } }
+VectorsConfig { multivectors: { <span class="s">"content_late"</span>: MultiVectorConfig { .. } } }</pre>
+        <p class="qd-ptr">
+          <a href="https://github.com/Two-Weeks-Team/memex/blob/main/src-tauri/src/schema.rs" target="_blank" rel="noopener">schema.rs::SPARSE_VECTORS · MULTIVECTOR_NAME</a> · <a href="https://github.com/Two-Weeks-Team/memex/blob/main/docs/qdrant-features.md#6-hybrid-retrieval--sparse--dense--opt-in-multivector" target="_blank" rel="noopener">qdrant-features.md §6</a>
+          <a class="qd-xref" href="#architecture" title="Jump to the Architecture STORE band">▸ POWERS STORE</a>
+        </p>
+      </article>
+    </div>
+
+    <!-- ──────────────── T2.13 · RelevanceFeedback playground ──────────────── -->
+    <div class="qd-fb-pg" id="qd-feedback-pg" role="group" aria-label="RelevanceFeedback playground — click thumbs-up or thumbs-down to bias the next ranking">
+      <h4>RelevanceFeedback live demo <span class="qd-fb-tag">Q7 + Q::RelevanceFeedback</span></h4>
+      <p class="qd-fb-lede">Click <span aria-label="thumbs up">👍</span> on results that match what you wanted; <span aria-label="thumbs down">👎</span> on results that don't. The mock <code>FeedbackItem</code> JSON updates on the right; the cards animate to their new positions. In the real product this exact payload is what <code>commands.rs::relevance_feedback</code> POSTs to Qdrant, biasing the next query in this session.</p>
+      <div class="qd-fb-flex">
+        <ol class="qd-fb-cards" data-feedback-list>
+          <li class="qd-fb-card" data-feedback-card data-sid="alpha-9c1f" data-base=".88"><span class="qd-fb-meta">.88</span><span class="qd-fb-title">refactor: auth middleware in <code>src-tauri</code></span><span class="qd-fb-btns"><button class="qd-fb-btn" data-feedback="up" aria-label="more like this">👍</button><button class="qd-fb-btn" data-feedback="down" aria-label="less like this">👎</button></span></li>
+          <li class="qd-fb-card" data-feedback-card data-sid="beta-7e22"  data-base=".84"><span class="qd-fb-meta">.84</span><span class="qd-fb-title">describe: ssr hydration tradeoffs in next.js app router</span><span class="qd-fb-btns"><button class="qd-fb-btn" data-feedback="up" aria-label="more like this">👍</button><button class="qd-fb-btn" data-feedback="down" aria-label="less like this">👎</button></span></li>
+          <li class="qd-fb-card" data-feedback-card data-sid="gamma-3b04" data-base=".79"><span class="qd-fb-meta">.79</span><span class="qd-fb-title">grep: <code>active_sparse_specs</code> implementation (lexical exact)</span><span class="qd-fb-btns"><button class="qd-fb-btn" data-feedback="up" aria-label="more like this">👍</button><button class="qd-fb-btn" data-feedback="down" aria-label="less like this">👎</button></span></li>
+          <li class="qd-fb-card" data-feedback-card data-sid="delta-1d8e" data-base=".74"><span class="qd-fb-meta">.74</span><span class="qd-fb-title">debug: ColBERT MaxSim threshold tuning</span><span class="qd-fb-btns"><button class="qd-fb-btn" data-feedback="up" aria-label="more like this">👍</button><button class="qd-fb-btn" data-feedback="down" aria-label="less like this">👎</button></span></li>
+          <li class="qd-fb-card" data-feedback-card data-sid="eps-2a76"   data-base=".70"><span class="qd-fb-meta">.70</span><span class="qd-fb-title">discuss: hybrid retrieval pros &amp; cons</span><span class="qd-fb-btns"><button class="qd-fb-btn" data-feedback="up" aria-label="more like this">👍</button><button class="qd-fb-btn" data-feedback="down" aria-label="less like this">👎</button></span></li>
+        </ol>
+        <div class="qd-fb-jsonbox" aria-live="polite">
+          <span class="lyr-l-a">FeedbackItem JSON (mock)</span>
+          <pre id="qd-fb-json">{
+  "previousQuery": "auth middleware",
+  "positiveIds": [],
+  "negativeIds": [],
+  "limit": 20
+}</pre>
+        </div>
+      </div>
     </div>
 
     <div class="qd-extras">
       <h3>And the small things that make it fast</h3>
       <ul class="qd-bullets" data-stagger>
         <li><b>Deterministic point ids.</b> <code>point_id = uuid_v5(session_id)</code> — upserts are idempotent; rebuilds don't duplicate.</li>
-        <li><b>Binary-quantized HNSW per named vector.</b> Each of the five lenses has its own index — recall &amp; latency tuned per lens, not per collection.</li>
-        <li><b>Field-indexed payload predicates.</b> <code>has_errors</code> (bool), <code>project</code>, <code>branch</code> are indexed via <code>CreateFieldIndexCollectionBuilder</code> — filters short-circuit before HNSW walk.</li>
+        <li><b>TurboQuant bits-2 + 2× oversampling + rescore.</b> 2-bit per dim · 2× oversampling guard · rescore on. The compression is real; the accuracy holds. Each of the five lenses still has its own HNSW graph — recall &amp; latency tuned per lens.</li>
+        <li><b>Per-vector HNSW tuning.</b> <code>content m=24/ef=200</code> · <code>code m=20/150</code> · <code>error m=16/100</code> · <code>tool &amp; path m=12/64</code> — each lens gets its own graph density, paid for what it earns.</li>
+        <li><b>Server-side <code>group_by</code>.</b> One query returns top-K results per project — no client-side bucketing pass over the result list.</li>
+        <li><b>Tenant-flagged keyword index.</b> <code>project_name</code> is created with <code>is_tenant: true</code> — Qdrant optimizes the field as a partition key, so per-project queries narrow before the HNSW walk.</li>
+        <li><b>Datetime payload index.</b> <code>start_ts_dt</code> is built via <code>DatetimeIndexParamsBuilder</code> — recency queries (<em>"sessions since last week"</em>) are first-class, not a scan-and-filter.</li>
+        <li><b>Full-text payload index.</b> <code>ai_title</code> is indexed with <code>FieldType::Text</code> — lexical search on session titles runs alongside vector search, in one call.</li>
         <li><b>Server-side FormulaQuery.</b> Prefetches carry per-vector recency decay, applied server-side — no client round-trip to re-score.</li>
+        <li><b>Strict-mode resource caps.</b> <code>max_resident_memory_percent: 85</code> + <code>max_query_limit: 100</code> — the embedded Qdrant can't OOM your laptop, even on a runaway prefetch.</li>
+        <li><b><code>SetPayload</code> + <code>HasIdCondition</code>.</b> Payload-only updates skip the embedder (fast metadata edits); known-set re-rank without a full search (cheap personalization paths).</li>
+        <li><b><code>OrderBy</code> recency lane.</b> <code>OrderBy { start_ts_dt, DESC }</code> for the recents panel — server-sorted, no client re-sort over the result list.</li>
         <li><b>Payload kept lean (≤1 KB).</b> Only metadata + <code>source_path</code>; the transcript itself stays in JSONL on disk and is re-parsed on demand for replay.</li>
         <li><b>Two transports, one client surface.</b> gRPC (<code>qdrant-client</code> 1.18) for queries; HTTP (<code>reqwest</code>) for snapshot endpoints. Same collection, same data.</li>
       </ul>
       <p class="muted" style="font-size:14px;margin-top:14px">
         Full engineer's tour →
         <a href="https://github.com/Two-Weeks-Team/memex/blob/main/docs/qdrant-features.md" target="_blank" rel="noopener">docs/qdrant-features.md</a>
+        · Wired-but-dormant flags →
+        <a href="https://github.com/Two-Weeks-Team/memex/blob/main/docs/wired-but-dormant.md" target="_blank" rel="noopener">docs/wired-but-dormant.md</a>
         · Collection schema and indexing path →
         <a href="https://github.com/Two-Weeks-Team/memex/blob/main/docs/architecture.md" target="_blank" rel="noopener">docs/architecture.md</a>.
       </p>
+      <div class="qd-30day" role="note" aria-label="Qdrant 1.18 adoption tempo">
+        <span>Qdrant <code>1.18</code> features adopted within <strong>30</strong> days of release:</span>
+        <span class="qd-30day-list">TurboQuant bits-2 · <code>Query::RelevanceFeedback</code> · <code>is_tenant: true</code> · <code>Datetime</code> index</span>
+      </div>
     </div>
   </div>
 </section>
@@ -2531,7 +2820,7 @@ POST /collections/{c}/snapshots/upload?priority=snapshot</pre>
     /* STORE — 5 named-vector lenses */
     'store-content': {
       title: 'content lens · 384-d', color: '#6cd6ff',
-      body: 'The semantic core — the joined user + assistant prose for a session. The default lens; drop it to 0 to feel what the others see. Built once at index time with BGE-small (cosine-normalised).',
+      body: 'The semantic core — the joined user + assistant prose for a session. The default lens; drop it to 0 to feel what the others see. Built once at index time with BGE-small (cosine-normalised). All five lens HNSW graphs are quantized via TurboQuant bits-2 (2-bit per dim) with 2× oversampling + rescore — real compression, accuracy preserved.',
       code: 'embed(joined_user_and_assistant_turns)  →  Vector<f32>·384',
       link: { text: 'indexer.rs · index_session', href: REPO + '/src-tauri/src/indexer.rs' }
     },
@@ -2558,6 +2847,26 @@ POST /collections/{c}/snapshots/upload?priority=snapshot</pre>
       body: 'Identifier and snippet density — function names, types, API symbols. Surfaces sessions that wrote near the same code shapes, even across projects with different prose.',
       code: 'embed(join(code_blocks + identifiers))  →  Vector<f32>·384',
       link: { text: 'indexer.rs · code extract', href: REPO + '/src-tauri/src/indexer.rs' }
+    },
+    /* SPARSE LANES (hybrid retrieval — ACTIVE by default) */
+    'store-path-sparse': {
+      title: 'path_sparse · IDF sparse vector', color: '#b5e48c',
+      body: 'A bag-of-paths sparse vector built from the file paths touched in this session, with IDF (inverse document frequency) weighting via Modifier::Idf. Lives alongside the dense `path` lens — same lens, two complementary representations. ACTIVE by default whenever the path weight is non-zero; fused server-side with the dense lanes via Formula prefetch.',
+      code: 'SparseSpec { name: "path_sparse", weight: w.path, source_field: "path" }\n→ Query::new_nearest(VectorInput::new_sparse(indices, values))',
+      link: { text: 'lens.rs::active_sparse_specs', href: REPO + '/src-tauri/src/lens.rs' }
+    },
+    'store-tool-sparse': {
+      title: 'tool_sparse · IDF sparse vector', color: '#ffb454',
+      body: 'A bag-of-tool-names sparse vector (Bash, Edit, Read, …) with IDF weighting. Twin to the dense `tool` lens — lexical exactness for tool-name matching alongside semantic embedding. ACTIVE by default with the tool weight; fused server-side via Formula prefetch in one round-trip.',
+      code: 'SparseSpec { name: "tool_sparse", weight: w.tool, source_field: "tool" }\n→ Query::new_nearest(VectorInput::new_sparse(indices, values))',
+      link: { text: 'schema.rs::SPARSE_VECTORS', href: REPO + '/src-tauri/src/schema.rs' }
+    },
+    /* MULTIVECTOR (ColBERT-style MaxSim — wired but off by default until T3.3) */
+    'store-content-late': {
+      title: 'content_late · ColBERT MaxSim rerank', color: '#6cd6ff',
+      body: 'A multivector slot — a list of token-level dense vectors per session, scored via MaxSim. Indexed via the same `content` text but at finer granularity. Currently OFF by default (LensWeights::default().content_late = 0.0) — opt-in rerank path. Activating it (T3.3) flips a single Rust default to 0.25 and adds a precision boost on the top-K dense results without dominating the query plan.',
+      code: 'PointStruct { vectors: NamedVectors { …, content_late: MultiDenseVector([…]) } }\n→ Query::new_nearest(VectorInput::new_multi(vec![qvec.to_vec()]))',
+      link: { text: 'lens.rs::content_late default', href: REPO + '/src-tauri/src/lens.rs' }
     },
     /* QUERY — 5 capabilities */
     'cap-lens': {
@@ -2830,6 +3139,110 @@ POST /collections/{c}/snapshots/upload?priority=snapshot</pre>
   }
 
   compute(); /* paint initial formula */
+})();
+
+/* ─── T2.13 · RelevanceFeedback playground (5 mock cards · 👍/👎 reorder + JSON) ── */
+(function () {
+  var pg = document.getElementById('qd-feedback-pg');
+  if (!pg) return;
+  var listEl = pg.querySelector('[data-feedback-list]');
+  var cards = Array.prototype.slice.call(pg.querySelectorAll('[data-feedback-card]'));
+  var jsonEl = pg.querySelector('#qd-fb-json');
+  if (!listEl || !jsonEl) return;
+
+  /* Per-card runtime state: { vote: 'up' | 'down' | null }. Base score is in data-base. */
+  var state = cards.map(function (c) { return { card: c, sid: c.dataset.sid, base: parseFloat(c.dataset.base), vote: null }; });
+
+  function recompute() {
+    /* Mock RelevanceFeedback bias: 👍 → +0.20, 👎 → −0.30 to that card's score. */
+    var positiveIds = [], negativeIds = [];
+    state.forEach(function (s) {
+      var bias = 0;
+      s.card.classList.remove('is-positive');
+      s.card.classList.remove('is-negative');
+      if (s.vote === 'up')   { bias = +0.20; positiveIds.push(s.sid); s.card.classList.add('is-positive'); }
+      if (s.vote === 'down') { bias = -0.30; negativeIds.push(s.sid); s.card.classList.add('is-negative'); }
+      s.score = Math.max(0, Math.min(1, s.base + bias));
+    });
+    /* Reorder by mock score (DESC) and re-append; CSS transition animates the move. */
+    var sorted = state.slice().sort(function (a, b) { return b.score - a.score; });
+    sorted.forEach(function (s) {
+      s.card.querySelector('.qd-fb-meta').textContent = s.score.toFixed(2);
+      listEl.appendChild(s.card);
+    });
+    /* Mock FeedbackItem JSON */
+    jsonEl.textContent = JSON.stringify({
+      previousQuery: 'auth middleware',
+      positiveIds: positiveIds,
+      negativeIds: negativeIds,
+      limit: 20
+    }, null, 2);
+  }
+
+  cards.forEach(function (card, idx) {
+    var s = state[idx];
+    card.querySelectorAll('.qd-fb-btn').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var act = btn.dataset.feedback;
+        s.vote = (s.vote === act) ? null : act;   /* click again to clear */
+        /* update btn visual */
+        card.querySelectorAll('.qd-fb-btn').forEach(function (b) { b.classList.remove('is-on'); });
+        if (s.vote) {
+          card.querySelector('.qd-fb-btn[data-feedback="' + s.vote + '"]').classList.add('is-on');
+        }
+        recompute();
+      });
+    });
+  });
+  recompute(); /* initial render with no votes */
+})();
+
+/* ─── T2.14 · Hybrid lane visualizer (toggle dense/sparse/late → list reorders) ── */
+(function () {
+  var pg = document.getElementById('qd-hybrid-viz');
+  if (!pg) return;
+  var toggles = Array.prototype.slice.call(pg.querySelectorAll('.qd-hyb-tog'));
+  var rows = Array.prototype.slice.call(pg.querySelectorAll('.qd-hyb-row'));
+  var listEl = pg.querySelector('.qd-hyb-results');
+  if (!toggles.length || !rows.length || !listEl) return;
+
+  /* default: dense ON, sparse ON, late OFF (matches v3 default + content_late=0.0) */
+  var lanes = { dense: true, sparse: true, late: false };
+
+  function score(row) {
+    /* hybrid score = sum of active lanes' per-row scores */
+    var s = 0, n = 0;
+    if (lanes.dense)  { s += parseFloat(row.dataset.dense);  n++; }
+    if (lanes.sparse) { s += parseFloat(row.dataset.sparse); n++; }
+    if (lanes.late)   { s += parseFloat(row.dataset.late);   n++; }
+    return n > 0 ? s / n : 0;
+  }
+
+  function recompute() {
+    var scored = rows.map(function (r) { return { row: r, s: score(r) }; });
+    scored.sort(function (a, b) { return b.s - a.s; });
+    scored.forEach(function (x, i) {
+      x.row.querySelector('.qd-hyb-score').textContent = x.s.toFixed(2);
+      x.row.classList.toggle('is-top', i === 0);
+      listEl.appendChild(x.row);
+    });
+  }
+
+  toggles.forEach(function (btn) {
+    var lane = btn.dataset.lane;
+    function paint() {
+      var on = lanes[lane];
+      btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+      btn.textContent = (lane === 'dense' ? 'Dense' : lane === 'sparse' ? 'Sparse' : 'Late (rerank)') + ' ' + (on ? 'ON' : 'OFF');
+    }
+    paint();
+    btn.addEventListener('click', function () {
+      lanes[lane] = !lanes[lane];
+      paint();
+      recompute();
+    });
+  });
+  recompute();
 })();
 
 /* ─── universal section reveal: every [data-stagger] gets .is-revealed in view.
