@@ -35,8 +35,13 @@ use crate::{crud, indexer, lens, mcp, parser, retrieval, schema, sec};
 /// embedder lock-wait histogram is a single Gauge surfaced via `seconds`
 /// suffix; we accumulate the total wait time and the count separately so
 /// the Prom client can compute an average.
+// Issue #16 Stage 2 — exposed `pub` so `mcp::McpState` can carry an
+// `Option<Arc<WebMetrics>>` and the new MCP write tool path can increment
+// `points_indexed_total` directly. stdio MCP (desktop) leaves it `None`
+// (desktop variant has no /metrics endpoint anyway); HTTP MCP (server)
+// gets the same Arc that the rest of the web handlers share.
 #[derive(Debug, Default)]
-struct WebMetrics {
+pub struct WebMetrics {
     queries_total:          AtomicU64,   // memex_queries_total (search + lens combined)
     recall_polls_total:     AtomicU64,   // memex_recall_polls_total
     // PR #12 REV-1 (Gemini HIGH) — rename: the previous "embedder_lock_waits"
@@ -54,28 +59,31 @@ struct WebMetrics {
 }
 
 impl WebMetrics {
-    fn mark_query(&self)        { self.queries_total.fetch_add(1, Ordering::Relaxed); }
-    fn mark_recall_poll(&self)  { self.recall_polls_total.fetch_add(1, Ordering::Relaxed); }
+    pub fn mark_query(&self)        { self.queries_total.fetch_add(1, Ordering::Relaxed); }
+    pub fn mark_recall_poll(&self)  { self.recall_polls_total.fetch_add(1, Ordering::Relaxed); }
     /// PR #12 REV-2 (Gemini medium) — bulk add instead of looping `fetch_add(1)`
     /// per hit. One atomic op per call, regardless of how many hits the recall
     /// lane surfaced.
-    fn mark_recall_hits(&self, n: u64) {
+    pub fn mark_recall_hits(&self, n: u64) {
         if n > 0 {
             self.errors_recalled_total.fetch_add(n, Ordering::Relaxed);
         }
     }
-    fn mark_mcp_call(&self)     { self.mcp_calls_total.fetch_add(1, Ordering::Relaxed); }
-    fn mark_indexed(&self, n: u64) { self.points_indexed_total.fetch_add(n, Ordering::Relaxed); }
+    pub fn mark_mcp_call(&self)     { self.mcp_calls_total.fetch_add(1, Ordering::Relaxed); }
+    /// Issue #16 Stage 2 — called from the MCP write-tool path (`refresh_session_enrich`)
+    /// when the tool successfully sets payload on N points. The desktop stdio MCP
+    /// path holds `None` for metrics and skips this; HTTP MCP wires it through.
+    pub fn mark_indexed(&self, n: u64) { self.points_indexed_total.fetch_add(n, Ordering::Relaxed); }
     /// PR #12 REV-1 (Gemini HIGH) — actually instrument the family that
     /// /metrics exposes. Call this around any embedder-bearing handler so the
     /// summary buckets accumulate real samples (not the zero-forever values
     /// gemini-code-assist flagged on the first review pass).
-    fn record_embedder_call(&self, elapsed: std::time::Duration) {
+    pub fn record_embedder_call(&self, elapsed: std::time::Duration) {
         let ms = elapsed.as_millis().min(u64::MAX as u128) as u64;
         self.embedder_call_ms_sum.fetch_add(ms, Ordering::Relaxed);
         self.embedder_call_count.fetch_add(1, Ordering::Relaxed);
     }
-    fn started_at(&self) -> Instant {
+    pub fn started_at(&self) -> Instant {
         *self.process_start.get_or_init(Instant::now)
     }
 }
@@ -167,7 +175,10 @@ pub async fn serve(port: u16, ui_dir: PathBuf) -> Result<()> {
     let state = WebState {
         qdrant,
         embedder,
-        mcp: mcp::new_shared_state(),
+        // Issue #16 Stage 2 — wire the same metrics Arc into the shared MCP
+        // state so the `refresh_session_enrich` write tool can flip
+        // `memex_points_indexed_total` off zero on this transport.
+        mcp: mcp::new_shared_state_with_metrics(metrics.clone()),
         ui_dir: ui_dir.clone(),
         metrics,
     };
