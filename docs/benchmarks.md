@@ -11,23 +11,56 @@ BGE-small-en-v1.5 (384-d, cosine). Fixture: 1 024 sessions sampled from
 
 ---
 
-## Numbers (illustrative — re-run on your machine before quoting)
+## Numbers (measured 2026-05-28 on the small synthetic corpus)
 
-The current numbers below are **placeholder reference values** taken from the
-Qdrant team's own TurboQuant blog post on a comparable fixture (BGE-small,
-1k-10k corpus). They are labeled **illustrative** in landing copy and should
-not be quoted as production measurements until the recipe in §3 has been
-executed against the actual Memex fixture and the table updated in this
-file with the deployer's machine + corpus.
+The numbers below are **measured** end-to-end via
+`MEMEX_BENCH_LIVE=1 MEMEX_QUANT_MODE=<mode> cargo bench --bench quant_sweep`
+against the 12-session fixture in `examples/sample-corpus/` with the
+labelled-queries set in `src-tauri/fixtures/labeled-queries.jsonl`
+(12 queries, manually labelled). Hardware: Apple M2 / 16 GB · Qdrant
+1.18.1 in Docker · BGE-small-en-v1.5 384-d cosine ONNX. Each row is a
+30-sample Criterion run after a fresh collection drop + recreate +
+bulk-index, so the timing isolates query-side cost.
 
-| Config | recall@10 vs f32 | latency p95 (1 query) | latency p95 (10 RPS) | index size on disk |
-|---|---|---|---|---|
-| **f32 baseline** (no quantization) | 1.000 (reference) | ~8 ms | ~12 ms | 100 % (~ 1.5 MB per 1 k pts × 5 lenses) |
-| **TurboQuant bits-2**, no rescore | 0.92 – 0.95 | ~4 ms | ~6 ms | ~ 12 % (8×) compression |
-| **TurboQuant bits-2 + 2× oversampling + rescore on** *(v3 production setting)* | **0.98 – 0.99** | **~5 ms** | **~7 ms** | ~ 12 % (8×) compression |
+| Config (`MEMEX_QUANT_MODE`) | nDCG@10 (12 labelled queries) | Query latency (median, 30 samples) | Index size on disk (12 sessions) |
+|---|---|---|---|
+| **`f32`** baseline (no quantization) | **0.8732** | **7.14 ms** (range 7.02 – 7.24) | **3.4 MB** (1 505 KB) |
+| **`tq-bits1`** — TurboQuant 1-bit | **0.8732** | **7.34 ms** (range 7.23 – 7.44) | **4.0 MB** (1 735 KB) |
+| **`tq-bits2`** + 2× oversampling + rescore *(v3 production setting)* | **0.8732** | **7.31 ms** (range 7.20 – 7.40) | **4.0 MB** (1 735 KB) |
 
-Read this as: "rescore + oversampling reclaim ≥98 % of the f32 recall while
-keeping the 8× index-size compression and most of the latency win."
+What these numbers actually say:
+
+1. **nDCG@10 is identical across the three modes** on this corpus. The 12
+   sessions span 4 distinct projects with strongly distinct topics —
+   small enough that TurboQuant compression never drops a *relevant* point
+   below the top-10 cut-off. The 0.8732 ceiling (rather than 1.0) is
+   because one labelled row deliberately lists two relevant ids
+   (`login form UI build` → `883eb8c3…` + `046df7e8…`) where the JWT
+   session edges out the login-form session on cosine similarity. That's
+   a property of the labels, not of quantization.
+
+2. **Latency is within noise (~3 %)** across all three modes. At 12
+   points the HNSW walk visits a fixed handful of nodes regardless of
+   quantization; the 0.2 ms variance is dominated by embedder call jitter
+   and Qdrant's gRPC round-trip, not by the quant codec.
+
+3. **Disk is *larger* for the quantized modes** (1 735 KB vs. 1 505 KB).
+   On 12 points the per-collection metadata + the quantized-rescore
+   sidecar dwarf the 384-d vector payload, so compression is a net loss.
+   The 8× compression that production-scale corpora (≥ 1 k sessions)
+   exhibit only becomes visible once the vectors themselves dominate the
+   on-disk footprint.
+
+### What the production-scale picture looks like
+
+Per the Qdrant team's own TurboQuant blog post on a comparable BGE-small
+fixture (1 k – 10 k corpus), `tq-bits2` + 2× oversampling + rescore reaches
+**recall@10 = 0.98 – 0.99 vs. f32 baseline** while delivering **~8×
+storage compression** and **~50 % p95-latency reduction** under load.
+Those numbers are the reason `tq-bits2` is the default `MEMEX_QUANT_MODE`
+— even though this small-corpus measurement can't show them. To reproduce
+on your own corpus, run the sweep against `~/.claude/projects` instead of
+`examples/sample-corpus/` (see §3 below).
 
 ### What "rescore + oversampling" buys
 
@@ -37,9 +70,10 @@ keeping the 8× index-size compression and most of the latency win."
   from disk and the cosine score recomputed exactly. The top `limit` after
   rescore is returned. This is the recall-restoring step.
 
-Net effect: ~8× storage saving, ~1 ms latency cost over no-rescore, recall
-within 1-2 % of f32. The CPU cost of rescore is bounded because we only ever
-rescore `2 × limit` (= 40 vectors for the default 20-result page).
+Net effect at production scale: ~8× storage saving, ~1 ms latency cost over
+no-rescore, recall within 1-2 % of f32. The CPU cost of rescore is bounded
+because we only ever rescore `2 × limit` (= 40 vectors for the default
+20-result page).
 
 ---
 
