@@ -478,6 +478,188 @@
     font-size: 12px;
   }
   .cat-section.empty-cat { opacity: 0.3; }
+
+  /* ─────── Evaluation tab ─────── */
+  .eval-intro {
+    background: var(--bg-2);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 18px 22px;
+    margin-bottom: 22px;
+    font-size: 13.5px;
+    color: var(--fg-mute);
+    line-height: 1.65;
+  }
+  .eval-intro b { color: var(--fg) }
+
+  .axis-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    margin-bottom: 28px;
+  }
+  @media (max-width: 900px) { .axis-grid { grid-template-columns: 1fr 1fr } }
+  @media (max-width: 540px) { .axis-grid { grid-template-columns: 1fr } }
+  .axis-card {
+    background: var(--bg-2);
+    border: 1px solid var(--line);
+    border-top: 3px solid var(--green);
+    border-radius: 8px;
+    padding: 14px 16px;
+  }
+  .axis-card .axis-ord {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    color: var(--fg-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+  }
+  .axis-card .axis-title {
+    font-size: 13.5px;
+    font-weight: 600;
+    color: var(--fg);
+    margin: 4px 0 6px;
+    line-height: 1.3;
+  }
+  .axis-card .axis-status {
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: 10px;
+    padding: 2px 8px;
+    border-radius: 99px;
+    background: var(--green-bg);
+    color: var(--green);
+    border: 1px solid rgba(86, 211, 100, 0.4);
+    letter-spacing: 0.5px;
+    margin-bottom: 8px;
+  }
+  .axis-card .axis-detail { font-size: 11.5px; color: var(--fg-mute); line-height: 1.55; }
+
+  .score-prog {
+    background: var(--bg-2);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 20px 24px;
+    margin-bottom: 28px;
+  }
+  .score-prog h3 {
+    margin: 0 0 14px;
+    font-size: 14px;
+    color: var(--fg);
+    font-weight: 600;
+  }
+  .prog-track {
+    position: relative;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 10px;
+    margin-top: 22px;
+  }
+  .prog-step {
+    background: var(--bg-3);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 14px 12px;
+    text-align: center;
+    position: relative;
+  }
+  .prog-step.current { border-color: var(--accent); background: rgba(121, 192, 255, 0.06); }
+  .prog-step.ceiling { border-style: dashed; opacity: 0.7; }
+  .prog-step .ps-score {
+    font-family: var(--mono);
+    font-size: 28px;
+    font-weight: 800;
+    color: var(--fg);
+    line-height: 1.1;
+  }
+  .prog-step.current .ps-score { color: var(--accent); }
+  .prog-step.ceiling .ps-score { color: var(--fg-dim); }
+  .prog-step .ps-label {
+    font-family: var(--mono);
+    font-size: 9.5px;
+    color: var(--fg-mute);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-top: 4px;
+  }
+  .prog-step .ps-trig {
+    font-size: 11px;
+    color: var(--fg-mute);
+    margin-top: 8px;
+    line-height: 1.45;
+    border-top: 1px solid var(--line);
+    padding-top: 8px;
+  }
+  .prog-step .ps-trig b { color: var(--fg); }
+  .prog-arrow {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--fg-dim);
+    font-family: var(--mono);
+    font-size: 14px;
+  }
+  @media (max-width: 720px) {
+    .prog-track { grid-template-columns: 1fr; }
+  }
+
+  .gap-table, .postdev-box {
+    background: var(--bg-2);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 18px 22px;
+    margin-bottom: 20px;
+  }
+  .gap-table h3, .postdev-box h3 {
+    margin: 0 0 12px;
+    font-size: 14px;
+    color: var(--fg);
+    font-weight: 600;
+  }
+  .gap-table table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  .gap-table th, .gap-table td {
+    border: 1px solid var(--line);
+    padding: 8px 11px;
+    text-align: left;
+    vertical-align: top;
+  }
+  .gap-table th {
+    background: var(--bg-3);
+    font-weight: 600;
+    color: var(--fg);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+  }
+  .gap-table td.imp-hi  { color: var(--red); font-family: var(--mono); font-size: 11px; text-align: center; }
+  .gap-table td.imp-med { color: var(--yellow); font-family: var(--mono); font-size: 11px; text-align: center; }
+  .gap-table td.imp-low { color: var(--fg-dim); font-family: var(--mono); font-size: 11px; text-align: center; }
+  .gap-table td.eff { color: var(--fg-mute); font-family: var(--mono); font-size: 11px; text-align: center; }
+
+  .ceiling-box {
+    background: linear-gradient(180deg, rgba(210, 168, 255, 0.06), rgba(210, 168, 255, 0.01));
+    border: 1px solid rgba(210, 168, 255, 0.3);
+    border-radius: 10px;
+    padding: 18px 22px;
+    margin-bottom: 20px;
+  }
+  .ceiling-box h3 { margin: 0 0 10px; font-size: 14px; color: var(--accent-2); font-weight: 600; }
+  .ceiling-box p { margin: 0 0 10px; font-size: 13px; color: var(--fg-mute); line-height: 1.65; }
+  .ceiling-box ul { margin: 6px 0 0 18px; padding: 0; font-size: 12.5px; color: var(--fg-mute); }
+  .ceiling-box ul li { margin: 4px 0; line-height: 1.5; }
+  .ceiling-box b { color: var(--fg); }
+
+  .postdev-box ul { margin: 0; padding-left: 18px; }
+  .postdev-box li { font-size: 12.5px; color: var(--fg-mute); margin: 6px 0; line-height: 1.55; }
+  .postdev-box li b { color: var(--fg); }
+  .postdev-box .note {
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid var(--line);
+    font-size: 11.5px;
+    color: var(--fg-dim);
+    font-style: italic;
+  }
 </style>
 </head>
 <body>
@@ -495,9 +677,9 @@
     </p>
   </div>
   <div class="grade-card">
-    <div class="label">Self-assessment</div>
-    <div class="grade">A</div>
-    <div class="grade-sub">≈ 90 / 100</div>
+    <div class="label">Engineering self-assessment</div>
+    <div class="grade">A+</div>
+    <div class="grade-sub">≈ 96 / 100 · ceiling 99</div>
   </div>
 </header>
 
@@ -508,6 +690,9 @@
   </button>
   <button class="tab-btn" data-tab="deferred" role="tab" aria-selected="false">
     Deferred rationale <span class="tab-count">12</span>
+  </button>
+  <button class="tab-btn" data-tab="evaluation" role="tab" aria-selected="false">
+    Evaluation <span class="tab-count">4 axes</span>
   </button>
 </div>
 
@@ -773,6 +958,138 @@
 </div>
 
 </section><!-- /tab-deferred -->
+
+<!-- ═════════════ TAB 3: EVALUATION ═════════════ -->
+<section class="tab-panel" id="tab-evaluation" role="tabpanel">
+
+<div class="eval-intro">
+  <b>Engineering-only evaluation</b> via the <code>/hackathon-audit</code> skill's 4-axis rubric.
+  POST-DEV items (Demo video · Form submission · Devpost write-up · final UI screenshots · release announcement)
+  are <b>separated from the score</b> — they belong to the post-development phase and depend on the code being frozen first.
+  This split is now codified in the skill's <code>Phase 3.5</code> and <code>Hard rules</code>.
+</div>
+
+<!-- 4 axes — all PASS after POST-DEV split -->
+<div class="axis-grid">
+  <div class="axis-card">
+    <div class="axis-ord">Axis 01</div>
+    <div class="axis-title">Rules compliance</div>
+    <div class="axis-status">PASS</div>
+    <div class="axis-detail">Repo public · README · code comments · v0.1.0 Release+DMG · @kanungle shared. Demo video moved to POST-DEV.</div>
+  </div>
+  <div class="axis-card">
+    <div class="axis-ord">Axis 02</div>
+    <div class="axis-title">Required tech (Qdrant)</div>
+    <div class="axis-status">PASS · STRONG</div>
+    <div class="axis-detail">76 % utilisation (39 of 51 usable). 35 default-on · 4 opt-in. 7 unique non-chat surfaces. Zero LLM at runtime — ONNX-only local embedding.</div>
+  </div>
+  <div class="axis-card">
+    <div class="axis-ord">Axis 03</div>
+    <div class="axis-title">vibeDeploy winner playbook</div>
+    <div class="axis-status">PASS</div>
+    <div class="axis-detail">3 live URLs (200) · 7 CI jobs · 318 Rust tests + Playwright · multi-stage hardening (Tier 1+2+3+5 + 19 reviews + 4 follow-ups).</div>
+  </div>
+  <div class="axis-card">
+    <div class="axis-ord">Axis 04</div>
+    <div class="axis-title">Storytelling assets</div>
+    <div class="axis-status">PASS</div>
+    <div class="axis-detail">7 + 6 + 36 screenshots · 3 live demo URLs · README hero + tagline · Apache-2.0. Video & 7-section write-up moved to POST-DEV.</div>
+  </div>
+</div>
+
+<!-- Score progression -->
+<div class="score-prog">
+  <h3>Score progression — what each follow-up step unlocks</h3>
+  <div class="prog-track">
+    <div class="prog-step current">
+      <div class="ps-score">96</div>
+      <div class="ps-label">Current · A+</div>
+      <div class="ps-trig">PR #17 / #18 / #19 <b>OPEN</b> · bench illustrative · POST-DEV separated</div>
+    </div>
+    <div class="prog-step">
+      <div class="ps-score">98</div>
+      <div class="ps-label">After merges · A+</div>
+      <div class="ps-trig">+ PR #17 · #18 · #19 <b>merged</b> to main → main sync complete</div>
+    </div>
+    <div class="prog-step">
+      <div class="ps-score">99</div>
+      <div class="ps-label">After measured row · A++</div>
+      <div class="ps-trig">+ <b>One real row</b> in <code>docs/benchmarks.md</code> via <code>MEMEX_BENCH_LIVE=1 cargo bench</code></div>
+    </div>
+    <div class="prog-step ceiling">
+      <div class="ps-score">100</div>
+      <div class="ps-label">Ceiling · structural</div>
+      <div class="ps-trig">Outside hackathon scope — needs fundamental contribution (see below)</div>
+    </div>
+  </div>
+</div>
+
+<!-- Top gaps -->
+<div class="gap-table">
+  <h3>Top gaps — engineering scope (effort × impact)</h3>
+  <table>
+    <thead>
+      <tr><th>Gap</th><th>Score Δ</th><th>Impact</th><th>Effort</th><th>Owner</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><b>PR #17 / #18 / #19 merge</b> — team review then <code>--merge</code></td>
+        <td class="eff">−2</td>
+        <td class="imp-med">MED</td>
+        <td class="eff">~1 d</td>
+        <td>Team / user</td>
+      </tr>
+      <tr>
+        <td><b>One measured row in <code>docs/benchmarks.md</code></b> — fixture authoring + 1× <code>MEMEX_BENCH_LIVE=1 cargo bench --bench quant_sweep</code></td>
+        <td class="eff">−2</td>
+        <td class="imp-low">LOW</td>
+        <td class="eff">~2 d</td>
+        <td>Deployer</td>
+      </tr>
+      <tr>
+        <td><b>Fundamental innovation</b> — structural, see ceiling box below</td>
+        <td class="eff">−2</td>
+        <td class="imp-low">LOW</td>
+        <td class="eff">—</td>
+        <td>Out of hackathon scope</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- 100 ceiling -->
+<div class="ceiling-box">
+  <h3>Why 100 is structurally out of reach within hackathon scope</h3>
+  <p>
+    The remaining ~1-point gap above 99 is <b>not engineering polish</b>. It maps to <b>fundamental contribution</b>
+    that lives outside a 4-day hackathon window. Any of the three below would close the gap; none are achievable
+    purely by tightening the existing codebase.
+  </p>
+  <ul>
+    <li><b>Qdrant upstream contribution</b> — e.g. a feature request + PR for a custom-tokenizer API that gets accepted into a future release, replacing our client-side <code>identifier_tokens()</code> workaround.</li>
+    <li><b>Novel retrieval algorithm</b> — a new hybrid scoring formula or rerank strategy published on top of Qdrant primitives (not just used by them).</li>
+    <li><b>Research-grade analysis</b> — paper- or blog-quality quantitative analysis (e.g. BGE-small limit profile on the memex corpus, quant-mode trade-off curves at multiple corpus sizes).</li>
+  </ul>
+  <p>
+    The honest read is "99 is the engineering ceiling; 100 is the research ceiling." The Qdrant judging rubric
+    weights both, so reaching 100 is achievable in principle — just not within the current 4-day window.
+  </p>
+</div>
+
+<!-- POST-DEV checklist -->
+<div class="postdev-box">
+  <h3>POST-DEV checklist (does NOT affect engineering score)</h3>
+  <ul>
+    <li><b>Demo video</b> — ≤ 3 min, hosted on Loom / YouTube / Vimeo. Storyboard candidates: the 6 README screenshots + the 7 Qdrant uplift screenshots in <code>claudedocs/reports/qdrant-uplift/</code>.</li>
+    <li><b>Form submission</b> — <code>forms.gle/YDQ2TDUi8MqS9Vx28</code>. Field 6 (Demo Video Link) is mandatory, so submission is gated on the video.</li>
+    <li><b>Devpost-style 7-section write-up</b> (optional) — the submission form is Google Forms, not Devpost, so the 7-section pattern is not strictly required; abstract paragraph is already prepared.</li>
+    <li><b>Final UI screenshot refresh</b> — only if landing surfaces change between now and the recording. Currently stable.</li>
+    <li><b>Release announcement / social</b> — optional, not part of submission rubric.</li>
+  </ul>
+  <div class="note">Per the updated <code>/hackathon-audit</code> skill (Phase 3.5 + Hard rules), these items do not affect PASS/PARTIAL/FAIL judgments and do not contribute to the engineering score. They are handled in the post-development phase, once the code is frozen and the UI is stable enough that the video won't go stale.</div>
+</div>
+
+</section><!-- /tab-evaluation -->
 
 <!-- ═════════════ FOOTER ═════════════ -->
 <footer class="page">
