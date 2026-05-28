@@ -141,20 +141,23 @@ mode-at-create choice above. Toggling those off is still a source edit on
 
 ### Live-mode wiring status
 
-The bench scaffold ships with the runtime config + a documented stub for
-the timed query loop. The actual `lens_search` invocation + `mean_ndcg_at_10`
-closure are TODOs marked in `benches/quant_sweep.rs` — they depend on
-collection setup state + embedder initialisation that varies by
-deployment. Wiring them is a few hundred LOC and lands as a follow-up
-commit on this PR if/when a deployer needs it before our reference
-numbers are ready.
+**Wired end-to-end as of PR #23.** With `MEMEX_BENCH_LIVE=1` the bench
+runs the full pipeline on its own: per-mode collection drop →
+`crud::ensure_collection_v3()` (picks up the current `MEMEX_QUANT_MODE`)
+→ `Embedder::new()` → `parser::scan_dir(examples/sample-corpus)` →
+`indexer::bulk_index_arc(...)` → labeled-queries round-robin through
+`indexer::lens_search` (Criterion samples p50/p95) → post-bench
+`mean_ndcg_at_10` pass over every labeled query. The measured table at
+the top of this file came out of exactly this loop.
 
-If you do not need timed numbers and just want **recall@10 / nDCG@10**,
-call `memex_lib::eval_ndcg::mean_ndcg_at_10` directly from a `#[tokio::test]`
+A lighter alternative — if you only want **recall@10 / nDCG@10** and
+not Criterion's timing distribution — is to call
+`memex_lib::eval_ndcg::mean_ndcg_at_10` directly from a `#[tokio::test]`
 in `src-tauri/tests/`, passing a closure that runs each query through
-`indexer::lens_search` against the live Qdrant. Set `MEMEX_QUANT_MODE`
+`indexer::lens_search` against a live Qdrant. Set `MEMEX_QUANT_MODE`
 before the test process spawns to control which mode the v3 collection
-gets created with.
+gets created with. This skips the bench framework's warm-up + sampling
+overhead.
 
 ---
 
