@@ -44,9 +44,7 @@
     display: grid;
     grid-template-columns: 1fr auto;
     gap: 32px;
-    padding-bottom: 32px;
-    border-bottom: 1px solid var(--line);
-    margin-bottom: 32px;
+    padding-bottom: 28px;
     align-items: end;
   }
   @media (max-width: 760px) { header.hero { grid-template-columns: 1fr } }
@@ -100,6 +98,45 @@
     font-size: 11px;
     color: var(--fg-mute);
   }
+
+  /* ─────── Tabs ─────── */
+  .tabs {
+    display: flex;
+    gap: 4px;
+    margin: 8px 0 28px;
+    border-bottom: 1px solid var(--line);
+    overflow-x: auto;
+  }
+  .tab-btn {
+    background: transparent;
+    border: 0;
+    color: var(--fg-mute);
+    padding: 12px 18px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    transition: color .15s ease, border-color .15s ease;
+    white-space: nowrap;
+    font-family: inherit;
+  }
+  .tab-btn:hover { color: var(--fg); }
+  .tab-btn.active {
+    color: var(--fg);
+    border-bottom-color: var(--accent);
+  }
+  .tab-btn .tab-count {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--fg-dim);
+    margin-left: 6px;
+    padding: 1px 6px;
+    background: var(--bg-3);
+    border-radius: 99px;
+  }
+  .tab-btn.active .tab-count { color: var(--accent); background: rgba(121, 192, 255, 0.12); }
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
 
   /* ─────── Stat strip ─────── */
   .stat-strip {
@@ -300,6 +337,77 @@
   a { color: var(--accent); text-decoration: none; border-bottom: 1px dotted currentColor; }
   a:hover { border-bottom-style: solid; }
 
+  /* ─────── Deferred rationale (tab 2) ─────── */
+  .rationale-intro {
+    background: var(--bg-2);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 18px 22px;
+    margin-bottom: 28px;
+    font-size: 13.5px;
+    color: var(--fg-mute);
+    line-height: 1.65;
+  }
+  .rationale-intro b { color: var(--fg); }
+  .rationale-cat {
+    background: var(--bg-2);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 18px 22px;
+    margin-bottom: 16px;
+  }
+  .rationale-cat .rc-head {
+    display: flex; align-items: baseline; gap: 12px;
+    margin-bottom: 10px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--line);
+  }
+  .rationale-cat .rc-head .rc-letter {
+    font-family: var(--mono);
+    font-size: 18px;
+    color: var(--accent-2);
+    font-weight: 700;
+    background: rgba(210, 168, 255, 0.10);
+    border: 1px solid rgba(210, 168, 255, 0.3);
+    padding: 4px 10px;
+    border-radius: 6px;
+    line-height: 1;
+  }
+  .rationale-cat .rc-head .rc-title { font-size: 15px; font-weight: 600; color: var(--fg); }
+  .rationale-cat .rc-head .rc-count {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--fg-dim);
+    margin-left: auto;
+  }
+  .rationale-cat .rc-criterion {
+    font-size: 12.5px;
+    color: var(--fg-mute);
+    margin-bottom: 12px;
+    font-style: italic;
+  }
+  .rationale-cat table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12.5px;
+  }
+  .rationale-cat th, .rationale-cat td {
+    border: 1px solid var(--line);
+    padding: 9px 12px;
+    text-align: left;
+    vertical-align: top;
+  }
+  .rationale-cat th {
+    background: var(--bg-3);
+    font-weight: 600;
+    color: var(--fg);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+  }
+  .rationale-cat td:nth-child(1) { width: 38%; color: var(--fg); font-weight: 500; }
+  .rationale-cat td:nth-child(2) { color: var(--fg-mute); }
+
   /* ─────── Timeline ─────── */
   .timeline-section { margin-top: 56px; }
   .timeline-section h2 { font-size: 17px; margin-bottom: 14px; padding-bottom: 6px; border-bottom: 1px solid var(--line); }
@@ -382,8 +490,8 @@
     <h1>Qdrant Feature Status — All PRs Merged</h1>
     <p class="lede">
       Snapshot after <b>PR #12</b> (already merged) + <b>PR #17 / #18 / #19</b> (post-merge target) all land on <code>main</code>.
-      Replaces the previous text-heavy classification with an interactive matrix — filter by status, search by keyword,
-      see at a glance which Qdrant 1.18 primitives are wired, opt-in, deferred, or blocked by SDK limits.
+      Two tabs: the full <b>52-feature matrix</b> with filters/search, and the <b>deferred-rationale</b> framework explaining
+      <em>why</em> the 12 intentional non-adoptions are deferred (not bugs).
     </p>
   </div>
   <div class="grade-card">
@@ -393,15 +501,28 @@
   </div>
 </header>
 
-<!-- ═════════════ STAT STRIP ═════════════ -->
+<!-- ═════════════ TABS ═════════════ -->
+<div class="tabs" role="tablist">
+  <button class="tab-btn active" data-tab="matrix" role="tab" aria-selected="true">
+    Feature matrix <span class="tab-count">52</span>
+  </button>
+  <button class="tab-btn" data-tab="deferred" role="tab" aria-selected="false">
+    Deferred rationale <span class="tab-count">12</span>
+  </button>
+</div>
+
+<!-- ═════════════ TAB 1: FEATURE MATRIX ═════════════ -->
+<section class="tab-panel active" id="tab-matrix" role="tabpanel">
+
+<!-- Stat strip -->
 <div class="stat-strip">
   <div class="stat s-pct">
-    <div class="stat-v">74%</div>
+    <div class="stat-v">76%</div>
     <div class="stat-l">Qdrant utilisation</div>
-    <div class="stat-d">37 of 50 usable</div>
+    <div class="stat-d">39 of 51 usable</div>
   </div>
   <div class="stat s-on">
-    <div class="stat-v">33</div>
+    <div class="stat-v">35</div>
     <div class="stat-l">Default-on</div>
     <div class="stat-d">Active every query</div>
   </div>
@@ -411,7 +532,7 @@
     <div class="stat-d">Wired, caller-activated</div>
   </div>
   <div class="stat s-def">
-    <div class="stat-v">13</div>
+    <div class="stat-v">12</div>
     <div class="stat-l">Deferred</div>
     <div class="stat-d">Intentional non-adoption</div>
   </div>
@@ -422,53 +543,48 @@
   </div>
 </div>
 
-<!-- ═════════════ DONUT + CATEGORY BARS ═════════════ -->
+<!-- Donut + category bars -->
 <section class="viz" aria-label="Status distribution visualisation">
-  <!-- Donut chart -->
   <div class="donut">
     <svg viewBox="0 0 100 100" width="220" height="220" aria-hidden="true">
-      <!-- 33/4/13/1 = 51 total. Circumference 251.327 (r=40). -->
-      <!-- on: 33/51 = 64.71% → 162.6 (gap auto) -->
-      <!-- opt: 4/51 = 7.84% → 19.7 -->
-      <!-- def: 13/51 = 25.49% → 64.1 -->
-      <!-- blk: 1/51 = 1.96% → 4.9 -->
+      <!-- 35/4/12/1 = 52 total. Circumference 251.327 (r=40). -->
+      <!-- on:  35/52 = 67.31% → 169.13 -->
+      <!-- opt:  4/52 =  7.69% →  19.33 -->
+      <!-- def: 12/52 = 23.08% →  58.00 -->
+      <!-- blk:  1/52 =  1.92% →   4.83 -->
       <circle cx="50" cy="50" r="40" fill="none" stroke="#161b22" stroke-width="14"/>
       <circle cx="50" cy="50" r="40" fill="none" stroke="#56d364" stroke-width="14"
-              stroke-dasharray="162.6 251.3" stroke-dashoffset="0"/>
+              stroke-dasharray="169.13 251.33" stroke-dashoffset="0"/>
       <circle cx="50" cy="50" r="40" fill="none" stroke="#f0b859" stroke-width="14"
-              stroke-dasharray="19.7 251.3" stroke-dashoffset="-162.6"/>
+              stroke-dasharray="19.33 251.33" stroke-dashoffset="-169.13"/>
       <circle cx="50" cy="50" r="40" fill="none" stroke="#8d96a0" stroke-width="14"
-              stroke-dasharray="64.1 251.3" stroke-dashoffset="-182.3"/>
+              stroke-dasharray="58.00 251.33" stroke-dashoffset="-188.46"/>
       <circle cx="50" cy="50" r="40" fill="none" stroke="#f47067" stroke-width="14"
-              stroke-dasharray="4.9 251.3" stroke-dashoffset="-246.4"/>
+              stroke-dasharray="4.83 251.33" stroke-dashoffset="-246.46"/>
     </svg>
     <div class="center">
-      <div class="big">51</div>
+      <div class="big">52</div>
       <div class="lbl">Qdrant features</div>
     </div>
   </div>
-
-  <!-- Category breakdown bars -->
-  <div class="cat-bars" id="cat-bars">
-    <!-- populated by JS for consistency with data below -->
-  </div>
+  <div class="cat-bars" id="cat-bars"></div>
 </section>
 
-<!-- ═════════════ CONTROLS ═════════════ -->
+<!-- Controls -->
 <div class="controls">
-  <button class="filter-btn active all"  data-filter="all">All <span class="count">51</span></button>
-  <button class="filter-btn on"          data-filter="s-on">✅ On <span class="count">33</span></button>
+  <button class="filter-btn active all"  data-filter="all">All <span class="count">52</span></button>
+  <button class="filter-btn on"          data-filter="s-on">✅ On <span class="count">35</span></button>
   <button class="filter-btn opt"         data-filter="s-opt">🟡 Opt-in <span class="count">4</span></button>
-  <button class="filter-btn def"         data-filter="s-def">⏸️ Deferred <span class="count">13</span></button>
+  <button class="filter-btn def"         data-filter="s-def">⏸️ Deferred <span class="count">12</span></button>
   <button class="filter-btn blk"         data-filter="s-blk">🔒 Blocked <span class="count">1</span></button>
   <input class="search-box" id="search" type="search" placeholder="Search features…" />
 </div>
 
-<!-- ═════════════ FEATURE CARDS ═════════════ -->
-<main id="features"><!-- populated by JS --></main>
+<!-- Feature card grid -->
+<main id="features"></main>
 
-<!-- ═════════════ TIMELINE ═════════════ -->
-<section class="timeline-section" id="timeline">
+<!-- Delivery timeline -->
+<section class="timeline-section">
   <h2>Delivery timeline — PR pipeline</h2>
   <div class="timeline">
     <div class="pr-card">
@@ -516,6 +632,149 @@
   </div>
 </section>
 
+</section><!-- /tab-matrix -->
+
+<!-- ═════════════ TAB 2: DEFERRED RATIONALE ═════════════ -->
+<section class="tab-panel" id="tab-deferred" role="tabpanel">
+
+<div class="rationale-intro">
+  <b>Why 12 deferred items?</b> The "deferred" status doesn't mean "missed" — each non-adoption maps
+  to one of <b>5 rationale categories</b>. None are bugs; all are intentional decisions
+  documented at the point of adoption (or non-adoption). This tab makes the criteria explicit
+  so a reviewer can challenge a category rather than challenge 12 individual choices.
+  <br><br>
+  <b>Promotion path</b>: when a deferred item's category condition flips (use case emerges,
+  scale changes, overlap dissolves, follow-up PR ships, architecture migrates), the row moves
+  from §B "wired:off" or §C "not-wired" in <code>docs/wired-but-dormant.md</code> to §A
+  "wired:on" — same mechanism that promoted RRF / MMR (#15) and added identifier_tokens (#14).
+</div>
+
+<!-- Category A -->
+<div class="rationale-cat">
+  <div class="rc-head">
+    <span class="rc-letter">A</span>
+    <span class="rc-title">Use case absent</span>
+    <span class="rc-count">4 items</span>
+  </div>
+  <div class="rc-criterion">Criterion: the feature solves a problem we don't have. Adopting now would be speculative.</div>
+  <table>
+    <thead><tr><th>Feature</th><th>Why we don't need it</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><code>Geo</code> filter</td>
+        <td>We don't index "where I was when I wrote this". One payload-index line if the laptop-on-trip filtering ever becomes a feature.</td>
+      </tr>
+      <tr>
+        <td><code>TokenizerType::Whitespace</code></td>
+        <td>The default <code>Word</code> tokenizer handles natural-language punctuation better. No specific use case for whitespace-only splitting in our corpus.</td>
+      </tr>
+      <tr>
+        <td><code>TokenizerType::Prefix</code></td>
+        <td>No typeahead / search-as-you-type surface in current UX. Revisit if that surface lands.</td>
+      </tr>
+      <tr>
+        <td><code>UpdateVectors</code> (swap a vector in place)</td>
+        <td><code>index_session</code> rebuilds the whole point on every change. <code>UpdateVectors</code> only buys speed when the vector itself changes more often than the payload — that's not our pattern.</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- Category B -->
+<div class="rationale-cat">
+  <div class="rc-head">
+    <span class="rc-letter">B</span>
+    <span class="rc-title">Scale mismatch</span>
+    <span class="rc-count">2 items</span>
+  </div>
+  <div class="rc-criterion">Criterion: the feature pays off at a corpus size or operational scale beyond hackathon scope. Adopting now is overengineering.</div>
+  <table>
+    <thead><tr><th>Feature</th><th>When it becomes worth adopting</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>Collection aliases (blue-green migration)</td>
+        <td>Single-collection drop+rebuild is acceptable at our point count. Aliases land when v3 → v4 migration happens at 100k+ session corpora and zero-downtime matters.</td>
+      </tr>
+      <tr>
+        <td>Multi-collection (one per macro-topic)</td>
+        <td>One <code>memex_sessions_v3</code> has been enough. Cross-collection search lands in Qdrant 1.19; revisit when sharding by topic outperforms the single-collection HNSW.</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- Category C -->
+<div class="rationale-cat">
+  <div class="rc-head">
+    <span class="rc-letter">C</span>
+    <span class="rc-title">Functional overlap / redundant</span>
+    <span class="rc-count">2 items</span>
+  </div>
+  <div class="rc-criterion">Criterion: an already-adopted feature covers the same job. Adding the redundant feature would only expand surface area.</div>
+  <table>
+    <thead><tr><th>Feature</th><th>What covers it instead</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><code>Query::Recommend</code> (<code>AverageVector · BestScore</code>)</td>
+        <td><code>DiscoverInput</code> + <code>ContextInput</code> already covers "more like this batch" with explicit positive/negative pairs (KB-03). Recommend is a redundant entry point. Revisit if DiscoverInput's target-required constraint becomes painful.</td>
+      </tr>
+      <tr>
+        <td><code>TokenizerType::Multilingual</code></td>
+        <td>Our corpus is English session titles + identifiers. BGE-small embedding handles language semantics on the vector side; the multilingual tokenizer carries charabia / vaporetto overhead for non-Latin scripts we don't index.</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- Category D -->
+<div class="rationale-cat">
+  <div class="rc-head">
+    <span class="rc-letter">D</span>
+    <span class="rc-title">Deferred to follow-up PR</span>
+    <span class="rc-count">2 items</span>
+  </div>
+  <div class="rc-criterion">Criterion: the feature would be in scope, but the first-round delivery already spans the interesting space. Adding the rest is a small mechanical follow-up if needed.</div>
+  <table>
+    <thead><tr><th>Feature</th><th>What was prioritised first</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>Scalar (int8) quantization</td>
+        <td>Issue #13 (PR #18) shipped <code>f32</code> / <code>tq-bits1</code> / <code>tq-bits2</code> as the <code>QuantMode</code> triple — these span the interesting recall vs. disk-size space. Adding Scalar is a ~30-LOC variant in the same enum if a sweep needs more granularity.</td>
+      </tr>
+      <tr>
+        <td>Binary quantization</td>
+        <td>Same rationale as Scalar. Same follow-up size if added.</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- Category E -->
+<div class="rationale-cat">
+  <div class="rc-head">
+    <span class="rc-letter">E</span>
+    <span class="rc-title">Different architectural layer</span>
+    <span class="rc-count">2 items</span>
+  </div>
+  <div class="rc-criterion">Criterion: the feature would handle a concern, but a different layer of the architecture already handles it more naturally. Adopting the Qdrant-side primitive would duplicate without adding value.</div>
+  <table>
+    <thead><tr><th>Feature</th><th>Where it's actually handled</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>MCP write tools + <code>memex_points_indexed_total</code> MCP-side increment</td>
+        <td>MCP is read-only by design (<code>mcp.rs:3</code>: "Qdrant primitives are hidden"). Adding write tools is a product/security decision (auth, schema, idempotency, abuse model). Issue #16 Stage 2 activates only when a future product PR introduces that surface. The always-zero counter is Prometheus-best-practice for cross-deployment metric uniformity.</td>
+      </tr>
+      <tr>
+        <td>API key / JWT / TLS auth on the embedded Qdrant</td>
+        <td>Qdrant is loopback-bound to <code>127.0.0.1</code> in <code>docker-compose.yml</code> (THR-06). TLS termination + auth for the all-in-one server variant lives in the Caddy reverse proxy. Adopting Qdrant-side auth would be defence-in-depth at the cost of operator complexity, not a correctness gain.</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+</section><!-- /tab-deferred -->
+
+<!-- ═════════════ FOOTER ═════════════ -->
 <footer class="page">
   <span>Generated: 2026-05-28 · branch <code>feat/qdrant-followup-landing</code></span>
   <span>Live: <a href="https://two-weeks-team.github.io/memex/qdrant-features/">qdrant-features/</a> · <a href="https://two-weeks-team.github.io/memex/">landing</a> · <a href="https://two-weeks-team.github.io/memex/forge/">/forge/</a></span>
@@ -525,9 +784,25 @@
 </div>
 
 <script>
-/* ───── Feature data — 51 rows across 10 categories.
-   Status values: "s-on" | "s-opt" | "s-def" | "s-blk".
-   `new` flag = true when added/promoted by PR #17/#18/#19.
+/* ───── Tab switching ───── */
+document.querySelectorAll(".tab-btn").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".tab-btn").forEach(b => {
+      b.classList.remove("active");
+      b.setAttribute("aria-selected", "false");
+    });
+    document.querySelectorAll(".tab-panel").forEach(p => p.classList.remove("active"));
+    btn.classList.add("active");
+    btn.setAttribute("aria-selected", "true");
+    document.getElementById("tab-" + btn.dataset.tab).classList.add("active");
+    // Scroll to top of tab content on switch
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  });
+});
+
+/* ───── Feature data — 52 rows across 10 categories.
+   Status: "s-on" | "s-opt" | "s-def" | "s-blk".
+   `new` flag = added/promoted by PR #17/#18/#19.
 ─────────────────────────────────────────────────────────── */
 const CATEGORIES = [
   { ord: "01", title: "Vector primitives", items: [
@@ -539,8 +814,8 @@ const CATEGORIES = [
     { feat: "TurboQuant bits-2 + <code>always_ram: true</code>", status: "s-on",  reason: "Production default. 8× compression, recall stays 98–99% with rescore + 2× oversampling." },
     { feat: "TurboQuant bits-1", status: "s-opt", reason: "Selected via <code>MEMEX_QUANT_MODE=tq-bits1 cargo bench --bench quant_sweep</code>. Higher compression, lower recall.", "new": true },
     { feat: "f32 baseline (no quantization)", status: "s-opt", reason: "Selected via <code>MEMEX_QUANT_MODE=f32</code>. Reference row for recall comparison. Selected by omitting the builder's quantization_config call.", "new": true },
-    { feat: "Scalar (int8) quantization", status: "s-def", reason: "Out of #13 first round. Would need a separate <code>QuantMode::Scalar</code> variant. ~30 LOC follow-up if a sweep needs more granularity." },
-    { feat: "Binary quantization", status: "s-def", reason: "Same rationale as Scalar. f32 / tq-bits1 / tq-bits2 already span the interesting recall vs. disk-size space." },
+    { feat: "Scalar (int8) quantization", status: "s-def", reason: "Out of #13 first round. ~30 LOC follow-up if a sweep needs more granularity." },
+    { feat: "Binary quantization", status: "s-def", reason: "Same rationale as Scalar. The f32 / tq-bits1 / tq-bits2 triple already spans the interesting recall vs. disk-size space." },
     { feat: "Search-time <code>rescore: true</code> + <code>oversampling: 2.0</code>", status: "s-on", reason: "Applied on every read. <code>schema::quantization_search_params()</code>." },
   ]},
   { ord: "03", title: "HNSW indexing", items: [
@@ -596,7 +871,7 @@ const CATEGORIES = [
   { ord: "09", title: "Metrics / MCP", items: [
     { feat: "<code>/metrics</code> Prometheus endpoint (8 metric families)", status: "s-on", reason: "<code>web::WebMetrics</code> from PR #12. <code>memex_queries_total · recall_polls_total · errors_recalled_total · points_indexed_total · snapshot_bytes · embedder_call_seconds · mcp_calls_total · process_uptime_seconds</code>." },
     { feat: "MCP read-only tool surface (11 tools)", status: "s-on", reason: "<code>mcp.rs::tools_catalog</code>. <code>find_similar_sessions · find_similar_error · predict_next_action · mix_similar_sessions · get_session_summary · get_session_turn · list_recent_sessions · analyze_corpus_topology · snapshot_export · get_project_memory · wrapped</code>. Read-only by design." },
-    { feat: "MCP write tools + <code>points_indexed_total</code> MCP-side increment", status: "s-def", reason: "PR #17 #16 Stage 1: TODO marker + Prometheus best-practice citation at the natural increment site. Stage 2 activates only when a future PR adds an MCP write tool (auth, schema, idempotency are separate design questions). Always-zero counter is a valid measurement, not a bug." },
+    { feat: "MCP write tools + <code>points_indexed_total</code> MCP-side increment", status: "s-def", reason: "PR #17 #16 Stage 1: TODO marker + Prometheus best-practice citation at the natural increment site. Stage 2 activates only when a future product PR adds an MCP write tool (auth, schema, idempotency are separate design questions). Always-zero counter is a valid measurement, not a bug." },
   ]},
   { ord: "10", title: "Security", items: [
     { feat: "Strict-mode resource caps (defence-in-depth)", status: "s-on", reason: "Caps RAM + per-query point count so a runaway prefetch can't OOM." },
@@ -606,15 +881,16 @@ const CATEGORIES = [
 
 const STATUS_LABEL = { "s-on":"DEFAULT-ON", "s-opt":"OPT-IN", "s-def":"DEFERRED", "s-blk":"BLOCKED" };
 
-/* ───── Render feature cards ───── */
+/* ───── Render feature cards + category bars ───── */
 const featRoot = document.getElementById("features");
 const catBarsRoot = document.getElementById("cat-bars");
 
 CATEGORIES.forEach((cat) => {
-  // Build category bar
+  // Build category mini-bar
   const counts = { "s-on":0, "s-opt":0, "s-def":0, "s-blk":0 };
   cat.items.forEach(i => counts[i.status]++);
   const total = cat.items.length;
+  const wired = counts["s-on"] + counts["s-opt"];
   const bar = document.createElement("div");
   bar.className = "cat-bar";
   bar.innerHTML = `
@@ -625,11 +901,11 @@ CATEGORIES.forEach((cat) => {
       ${counts["s-def"] > 0 ? `<div class="seg def" style="width:${(counts["s-def"]/total)*100}%" title="${counts["s-def"]} deferred"></div>` : ""}
       ${counts["s-blk"] > 0 ? `<div class="seg blk" style="width:${(counts["s-blk"]/total)*100}%" title="${counts["s-blk"]} blocked"></div>` : ""}
     </div>
-    <div class="ratio">${counts["s-on"]+counts["s-opt"]}/${total} wired</div>
+    <div class="ratio">${wired}/${total} wired</div>
   `;
   catBarsRoot.appendChild(bar);
 
-  // Build category section + cards
+  // Build feature card section
   const sec = document.createElement("section");
   sec.className = "cat-section";
   sec.dataset.catOrd = cat.ord;
@@ -660,7 +936,7 @@ CATEGORIES.forEach((cat) => {
   featRoot.appendChild(sec);
 });
 
-/* ───── Filter + search ───── */
+/* ───── Filter + search (tab 1 only) ───── */
 let currentFilter = "all";
 let currentSearch = "";
 
@@ -670,7 +946,6 @@ function applyFilter() {
     const matchSearch = (currentSearch === "" || card.dataset.searchable.includes(currentSearch));
     card.classList.toggle("hidden", !(matchStatus && matchSearch));
   });
-  // Mark empty categories
   document.querySelectorAll(".cat-section").forEach((sec) => {
     const visibleCount = sec.querySelectorAll(".card:not(.hidden)").length;
     sec.classList.toggle("empty-cat", visibleCount === 0);
