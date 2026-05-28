@@ -121,8 +121,11 @@ fn quant_sweep(c: &mut Criterion) {
              picks up MEMEX_QUANT_MODE={}",
             mode.as_name()
         );
-        // Best-effort delete; ignore "not found" on first run.
-        let _ = q.delete_collection("memex_sessions_v3").await;
+        // Best-effort delete; ignore "not found" on first run. Use the
+        // shared `COLLECTION_V3` constant so this can't drift from the
+        // name `crud::ensure_collection_v3` recreates next (Gemini #23
+        // review).
+        let _ = q.delete_collection(memex_lib::schema::COLLECTION_V3).await;
 
         crud::ensure_collection_v3(&q)
             .await
@@ -157,8 +160,11 @@ fn quant_sweep(c: &mut Criterion) {
     let mut group = c.benchmark_group(format!("quant/{}", mode.as_name()));
     group.bench_function("query_p95", |b| {
         b.iter(|| {
-            let q_text = &queries[q_idx % queries.len()].query;
-            q_idx += 1;
+            // Bound q_idx to queries.len() at increment time so the index
+            // can't grow without limit and trigger an overflow panic on
+            // very long sample runs in debug profile (Gemini #23 review).
+            let q_text = &queries[q_idx].query;
+            q_idx = (q_idx + 1) % queries.len();
             let hits = rt
                 .block_on(async {
                     indexer::lens_search(&qdrant, &embedder, q_text, &weights, 10, 50).await
@@ -196,21 +202,12 @@ fn quant_sweep(c: &mut Criterion) {
     );
 }
 
-#[derive(Debug, serde::Deserialize)]
-struct LabeledQuery {
-    query: String,
-    relevant_ids: Vec<String>,
-}
-
-// Adapter so we can pass `LabeledQuery` into `eval_ndcg::ndcg_at_10`
-// (it wants `&[String]` for the actual side; we already build that
-// from `lens_search` hits above). No-op here, kept for clarity.
-impl LabeledQuery {
-    #[allow(dead_code)]
-    fn relevant_ids(&self) -> &[String] {
-        &self.relevant_ids
-    }
-}
+// Gemini #23 review: there's already a public `LabeledQuery` in
+// `eval_ndcg` with `pub query` + `pub relevant_ids` + `Deserialize`.
+// Re-aliasing avoids duplicating the struct (and the risk of drift if
+// the canonical one gains a field). The rest of the bench still uses
+// the local name `LabeledQuery` unchanged.
+type LabeledQuery = eval_ndcg::LabeledQuery;
 
 fn load_labeled_queries() -> Vec<LabeledQuery> {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
