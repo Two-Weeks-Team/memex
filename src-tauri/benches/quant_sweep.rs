@@ -32,19 +32,37 @@
 //!
 //! Reports land in `target/criterion/quant/<mode>/report/index.html`.
 //!
-//! ## Live-mode wiring status
+//! ## Live-mode pipeline (Issue #13 — second pass, fully wired)
 //!
-//! The query-runner + nDCG computation closures are documented stubs in
-//! this commit. Wiring them to the actual `memex_lib::indexer::lens_search`
-//! + `memex_lib::eval_ndcg::mean_ndcg_at_10` path is deliberately deferred
-//! to a follow-up: it depends on collection setup state + embedder
-//! initialisation that varies by deployment. Shipping the runtime config
-//! (`MEMEX_QUANT_MODE` env in `schema::QuantMode`) + the bench scaffold +
-//! the fixture schema independently lets ops teams measure on their own
-//! corpora without waiting for our reference numbers.
+//! When `MEMEX_BENCH_LIVE=1`, the bench:
+//!
+//! 1. Connects to Qdrant (`MEMEX_QDRANT_URL` or `http://127.0.0.1:6334`)
+//! 2. **Drops** the `memex_sessions_v3` collection so the next
+//!    `ensure_collection_v3()` recreates it with the *current*
+//!    `MEMEX_QUANT_MODE` (the quant config is read inside the create call,
+//!    so an existing collection's config would stick otherwise).
+//! 3. Initialises the BGE-small embedder (first run downloads ~130 MB into
+//!    `~/.cache/fastembed/`).
+//! 4. Scans `examples/sample-corpus/` and bulk-indexes its 12 sessions.
+//! 5. Registers a Criterion bench that, on each iteration, picks the next
+//!    labeled query (round-robin) and calls `indexer::lens_search` against
+//!    the freshly-indexed collection. Criterion derives p50 / p95 / outlier
+//!    statistics from the sample.
+//! 6. After the bench, runs every labeled query once more (not timed) and
+//!    computes `eval_ndcg::ndcg_at_10` against `relevant_ids`. The mean is
+//!    printed alongside the criterion report path for the human reader.
+//!
+//! All quant-mode-specific work — collection drop + recreate — happens
+//! *before* `bench_function` so the timed loop only measures the query, not
+//! cold-start IO.
+
+use std::path::PathBuf;
+use std::sync::Arc;
 
 use criterion::{criterion_group, criterion_main, Criterion};
+use memex_lib::indexer::{self, Embedder, LensWeights};
 use memex_lib::schema::QuantMode;
+use memex_lib::{crud, eval_ndcg, parser};
 
 fn quant_sweep(c: &mut Criterion) {
     let mode = QuantMode::from_env();
@@ -72,52 +90,127 @@ fn quant_sweep(c: &mut Criterion) {
         return;
     }
 
-    // Live mode — load the fixture + register the timed bench.
+    // ── Live mode ─────────────────────────────────────────────────────────
     let queries = load_labeled_queries();
     println!(
         "[quant_sweep] loaded {} labeled queries from fixtures/labeled-queries.jsonl",
         queries.len()
     );
-    if queries.is_empty() {
-        println!(
-            "[quant_sweep] fixture is empty — add entries to \
-             src-tauri/fixtures/labeled-queries.jsonl before running live."
-        );
-    }
+    assert!(!queries.is_empty(), "live mode requires a non-empty fixture");
 
+    // Single tokio runtime for all async calls — created once, reused inside
+    // `b.iter` via `block_on`. `Builder::new_current_thread` is enough for
+    // a single-flight bench harness; we don't need work-stealing here.
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("build tokio runtime");
+
+    // 1. Connect + 2. drop existing collection so the recreate picks up the
+    //    current QuantMode + 3. embedder init + 4. corpus indexing.
+    let corpus_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("workspace root")
+        .join("examples/sample-corpus");
+    let (qdrant, embedder) = rt.block_on(async {
+        eprintln!("[quant_sweep] connecting to Qdrant…");
+        let q = Arc::new(indexer::connect().await.expect("Qdrant connect"));
+
+        eprintln!(
+            "[quant_sweep] dropping collection memex_sessions_v3 so recreate \
+             picks up MEMEX_QUANT_MODE={}",
+            mode.as_name()
+        );
+        // Best-effort delete; ignore "not found" on first run. Use the
+        // shared `COLLECTION_V3` constant so this can't drift from the
+        // name `crud::ensure_collection_v3` recreates next (Gemini #23
+        // review).
+        let _ = q.delete_collection(memex_lib::schema::COLLECTION_V3).await;
+
+        crud::ensure_collection_v3(&q)
+            .await
+            .expect("ensure_collection_v3");
+
+        eprintln!("[quant_sweep] loading BGE-small embedder (first run: ~130MB download)…");
+        let e = Arc::new(Embedder::new().expect("Embedder::new"));
+
+        eprintln!(
+            "[quant_sweep] scanning {} for sessions…",
+            corpus_path.display()
+        );
+        let sessions = parser::scan_dir(&corpus_path).expect("scan corpus");
+        eprintln!(
+            "[quant_sweep] indexing {} session(s) into v3 collection…",
+            sessions.len()
+        );
+        let report = indexer::bulk_index_arc(&q, e.clone(), &sessions)
+            .await
+            .expect("bulk_index_arc");
+        eprintln!(
+            "[quant_sweep] indexed {} session(s) ({} skipped)",
+            report.indexed,
+            sessions.len().saturating_sub(report.indexed)
+        );
+        (q, e)
+    });
+
+    // 5. Timed bench — round-robin over the labeled queries.
+    let weights = LensWeights::default();
+    let mut q_idx = 0usize;
     let mut group = c.benchmark_group(format!("quant/{}", mode.as_name()));
     group.bench_function("query_p95", |b| {
         b.iter(|| {
-            // STUB — see module-level "Live-mode wiring status" note. Real
-            // impl would:
-            //   1. Ensure v3 collection exists with the chosen QuantMode
-            //   2. Index the corpus subset referenced by the labeled fixture
-            //   3. For each query, call `indexer::lens_search` and collect
-            //      wall-clock timing
-            //   4. Return one sample per `b.iter` invocation; criterion
-            //      derives p50/p95 statistics
-            std::hint::black_box(queries.len())
+            // Bound q_idx to queries.len() at increment time so the index
+            // can't grow without limit and trigger an overflow panic on
+            // very long sample runs in debug profile (Gemini #23 review).
+            let q_text = &queries[q_idx].query;
+            q_idx = (q_idx + 1) % queries.len();
+            let hits = rt
+                .block_on(async {
+                    indexer::lens_search(&qdrant, &embedder, q_text, &weights, 10, 50).await
+                })
+                .expect("lens_search");
+            std::hint::black_box(hits.len())
         })
     });
     group.finish();
 
+    // 6. nDCG measurement — separate pass over every query, not timed.
+    let mut ndcg_sum = 0.0_f64;
+    for q in &queries {
+        let actual: Vec<String> = rt
+            .block_on(async {
+                indexer::lens_search(&qdrant, &embedder, &q.query, &weights, 10, 50).await
+            })
+            .expect("lens_search (ndcg pass)")
+            .into_iter()
+            .map(|h| h.session_id)
+            .collect();
+        ndcg_sum += eval_ndcg::ndcg_at_10(&actual, &q.relevant_ids);
+    }
+    let mean_ndcg = ndcg_sum / (queries.len() as f64);
     println!(
-        "[quant_sweep] nDCG@10 measurement stub — wire to \
-         memex_lib::eval_ndcg::mean_ndcg_at_10 with a closure that runs \
-         each query against the live Qdrant + returns the actual session \
-         IDs (see eval_ndcg::LabeledQuery for the relevance shape)."
+        "[quant_sweep] RESULT  mode={}  nDCG@10={:.4}  corpus={}  queries={}",
+        mode.as_name(),
+        mean_ndcg,
+        corpus_path.display(),
+        queries.len()
+    );
+    println!(
+        "[quant_sweep] criterion report: target/criterion/quant/{}/query_p95/report/index.html",
+        mode.as_name()
     );
 }
 
-#[derive(Debug, serde::Deserialize)]
-#[allow(dead_code)] // fields used once live-mode wiring lands
-struct LabeledQuery {
-    query: String,
-    relevant_ids: Vec<String>,
-}
+// Gemini #23 review: there's already a public `LabeledQuery` in
+// `eval_ndcg` with `pub query` + `pub relevant_ids` + `Deserialize`.
+// Re-aliasing avoids duplicating the struct (and the risk of drift if
+// the canonical one gains a field). The rest of the bench still uses
+// the local name `LabeledQuery` unchanged.
+type LabeledQuery = eval_ndcg::LabeledQuery;
 
 fn load_labeled_queries() -> Vec<LabeledQuery> {
-    let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("fixtures")
         .join("labeled-queries.jsonl");
     let body = match std::fs::read_to_string(&path) {
