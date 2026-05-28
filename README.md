@@ -711,9 +711,10 @@ memex warm-embedder                              # pre-bake BGE-small for the Do
 # Cargo.toml lives under src-tauri/; --manifest-path lets you run from repo root.
 # Replace the env value (f32 | tq-bits1 | tq-bits2) per row of the sweep.
 MEMEX_QUANT_MODE=tq-bits2 cargo bench --bench quant_sweep --manifest-path src-tauri/Cargo.toml
-# Bench is currently a SCAFFOLD: the dry-run no-op + the MEMEX_BENCH_LIVE=1 path's
-# query-runner + nDCG closures are documented stubs (`benches/quant_sweep.rs`).
-# Use to verify the runtime knob + fixture format; full live wiring is a follow-up.
+# Bench is wired end-to-end (PR #23): per-mode collection drop → ensure_collection_v3
+# → Embedder::new → bulk_index_arc → labeled-queries sweep → nDCG@10 + p95 latency.
+# `MEMEX_BENCH_LIVE=1` flips on the live runner; measured rows shipped in
+# `docs/benchmarks.md` (2026-05-28, 12-session synthetic corpus, 30 samples × 3 modes).
 ```
 
 Run `memex --help` for the full surface; each subcommand has `--help` too.
