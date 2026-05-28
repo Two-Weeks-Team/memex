@@ -246,6 +246,21 @@ async fn dispatch(state: &Arc<McpState>, method: &str, params: Value) -> Result<
     }
 }
 
+// TODO(metric, see Issue #16): if/when an MCP write tool (e.g.
+// `index_session`, `enrich_session`, `upsert_payload`) is added, increment
+// `state.metrics.mark_indexed(n)` in the handler — the counter is already
+// declared and exposed at `/metrics` via `web::WebMetrics`, only the
+// increment call is missing.
+//
+// Why the counter is currently zero rather than absent: Prometheus best
+// practice says always-zero counters are valid measurements — they
+// communicate that the dimension exists in the metric set, just isn't
+// active in this deployment. Removing the counter would create cross-
+// deployment metric-set drift (desktop binary increments it via the
+// indexer path; the MCP-only server doesn't because MCP is read-only).
+// See https://prometheus.io/docs/practices/instrumentation/ and the
+// Google SRE Book Ch. 6 "Monitoring Distributed Systems".
+
 fn tools_catalog() -> Value {
     json!({
         "tools": [
