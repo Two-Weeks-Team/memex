@@ -667,13 +667,31 @@ async fn tool_call(state: &Arc<McpState>, params: Value) -> Result<Value> {
             let source_path = indexer::payload_str(&payload, "source_path")
                 .ok_or_else(|| anyhow::anyhow!("payload missing source_path for {session_id}"))?;
 
-            // 2. Re-parse the original JSONL into a Session + Turns. The
-            //    parser already validates that the path is under one of the
-            //    allowed roots (`~/.claude/projects` or `~/.codex/sessions`)
-            //    so we don't need a separate traversal-guard here.
+            // 2. Validate the path against the sandbox roots BEFORE we read
+            //    it (Gemini #22 review — HIGH security). `source_path` came
+            //    out of Qdrant payload, which is attacker-influenceable in
+            //    principle (anyone who can write the payload could put
+            //    `/etc/passwd` here). `parser::parse_session` does not run
+            //    its own traversal guard, so we run the same `sec`
+            //    validation every other ingress path uses (web.rs · indexer).
+            //
+            //    Then route to the matching parser by `source_agent`: Claude
+            //    Code sessions use the default JSONL envelope, Codex
+            //    sessions use `codex_parser` (different envelope shape).
+            //    Default to Claude-Code parsing when the payload is missing
+            //    the field (legacy v2 points lifted to v3 may have no
+            //    source_agent).
             let session_path = PathBuf::from(&source_path);
-            let session = parser::parse_session(&session_path)
-                .map_err(|e| anyhow::anyhow!("re-parse failed for {session_id}: {e:#}"))?;
+            let validated_path = crate::sec::validate_session_path(&session_path)
+                .map_err(|e| anyhow::anyhow!("path validation failed for {session_id}: {e:#}"))?;
+            let source_agent = indexer::payload_str(&payload, "source_agent")
+                .unwrap_or_else(|| "claude_code".to_string());
+            let session = if source_agent == "codex" {
+                crate::codex_parser::parse_codex_session(&validated_path)
+            } else {
+                parser::parse_session(&validated_path)
+            }
+            .map_err(|e| anyhow::anyhow!("re-parse failed for {session_id}: {e:#}"))?;
 
             // 3. Re-run the deterministic enrichment pipeline. Same code
             //    path the indexer uses on initial upsert.
