@@ -131,13 +131,19 @@ fn default_zero() -> f32 {
 
 impl Default for LensWeights {
     fn default() -> Self {
+        // T3.3 (qdrant-improvement-goal.md) — content_late default is flipped
+        // from 0.0 to 0.25: a deliberate rerank-only nudge that activates the
+        // ColBERT multivector lane on every search without dominating the query
+        // plan. The 0.25 was picked to keep dense lenses (each at 1.0) as the
+        // primary signal while letting late-interaction tie-break on token-level
+        // precision. Reverting to 0.0 is the rollback if eval_ndcg regresses.
         Self {
             content: 1.0,
             tool: 1.0,
             path: 1.0,
             error: 1.0,
             code: 1.0,
-            content_late: 0.0,
+            content_late: 0.25,
             diversity: None,
             fusion: FusionMode::Formula,
         }
@@ -1038,14 +1044,16 @@ mod tests {
 
     #[test]
     fn formula_score_idx_ordering_matches_prefetch() {
-        // With default weights: dense=[content,tool,error,code] (content_late=0
-        // so skipped) and sparse=[path_sparse,tool_sparse].
+        // With default weights (post-T3.3 in qdrant-improvement-goal.md):
+        // content_late is now 0.25 (was 0.0), so it joins the dense list at
+        // the END (after content/tool/error/code per active_dense_specs order).
+        // Sparse lanes are unchanged: [path_sparse, tool_sparse].
         // Note: path is routed to sparse, so dense.path is absent.
         let w = LensWeights::default();
         let dense = active_dense_specs(&w);
         let sparse = active_sparse_specs(&w);
         let names: Vec<&str> = dense.iter().map(|d| d.name).collect();
-        assert_eq!(names, vec!["content", "tool", "error", "code"]);
+        assert_eq!(names, vec!["content", "tool", "error", "code", "content_late"]);
         assert_eq!(sparse.iter().map(|s| s.name).collect::<Vec<_>>(),
                    vec!["path_sparse", "tool_sparse"]);
         let f = build_formula(&w, &dense, &sparse).build();
