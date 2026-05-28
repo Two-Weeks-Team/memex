@@ -164,15 +164,15 @@ function renderArchaeoCard() {
       </div>
     </div>
     <div class="archaeo-note">
-      <strong>왜 이 카드가 있나:</strong>
-      Claude Code는 v2.1.114 즈음 세션 저장 경로를 <code class="mono">~/.claude/transcripts/</code>에서
-      <code class="mono">~/.claude/projects/</code>로 silent migration했고,
-      자동 업데이트가 옛 .jsonl을 청소한 사례가
+      <strong>Why this card exists:</strong>
+      Around v2.1.114, Claude Code silently migrated its session storage from
+      <code class="mono">~/.claude/transcripts/</code> to <code class="mono">~/.claude/projects/</code>,
+      and auto-updates have wiped the old <code class="mono">.jsonl</code> files in dozens of open
+      GitHub issues including
       <a href="https://github.com/anthropics/claude-code/issues/41591" target="_blank" rel="noopener">#41591</a> ·
       <a href="https://github.com/anthropics/claude-code/issues/54907" target="_blank" rel="noopener">#54907</a> ·
-      <a href="https://github.com/anthropics/claude-code/issues/48782" target="_blank" rel="noopener">#48782</a>
-      등 수십 건의 OPEN GitHub issue로 보고됐습니다.
-      Memex는 두 경로 모두 indexing하고 Qdrant snapshot으로 영구 보존 — Anthropic이 잊어도 Memex는 기억합니다.
+      <a href="https://github.com/anthropics/claude-code/issues/48782" target="_blank" rel="noopener">#48782</a>.
+      Memex indexes both paths and seals them into a Qdrant snapshot — Anthropic may forget, Memex remembers.
     </div>
     <div class="archaeo-actions">
       <button class="btn-mini" id="archaeoSnapshot">📦 Export snapshot now</button>
@@ -413,10 +413,10 @@ function renderHeatmap() {
   if (titleEl) {
     if (state.history?.earliest_ms) {
       const spanDays = Math.max(1, Math.ceil((today.getTime() - state.history.earliest_ms) / DAY));
-      titleEl.textContent = `활동 히트맵 — corpus ${spanDays}일 (history.jsonl base · sessions overlay)`;
+      titleEl.textContent = `Activity heatmap — corpus ${spanDays} days (history.jsonl base · sessions overlay)`;
     } else if (sessionEarliest) {
       const spanDays = Math.max(1, Math.ceil((today.getTime() - sessionEarliest.getTime()) / DAY) + 1);
-      titleEl.textContent = `활동 히트맵 — corpus ${spanDays}일`;
+      titleEl.textContent = `Activity heatmap — corpus ${spanDays} days`;
     }
   }
 }
@@ -441,7 +441,7 @@ function renderProjectBars(sessions) {
   const rows = [...agg.values()].sort((a, b) => b.sessions - a.sessions);
 
   if (rows.length === 0) {
-    wrap.innerHTML = `<div class="muted">이 범위에 세션이 없습니다.</div>`;
+    wrap.innerHTML = `<div class="muted">No sessions in this range.</div>`;
     return;
   }
 
@@ -485,8 +485,8 @@ function renderToolParetoPlaceholder() {
   const wrap = document.getElementById("toolBars");
   wrap.innerHTML = `
     <div class="muted" style="margin-bottom:8px">
-      개별 도구 이름 카운트는 새 Tauri command(<code>dashboard_aggregates</code>) 도입 후 채워집니다.
-      지금은 세션별 총 도구 호출 수 상위 8개를 표시합니다.
+      Per-tool name counts will populate once the <code>dashboard_aggregates</code> Tauri command lands.
+      Currently showing the top 8 sessions by total tool-call count.
     </div>
     <div id="toolBarsBody"></div>`;
 }
@@ -522,8 +522,8 @@ function renderErrorCatalogPlaceholder() {
   const wrap = document.getElementById("errorList");
   wrap.innerHTML = `
     <div class="muted" style="margin-bottom:8px">
-      에러 텍스트 추출/클러스터링은 새 Tauri command 도입 후 채워집니다.
-      지금은 has_errors 플래그가 켜진 세션 목록을 최근 순으로 표시합니다.
+      Error text extraction and clustering will populate once the new Tauri command lands.
+      Currently showing sessions with the <code>has_errors</code> flag, most recent first.
     </div>
     <div id="errorListBody"></div>`;
 }
@@ -564,7 +564,7 @@ async function loadRecallQueue() {
   try {
     const errors = await invoke("tail_recent_errors", { sinceSeconds: 7 * 86_400 });
     if (!errors || errors.length === 0) {
-      wrap.innerHTML = `<div class="muted">최근 7 일 내 에러 없음.</div>`;
+      wrap.innerHTML = `<div class="muted">No errors in the last 7 days.</div>`;
       return;
     }
     const seen = new Set();
@@ -584,7 +584,7 @@ async function loadRecallQueue() {
       }
     }
     if (items.length === 0) {
-      wrap.innerHTML = `<div class="muted">recall 매치 없음 — 새 영역의 에러일 가능성.</div>`;
+      wrap.innerHTML = `<div class="muted">No recall match — likely an error in new territory.</div>`;
       return;
     }
     wrap.innerHTML = "";
@@ -617,7 +617,7 @@ async function loadRecallQueue() {
       }
     });
   } catch (err) {
-    wrap.innerHTML = `<div class="muted">recall queue 로드 실패: ${escapeHtml(String(err))}</div>`;
+    wrap.innerHTML = `<div class="muted">recall queue load failed: ${escapeHtml(String(err))}</div>`;
   }
 }
 
@@ -628,7 +628,7 @@ async function loadRecallQueue() {
 async function loadTodayBrief() {
   const wrap = document.getElementById("todayBrief");
   if (state.sessions.length === 0) {
-    wrap.innerHTML = `<div class="muted">최근 세션 없음.</div>`;
+    wrap.innerHTML = `<div class="muted">No recent sessions.</div>`;
     return;
   }
   const latest = [...state.sessions]
@@ -636,11 +636,11 @@ async function loadTodayBrief() {
 
   const lastAgo = relativeAgo(parseIso(latest.start_iso));
   const title = latest.ai_title || latest.project_name || latest.session_id;
-  let predictHtml = `<div class="muted" style="font-size:11.5px">predict 계산 중…</div>`;
+  let predictHtml = `<div class="muted" style="font-size:11.5px">predicting…</div>`;
 
   wrap.innerHTML = `
     <p class="brief-line">
-      마지막 세션: <strong>${escapeHtml(latest.project_name || "?")}</strong>
+      Last session: <strong>${escapeHtml(latest.project_name || "?")}</strong>
       · <span class="dim-2">${escapeHtml(title.slice(0, 60))}</span>
       · <span class="muted">${lastAgo}</span>
     </p>
@@ -661,7 +661,7 @@ async function loadTodayBrief() {
     renderPrediction(pred);
   } catch (err) {
     document.getElementById("todayPredict").innerHTML =
-      `<div class="muted" style="font-size:11.5px">predict 실패: ${escapeHtml(String(err).slice(0,100))}</div>`;
+      `<div class="muted" style="font-size:11.5px">predict failed: ${escapeHtml(String(err).slice(0,100))}</div>`;
   }
 }
 
@@ -670,7 +670,7 @@ function renderPrediction(pred) {
   if (!wrap) return;
   const top = pred?.predictions?.[0];
   if (!top) {
-    wrap.innerHTML = `<div class="muted" style="font-size:11.5px">예측 결과 없음 (이웃 세션 부족).</div>`;
+    wrap.innerHTML = `<div class="muted" style="font-size:11.5px">No prediction (insufficient neighbor sessions).</div>`;
     return;
   }
   const freq = Math.round((top.frequency || 0) * 100);
@@ -751,7 +751,7 @@ function renderSkillGraph() {
 
 function renderWeekStatsLoading() {
   document.getElementById("weekStats").innerHTML =
-    `<div class="muted">집계 중…</div>`;
+    `<div class="muted">Aggregating…</div>`;
 }
 
 function renderWeekStats() {

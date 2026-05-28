@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ko">
+<html lang="en">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -397,20 +397,20 @@ body { overflow-x: hidden; }
       </div>
     </section>
 
-    <!-- Data archaeology — Memex 가치 명제 표현 -->
+    <!-- Data archaeology — Memex value proposition -->
     <section class="card archaeo-card" id="archaeoCard">
       <div class="card-head">
-        <div class="title">📦 Memex가 보호하는 데이터</div>
-        <div class="why">Anthropic이 silent migration / cleanup해도 Memex Qdrant 안에 남습니다.</div>
+        <div class="title">📦 Data Memex protects</div>
+        <div class="why">Survives every silent migration or cleanup Anthropic ships — your data stays inside Memex's Qdrant.</div>
       </div>
-      <div id="archaeoBody" class="muted">집계 중…</div>
+      <div id="archaeoBody" class="muted">Aggregating…</div>
     </section>
 
     <!-- Activity Heatmap -->
     <section class="card heatmap-card">
       <div class="card-head">
-        <div class="title">활동 히트맵 — 지난 365 일</div>
-        <div class="why">"내가 언제 일했는지 / 언제 비었는지" 한 눈에. 칸 호버 → 그날 세션 수 + prompt 수.</div>
+        <div class="title">Activity heatmap — last 365 days</div>
+        <div class="why">When you worked and when you didn't, at a glance. Hover any cell → that day's sessions + prompt count.</div>
       </div>
       <div class="heatmap-wrap">
         <div class="heatmap" id="heatmap"></div>
@@ -428,20 +428,20 @@ body { overflow-x: hidden; }
     <section class="row-2">
       <div class="card">
         <div class="card-head">
-          <div class="title">프로젝트 분포</div>
-          <div class="why">"이번 분기 내가 가장 매달린 프로젝트". 카운트 기준 ↓.</div>
+          <div class="title">Project distribution</div>
+          <div class="why">Projects you sank the most time into this quarter. Sorted by count ↓.</div>
         </div>
         <div id="projectBars">
-          <div class="muted">집계 중…</div>
+          <div class="muted">Aggregating…</div>
         </div>
       </div>
       <div class="card">
         <div class="card-head">
-          <div class="title">도구 사용 — Pareto</div>
-          <div class="why">"내 워크플로의 진짜 모양". 무엇이 핵심 도구, 무엇이 가끔.</div>
+          <div class="title">Tool usage — Pareto</div>
+          <div class="why">The actual shape of your workflow. Which tools are core, which are rare.</div>
         </div>
         <div id="toolBars">
-          <div class="muted">집계 중… (현재는 세션별 총 tool count 합계 기준 placeholder)</div>
+          <div class="muted">Aggregating… (placeholder — currently sums tool_count per session)</div>
         </div>
       </div>
     </section>
@@ -450,20 +450,20 @@ body { overflow-x: hidden; }
     <section class="row-2">
       <div class="card">
         <div class="card-head">
-          <div class="title">에러 카탈로그</div>
-          <div class="why">"이번 분기 나를 막은 항목". 클릭 → 해당 세션 Replay.</div>
+          <div class="title">Error catalog</div>
+          <div class="why">What blocked you this quarter. Click any row → replay that session.</div>
         </div>
         <div id="errorList">
-          <div class="muted">스캔 중…</div>
+          <div class="muted">Scanning…</div>
         </div>
       </div>
       <div class="card">
         <div class="card-head">
-          <div class="title">Recall queue — 과거의 내가 도와줄 수 있음</div>
-          <div class="why">최근 본 에러 중 cross-session 매치 ≥ 0.65 항목.</div>
+          <div class="title">Recall queue — your past self can help</div>
+          <div class="why">Recent errors with a cross-session match ≥ 0.65.</div>
         </div>
         <div id="recallList">
-          <div class="muted">tail_recent_errors + recall 폴링 중…</div>
+          <div class="muted">Polling tail_recent_errors + recall…</div>
         </div>
       </div>
     </section>
@@ -472,8 +472,8 @@ body { overflow-x: hidden; }
     <section class="row-3">
       <div class="card">
         <div class="card-head">
-          <div class="title">도구 동시-사용 그래프</div>
-          <div class="why">"내 워크플로 패턴". 함께 자주 쓰이는 도구가 가까이.</div>
+          <div class="title">Tool co-occurrence graph</div>
+          <div class="why">Your workflow pattern. Tools used together cluster nearby.</div>
         </div>
         <div class="skill-graph">
           <svg viewBox="0 0 360 220" id="skillGraph"></svg>
@@ -486,21 +486,21 @@ body { overflow-x: hidden; }
 
       <div class="card">
         <div class="card-head">
-          <div class="title">이번 주 vs 지난 주</div>
-          <div class="why">"내 페이스 가속/감속".</div>
+          <div class="title">This week vs last week</div>
+          <div class="why">Your pace — speeding up or slowing down.</div>
         </div>
         <div class="weekstat-list" id="weekStats">
-          <div class="muted">집계 중…</div>
+          <div class="muted">Aggregating…</div>
         </div>
       </div>
 
       <div class="card">
         <div class="card-head">
           <div class="title">Today's brief</div>
-          <div class="why">"어제 어디서 끝났고, 무엇을 이어갈지". Predict 1회.</div>
+          <div class="why">Where you stopped yesterday, what to pick up. Predict ×1.</div>
         </div>
         <div id="todayBrief">
-          <p class="brief-line muted">최근 세션 + 예측 계산 중…</p>
+          <p class="brief-line muted">Loading recent sessions + predicting…</p>
         </div>
       </div>
     </section>
