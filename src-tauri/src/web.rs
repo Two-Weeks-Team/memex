@@ -176,6 +176,11 @@ pub async fn serve(port: u16, ui_dir: PathBuf) -> Result<()> {
         .route("/api/health", get(health))
         // T3.2 — Prometheus exposition for the Docker server variant.
         .route("/metrics", get(metrics_handler))
+        // PR #12 REV-14 (self-review) — closes the snapshot_bytes orphan
+        // metric. Posts to indexer::snapshot_export, reads the resulting
+        // file size, updates WebMetrics::snapshot_bytes, returns
+        // { name, bytes } so the operator can verify the export landed.
+        .route("/api/snapshot/export", post(snapshot_export_handler))
         .route("/api/search", get(search))
         .route("/api/lens", post(lens))
         .route("/api/recall", get(recall))
@@ -472,6 +477,61 @@ async fn index_path(State(s): State<WebState>, Json(body): Json<IndexReq>) -> Ap
         "indexed": report.indexed,
         "duplicates_skipped": report.duplicates_skipped,
         "errors": report.errors,
+    })))
+}
+
+// ---- Snapshot export (PR #12 REV-14 self-review) -------------------------
+//
+// Closes the `memex_snapshot_bytes` orphan metric. Before this route existed,
+// the Prometheus gauge was always 0 because nothing in the web variant ever
+// triggered a snapshot. Now an operator can POST to /api/snapshot/export,
+// the indexer's snapshot endpoint is exercised, and the resulting file's
+// size on disk lands in the gauge so Prometheus can alert on absent backups.
+//
+// The snapshot lives under MEMEX_SNAPSHOT_DIR (or the user's HOME by default)
+// — the existing indexer::snapshot_export resolves the path; we just measure
+// what it produced.
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct SnapshotReq {
+    /// Optional destination directory. Defaults to $MEMEX_SNAPSHOT_DIR or
+    /// $HOME — the indexer applies the same resolution as the desktop CLI.
+    dir: Option<String>,
+}
+
+async fn snapshot_export_handler(
+    State(s): State<WebState>,
+    Json(body): Json<SnapshotReq>,
+) -> ApiResult {
+    use std::path::PathBuf;
+    // indexer::snapshot_export expects a FILE path, not a directory — it
+    // writes the snapshot bytes directly to `dest`. Mirror what
+    // commands::snapshot_export_default does on the desktop side: resolve a
+    // directory (caller-supplied or env MEMEX_SNAPSHOT_DIR or HOME), append
+    // a timestamped filename, then hand that file path to the indexer.
+    let dir: PathBuf = match body.dir {
+        Some(d) => PathBuf::from(d),
+        None => std::env::var("MEMEX_SNAPSHOT_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| {
+                std::env::var("HOME")
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|_| PathBuf::from("/tmp"))
+            }),
+    };
+    let ts = chrono::Utc::now().format("%Y-%m-%dT%H-%M-%S").to_string();
+    let dest = dir.join(format!("memex-snapshot-{ts}.snapshot"));
+    let name = indexer::snapshot_export(&dest).await.map_err(err500)?;
+    // Measure the resulting file size and update the Prometheus gauge.
+    let bytes = tokio::fs::metadata(&dest).await.map(|m| m.len()).unwrap_or(0);
+    s.metrics
+        .snapshot_bytes
+        .store(bytes, Ordering::Relaxed);
+    Ok(Json(json!({
+        "name": name,
+        "path": dest.to_string_lossy(),
+        "bytes": bytes,
     })))
 }
 

@@ -313,6 +313,15 @@ final top-K.
 **Code pointer.** `src-tauri/src/lens.rs::FusionMode` +
 `src-tauri/src/retrieval.rs` (the Formula construction).
 
+**Known limitation — web variant API surface** (PR #12 REV-15). The
+`POST /api/lens` handler accepts `indexer::LensWeights`, a 6-field struct
+covering the dense weights + `content_late` only. `MMR diversity` and
+`FusionMode::Rrf` live on the richer `lens::LensWeights` (8 fields) and are
+exposed only on the desktop (Tauri) command surface today. A future PR can
+either (a) widen `indexer::LensWeights` to mirror the lens module's struct,
+or (b) thread `lens::LensWeights` through the web handler directly. Tracked
+in `docs/wired-but-dormant.md` §C if needed.
+
 ---
 
 ## 8. Indexed payload fields — 10 first-class predicates

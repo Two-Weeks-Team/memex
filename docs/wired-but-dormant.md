@@ -28,6 +28,7 @@ These need no further work; they're already part of the production query plan.
 | **TurboQuant bits-2 + 2× oversampling + rescore** | `schema.rs::quant_config` + `schema.rs::quant_search` | `always_ram: true`, `rescore: true`, `oversampling: 2.0`. The compression is real; the accuracy holds. |
 | **Per-vector HNSW tuning** | `schema.rs` HnswConfigDiff per vector name | `content m=24/ef=200` · `code m=20/150` · `error m=16/100` · `tool & path m=12/64`. |
 | **Server-side `Query::new_formula`** with `exp_decay` recency | `lens.rs` (default `FusionMode::Formula`) · `retrieval.rs` | The default fusion across the prefetch chain. |
+| **`content_late` — ColBERT MaxSim multivector rerank** (PR #12 REV-16 promotion) | Schema: `schema.rs` (multivector slot) · indexed at `indexer.rs:621-625` (token-level vectors). Query path: `lens.rs::build_prefetches` emits `Query::new_nearest(VectorInput::new_multi(...))` when weight > 0. | T3.3 flipped both `lens::LensWeights::default()` and `indexer::LensWeights::default()` from `0.0` to **`0.25`** — a rerank-only nudge that doesn't dominate the dense lenses. HNSW for this slot still has `m: 0, ef_construct: 0` (rerank-only, no graph cost). Rollback path: set both defaults back to `0.0`. |
 | **Tenant-flagged `project_name`** keyword index | `schema.rs` payload index list | `is_tenant: true` — Qdrant 1.18 partitions the field as a tenant key. |
 | **`Datetime` index on `start_ts_dt`** | `schema.rs` payload index list | Recency queries are first-class via `DatetimeIndexParamsBuilder`. |
 | **`Text` index on `ai_title`** | `schema.rs` payload index list | Lexical search on session titles. T3.4 investigates tokenizer customisation. |
@@ -50,29 +51,7 @@ These features exist in the v3 collection schema (or the retrieval code path)
 but are intentionally not contributing to default queries. Each has an explicit
 flip target.
 
-### B.1 · `content_late` — ColBERT MaxSim multivector rerank
-
-- **Status flag**: `wired:off`
-- **Where**:
-  - Schema: `schema.rs` declares `content_late` as a multivector slot (the
-    `Multivectors` config), and `indexer.rs:621-625` indexes it with the
-    token-level vectors at write time.
-  - HNSW: built with `m: 0, ef_construct: 0` — no graph cost paid until
-    activated (it's rerank-only by design).
-  - Query path: `lens.rs::build_prefetches` includes a `content_late` branch
-    that emits `Query::new_nearest(VectorInput::new_multi(...))` *if* its
-    weight is non-zero.
-- **Activation**: flip `LensWeights::default().content_late` from `0.0` to a
-  non-zero value. Target: **`0.25`** (a deliberate rerank-only nudge that
-  doesn't dominate the query plan).
-- **Rationale**: the multivector lane is the most expensive of the 8 slots
-  (MaxSim is O(query_tokens × doc_tokens)). We wanted to pay the storage cost
-  upfront (so existing v3 corpora don't need a rebuild when we flip it on)
-  but skip the runtime cost until we have an eval that says it improves
-  recall@10 without regressing latency.
-- **Tracked by**: `qdrant-improvement-goal.md` T3.3.
-
-### B.2 · `FusionMode::Rrf` — Reciprocal Rank Fusion alternative
+### B.1 · `FusionMode::Rrf` — Reciprocal Rank Fusion alternative
 
 - **Status flag**: `wired:off`
 - **Where**: `lens.rs::FusionMode` enum has an `Rrf` variant; the default is
@@ -83,7 +62,7 @@ flip target.
   corpus). RRF is kept as an alternative for diverse-source fusion.
 - **Tracked by**: future work (not in current goal).
 
-### B.3 · `Mmr` diversity — opt-in
+### B.2 · `Mmr` diversity — opt-in
 
 - **Status flag**: `wired:off`
 - **Where**: `lens.rs::LensWeights::diversity: Option<f32>`; default `None`.

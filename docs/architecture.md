@@ -167,7 +167,7 @@ sets to bias the ranking — see `retrieval.rs::relevance_feedback`.
 > (PR #12 ships this flip). The historical pre-T3.3 baseline of `0.0` is
 > archived in [`claudedocs/qdrant-audit-findings.md`](../claudedocs/qdrant-audit-findings.md) §2
 > for reproducibility; the rollback path (flip both Default impls back to `0.0`)
-> is documented in [`docs/wired-but-dormant.md`](./wired-but-dormant.md) §B.1
+> is documented in [`docs/wired-but-dormant.md`](./wired-but-dormant.md) §A `content_late` row
 > in case `eval_ndcg` regresses.
 
 ### (c) Snapshot lifecycle — POST → file → GET → restore
