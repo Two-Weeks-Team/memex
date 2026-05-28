@@ -24,7 +24,7 @@ use qdrant_client::qdrant::{
     Modifier, MultiVectorComparator, MultiVectorConfigBuilder, PayloadIndexParams,
     QuantizationSearchParams, QuantizationSearchParamsBuilder, SearchParams, SearchParamsBuilder,
     SparseIndexConfig, SparseVectorConfig, SparseVectorParams, SparseVectorParamsBuilder,
-    StrictModeConfigBuilder, TurboQuantBitSize, TurboQuantization, TurboQuantizationBuilder,
+    StrictModeConfigBuilder, TurboQuantBitSize, TurboQuantizationBuilder,
     VectorParams, VectorParamsBuilder, VectorParamsMap, VectorsConfig, WalConfigDiff,
 };
 use qdrant_client::Payload;
@@ -175,17 +175,21 @@ pub fn build_v3_create_collection() -> CreateCollectionBuilder {
         ..Default::default()
     };
 
-    // TurboQuant bits2 + always_ram.
+    // Quantization mode (Issue #13).
     //
     // SPEC NOTE (P3, KC-01): `CreateCollectionBuilder.quantization_config`
     // accepts `Into<quantization_config::Quantization>` — the inner *oneof*
     // variant, not the wrapper `QuantizationConfig`. The server still stores
     // a `QuantizationConfig { quantization: Some(Turboquant(...)) }` on the
     // collection — verified in `it_quantization_present_in_collection_info`.
-    let turbo: TurboQuantization = TurboQuantizationBuilder::default()
-        .bits(TurboQuantBitSize::Bits2)
-        .always_ram(true)
-        .build();
+    //
+    // Issue #13 made this runtime-configurable via `MEMEX_QUANT_MODE`. The
+    // default (env unset / unrecognised) is **the same** TurboQuant bits-2 +
+    // always_ram production setting we had pre-#13 — no behaviour change for
+    // existing deployments. The new env var is used by `benches/quant_sweep.rs`
+    // and by anyone running `cargo bench --bench quant_sweep` to compare
+    // recall / latency / disk-size across configs on their own corpus.
+    let quantization_inner: Option<Quantization> = QuantMode::from_env().to_inner_quantization();
 
     // Strict mode — KC-06 (P5) adds `max_query_limit` on top of P3's
     // `max_resident_memory_percent`. Both are conservative: 85% memory cap
@@ -203,14 +207,19 @@ pub fn build_v3_create_collection() -> CreateCollectionBuilder {
         ..Default::default()
     };
 
-    CreateCollectionBuilder::new(COLLECTION_V3)
+    let mut builder = CreateCollectionBuilder::new(COLLECTION_V3)
         .vectors_config(vectors_cfg)
         .sparse_vectors_config(sparse_cfg)
         .hnsw_config(hnsw)
-        .quantization_config(Quantization::Turboquant(turbo))
         .strict_mode_config(strict_mode)
         .wal_config(wal)
-        .timeout(60)
+        .timeout(60);
+    // F32None (no quantization at all) is selected by omitting the field.
+    // Any other QuantMode wraps the inner oneof variant.
+    if let Some(q) = quantization_inner {
+        builder = builder.quantization_config(q);
+    }
+    builder
 }
 
 // ---------------------------------------------------------------------------
@@ -256,6 +265,80 @@ pub fn v3_payload_indexes() -> Vec<(&'static str, FieldType, Option<PayloadIndex
         ("outcome", FieldType::Keyword, None),
         ("source_agent", FieldType::Keyword, None), // KH-01
     ]
+}
+
+// ---------------------------------------------------------------------------
+// Issue #13 — runtime-configurable quantization mode (MEMEX_QUANT_MODE env)
+// ---------------------------------------------------------------------------
+//
+// Used by `build_v3_create_collection()` above + the Criterion benchmark in
+// `benches/quant_sweep.rs`. The default (env unset / unrecognised) is the
+// same TurboQuant bits-2 setting we shipped pre-#13.
+//
+// Recognised values:
+//   - "f32" / "none"  → no quantization at all (f32 baseline)
+//   - "tq-bits1"      → TurboQuant 1-bit (more compression, lower recall)
+//   - "tq-bits2"      → TurboQuant 2-bit (default — current production)
+//
+// Scalar / Binary quantization variants are intentionally not included in
+// this first round — they would require additional builder plumbing and the
+// 3 modes above already span the interesting recall vs. disk-size space.
+// Adding them is a 30-line follow-up if a sweep needs more granularity.
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QuantMode {
+    F32None,
+    TqBits1,
+    TqBits2,
+}
+
+impl QuantMode {
+    /// Read the mode from `MEMEX_QUANT_MODE`. Unset / unrecognised → TqBits2
+    /// (the pre-#13 hardcoded production default).
+    pub fn from_env() -> Self {
+        match std::env::var("MEMEX_QUANT_MODE")
+            .ok()
+            .as_deref()
+            .map(str::trim)
+            .map(str::to_ascii_lowercase)
+            .as_deref()
+        {
+            Some("f32") | Some("none") => Self::F32None,
+            Some("tq-bits1") | Some("tq_bits1") | Some("turboquant_bits1") => Self::TqBits1,
+            // Default branch covers "tq-bits2", "tq_bits2", unset, unknown.
+            _ => Self::TqBits2,
+        }
+    }
+
+    /// The kebab-case name used in env values and reports.
+    pub fn as_name(self) -> &'static str {
+        match self {
+            Self::F32None => "f32",
+            Self::TqBits1 => "tq-bits1",
+            Self::TqBits2 => "tq-bits2",
+        }
+    }
+
+    /// Convert into the inner Qdrant `Quantization` oneof variant.
+    /// `None` means "no quantization at all" (f32 baseline) — handled at the
+    /// caller by omitting the builder field entirely.
+    pub fn to_inner_quantization(self) -> Option<Quantization> {
+        match self {
+            Self::F32None => None,
+            Self::TqBits1 => Some(Quantization::Turboquant(
+                TurboQuantizationBuilder::default()
+                    .bits(TurboQuantBitSize::Bits1)
+                    .always_ram(true)
+                    .build(),
+            )),
+            Self::TqBits2 => Some(Quantization::Turboquant(
+                TurboQuantizationBuilder::default()
+                    .bits(TurboQuantBitSize::Bits2)
+                    .always_ram(true)
+                    .build(),
+            )),
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1043,6 +1126,110 @@ mod tests {
         assert!(!t.contains(&"b".to_string()), "single-char tokens dropped");
         assert!(t.contains(&"cd".to_string()));
         assert!(t.contains(&"ef".to_string()));
+    }
+
+    // -----------------------------------------------------------------
+    // Issue #13 — QuantMode::from_env unit tests
+    // -----------------------------------------------------------------
+
+    /// Helper: run a closure with `MEMEX_QUANT_MODE` set to `value` (or
+    /// unset if `None`), then restore the previous value. Avoids leaking
+    /// env state between tests; `cargo test` runs lib tests in the same
+    /// process so this matters.
+    fn with_env<F, R>(value: Option<&str>, f: F) -> R
+    where
+        F: FnOnce() -> R,
+    {
+        let key = "MEMEX_QUANT_MODE";
+        let saved = std::env::var(key).ok();
+        match value {
+            Some(v) => std::env::set_var(key, v),
+            None => std::env::remove_var(key),
+        }
+        let result = f();
+        match saved {
+            Some(v) => std::env::set_var(key, v),
+            None => std::env::remove_var(key),
+        }
+        result
+    }
+
+    #[test]
+    fn issue_13_quant_mode_from_env_default_is_tq_bits2() {
+        with_env(None, || {
+            assert_eq!(QuantMode::from_env(), QuantMode::TqBits2);
+        });
+    }
+
+    #[test]
+    fn issue_13_quant_mode_from_env_recognises_f32() {
+        with_env(Some("f32"), || {
+            assert_eq!(QuantMode::from_env(), QuantMode::F32None);
+        });
+        with_env(Some("none"), || {
+            assert_eq!(QuantMode::from_env(), QuantMode::F32None);
+        });
+        // Mixed case + whitespace tolerated.
+        with_env(Some("  F32  "), || {
+            assert_eq!(QuantMode::from_env(), QuantMode::F32None);
+        });
+    }
+
+    #[test]
+    fn issue_13_quant_mode_from_env_recognises_turboquant_variants() {
+        with_env(Some("tq-bits1"), || {
+            assert_eq!(QuantMode::from_env(), QuantMode::TqBits1);
+        });
+        with_env(Some("tq-bits2"), || {
+            assert_eq!(QuantMode::from_env(), QuantMode::TqBits2);
+        });
+        // Underscore alternative + uppercase tolerated.
+        with_env(Some("TQ_BITS1"), || {
+            assert_eq!(QuantMode::from_env(), QuantMode::TqBits1);
+        });
+    }
+
+    #[test]
+    fn issue_13_quant_mode_unknown_falls_back_to_tq_bits2() {
+        // Unrecognised values must not crash — they fall back to the
+        // pre-#13 production default (TqBits2) so accidentally setting
+        // `MEMEX_QUANT_MODE=garbage` does not change collection shape.
+        with_env(Some("garbage"), || {
+            assert_eq!(QuantMode::from_env(), QuantMode::TqBits2);
+        });
+        with_env(Some(""), || {
+            assert_eq!(QuantMode::from_env(), QuantMode::TqBits2);
+        });
+    }
+
+    #[test]
+    fn issue_13_quant_mode_to_inner_shapes() {
+        // F32None → None (no quantization field on the builder).
+        assert!(QuantMode::F32None.to_inner_quantization().is_none());
+        // TqBits1 and TqBits2 each produce a Turboquant variant.
+        match QuantMode::TqBits1.to_inner_quantization() {
+            Some(Quantization::Turboquant(_)) => {}
+            other => panic!("TqBits1 must produce Turboquant; got {other:?}"),
+        }
+        match QuantMode::TqBits2.to_inner_quantization() {
+            Some(Quantization::Turboquant(_)) => {}
+            other => panic!("TqBits2 must produce Turboquant; got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn issue_13_quant_mode_as_name_roundtrips() {
+        // Each mode's `as_name()` must round-trip back through `from_env`.
+        for mode in [QuantMode::F32None, QuantMode::TqBits1, QuantMode::TqBits2] {
+            let name = mode.as_name();
+            with_env(Some(name), || {
+                assert_eq!(
+                    QuantMode::from_env(),
+                    mode,
+                    "round-trip failed for {name}",
+                );
+            });
+        }
     }
 
     #[test]

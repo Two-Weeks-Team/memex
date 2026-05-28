@@ -1,0 +1,34 @@
+// Issue #13 — labeled queries fixture for `benches/quant_sweep.rs`.
+//
+// Format: one JSON object per line. Comment lines (starting with `#` or
+// `//`) and blank lines are skipped by the bench loader. Schema matches
+// `memex_lib::eval_ndcg::LabeledQuery`:
+//
+//   { "query": "<free-text the user would type>",
+//     "relevant_ids": ["<session-id 1>", "<session-id 2>", ...] }
+//
+// `relevant_ids` are listed in descending relevance order (most relevant
+// first). nDCG@10 will count each ID found in the top-10 results,
+// discounted by rank.
+//
+// ## How to populate this file
+//
+// 1. Pick ~20 queries that span the kinds of recall you care about:
+//    error-mode lookups, code-snippet recall, project-spanning topic
+//    search, identifier search, etc.
+//
+// 2. For each query, manually identify 3-5 sessions in your corpus that
+//    a perfect retrieval system would return. Use `memex` itself or
+//    `~/.claude/projects/**/*.jsonl` directly — the session_id is the
+//    file basename (UUID).
+//
+// 3. Commit this file. The benchmark loads it deterministically; identical
+//    fixture + identical QuantMode → identical nDCG.
+//
+// The 3 examples below are placeholders demonstrating the format. They
+// reference made-up session IDs and will produce a zero nDCG on any real
+// corpus — replace them with your own.
+
+{"query": "vector search recall benchmark", "relevant_ids": ["00000000-0000-0000-0000-000000000001", "00000000-0000-0000-0000-000000000002"]}
+{"query": "qdrant payload index migration", "relevant_ids": ["00000000-0000-0000-0000-000000000003"]}
+{"query": "memex landing page rebuild", "relevant_ids": ["00000000-0000-0000-0000-000000000004", "00000000-0000-0000-0000-000000000005"]}

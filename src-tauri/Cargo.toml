@@ -83,4 +83,15 @@ tower-http = { version = "0.6", features = ["fs", "trace", "cors"], optional = t
 [dev-dependencies]
 pretty_assertions = "1"
 tempfile = "3"
+# Issue #13 — Criterion harness for `benches/quant_sweep.rs`. `html_reports`
+# gives the `target/criterion/report/` HTML so deployers can eyeball
+# recall/latency without an external dashboard.
+criterion = { version = "0.5", features = ["html_reports"] }
+
+# Issue #13 — quantization sweep benchmark. Set `MEMEX_QUANT_MODE` to
+# `f32` | `tq-bits1` | `tq-bits2` (default) and `MEMEX_BENCH_LIVE=1` to
+# actually hit a running Qdrant (default is dry-run print + compile-check).
+[[bench]]
+name = "quant_sweep"
+harness = false
 
