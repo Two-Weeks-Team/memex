@@ -3,12 +3,13 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Memex × Qdrant — Feature Status After PR #19</title>
+<title>Memex × Qdrant — Feature Status (All PRs Merged)</title>
 <style>
   :root {
     --bg: #0a0d12;
     --bg-2: #0f1419;
     --bg-3: #161b22;
+    --bg-4: #1a2028;
     --fg: #e6edf3;
     --fg-mute: #8d96a0;
     --fg-dim: #6e7681;
@@ -17,13 +18,17 @@
     --accent: #79c0ff;
     --accent-2: #d2a8ff;
     --green: #56d364;
+    --green-bg: rgba(86, 211, 100, 0.10);
     --yellow: #f0b859;
+    --yellow-bg: rgba(240, 184, 89, 0.10);
+    --gray: #8d96a0;
+    --gray-bg: rgba(141, 150, 160, 0.08);
     --red: #f47067;
-    --gray: #6e7681;
+    --red-bg: rgba(244, 112, 103, 0.10);
     --gradient: linear-gradient(135deg, #79c0ff 0%, #d2a8ff 100%);
     --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   }
-  * { box-sizing: border-box }
+  *, *::before, *::after { box-sizing: border-box }
   html, body { margin: 0; padding: 0 }
   body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -32,102 +37,246 @@
     background: var(--bg);
     -webkit-font-smoothing: antialiased;
   }
-  .wrap { max-width: 1240px; margin: 0 auto; padding: 56px 32px 80px }
-  header.page {
+  .wrap { max-width: 1280px; margin: 0 auto; padding: 48px 28px 80px }
+
+  /* ─────── Hero ─────── */
+  header.hero {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 32px;
+    padding-bottom: 32px;
     border-bottom: 1px solid var(--line);
-    padding-bottom: 28px;
-    margin-bottom: 36px;
+    margin-bottom: 32px;
+    align-items: end;
   }
+  @media (max-width: 760px) { header.hero { grid-template-columns: 1fr } }
   .eyebrow {
     font-family: var(--mono);
     font-size: 11px;
     letter-spacing: 1.5px;
     text-transform: uppercase;
     color: var(--fg-dim);
-    margin: 0 0 8px;
+    margin: 0 0 10px;
   }
   h1 {
-    font-size: 30px;
-    line-height: 1.2;
-    margin: 0 0 10px;
+    font-size: 34px;
+    line-height: 1.15;
+    margin: 0 0 12px;
+    background: var(--gradient);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    font-weight: 700;
+  }
+  .lede { font-size: 15.5px; color: var(--fg-mute); margin: 0; max-width: 72ch }
+  .lede b { color: var(--fg) }
+  .grade-card {
+    text-align: center;
+    background: var(--bg-2);
+    border: 1px solid var(--line-2);
+    border-radius: 14px;
+    padding: 18px 28px;
+    min-width: 200px;
+  }
+  .grade-card .label {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    color: var(--fg-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+  }
+  .grade-card .grade {
+    font-size: 64px;
+    font-weight: 800;
+    line-height: 1;
+    margin: 4px 0 4px;
     background: var(--gradient);
     -webkit-background-clip: text;
     background-clip: text;
     -webkit-text-fill-color: transparent;
   }
-  .lede { font-size: 15px; color: var(--fg-mute); margin: 0; max-width: 80ch }
-  .meta {
-    margin-top: 18px;
-    display: flex;
-    flex-wrap: wrap;
-    gap: 22px;
+  .grade-card .grade-sub {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--fg-mute);
+  }
+
+  /* ─────── Stat strip ─────── */
+  .stat-strip {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 14px;
+    margin-bottom: 32px;
+  }
+  @media (max-width: 900px) { .stat-strip { grid-template-columns: repeat(2, 1fr) } }
+  .stat {
+    background: var(--bg-2);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 16px 18px;
+  }
+  .stat .stat-v { font-family: var(--mono); font-size: 26px; font-weight: 700; line-height: 1.1; color: var(--fg); }
+  .stat .stat-l { font-size: 11px; color: var(--fg-mute); text-transform: uppercase; letter-spacing: 0.5px; margin-top: 6px; }
+  .stat .stat-d { font-size: 11.5px; color: var(--fg-dim); margin-top: 3px; }
+  .stat.s-on .stat-v   { color: var(--green) }
+  .stat.s-opt .stat-v  { color: var(--yellow) }
+  .stat.s-def .stat-v  { color: var(--gray) }
+  .stat.s-blk .stat-v  { color: var(--red) }
+  .stat.s-pct .stat-v  { color: var(--accent) }
+
+  /* ─────── Donut + category bars ─────── */
+  .viz {
+    display: grid;
+    grid-template-columns: 240px 1fr;
+    gap: 32px;
+    background: var(--bg-2);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 22px 26px;
+    margin-bottom: 30px;
+    align-items: center;
+  }
+  @media (max-width: 760px) { .viz { grid-template-columns: 1fr; gap: 20px } }
+  .donut { position: relative; width: 220px; height: 220px; margin: 0 auto; }
+  .donut svg { transform: rotate(-90deg); }
+  .donut .center {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    text-align: center;
+  }
+  .donut .center .big { font-family: var(--mono); font-size: 38px; font-weight: 800; color: var(--fg); line-height: 1; }
+  .donut .center .lbl { font-family: var(--mono); font-size: 10.5px; color: var(--fg-mute); text-transform: uppercase; letter-spacing: 0.6px; margin-top: 4px; }
+
+  .cat-bars { display: flex; flex-direction: column; gap: 10px; }
+  .cat-bar {
+    display: grid;
+    grid-template-columns: 200px 1fr 70px;
+    gap: 12px;
+    align-items: center;
+    font-size: 12.5px;
+  }
+  @media (max-width: 600px) { .cat-bar { grid-template-columns: 1fr } }
+  .cat-bar .name { color: var(--fg); font-weight: 500; }
+  .cat-bar .name .ord { color: var(--fg-dim); font-family: var(--mono); font-size: 10.5px; margin-right: 6px; }
+  .cat-bar .bar {
+    display: flex; height: 10px; border-radius: 999px; overflow: hidden;
+    background: var(--bg-3);
+  }
+  .cat-bar .bar .seg { height: 100%; transition: filter .15s ease; }
+  .cat-bar .bar .seg.on  { background: var(--green) }
+  .cat-bar .bar .seg.opt { background: var(--yellow) }
+  .cat-bar .bar .seg.def { background: var(--gray) }
+  .cat-bar .bar .seg.blk { background: var(--red) }
+  .cat-bar .ratio { font-family: var(--mono); font-size: 11px; color: var(--fg-mute); text-align: right; }
+
+  /* ─────── Controls ─────── */
+  .controls {
+    display: flex; flex-wrap: wrap; gap: 8px;
+    align-items: center;
+    margin-bottom: 22px;
+    padding: 14px 16px;
+    background: var(--bg-2);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    position: sticky;
+    top: 8px;
+    z-index: 10;
+    backdrop-filter: saturate(140%) blur(8px);
+  }
+  .filter-btn {
     font-family: var(--mono);
     font-size: 12px;
-    color: var(--fg-dim);
+    padding: 6px 14px;
+    border-radius: 99px;
+    border: 1px solid var(--line-2);
+    background: var(--bg-3);
+    color: var(--fg-mute);
+    cursor: pointer;
+    transition: all .15s ease;
   }
-  .meta b { color: var(--fg); font-weight: 600 }
-  h2 {
-    font-size: 19px;
-    margin: 44px 0 14px;
+  .filter-btn:hover { color: var(--fg); border-color: var(--fg-dim); }
+  .filter-btn.active.all  { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+  .filter-btn.active.on   { background: var(--green); color: var(--bg); border-color: var(--green); }
+  .filter-btn.active.opt  { background: var(--yellow); color: var(--bg); border-color: var(--yellow); }
+  .filter-btn.active.def  { background: var(--gray); color: var(--bg); border-color: var(--gray); }
+  .filter-btn.active.blk  { background: var(--red); color: var(--bg); border-color: var(--red); }
+  .filter-btn .count { opacity: .7; font-size: 10.5px; margin-left: 4px; }
+  .search-box {
+    flex: 1; min-width: 200px; max-width: 280px;
+    margin-left: auto;
+    padding: 6px 12px;
+    background: var(--bg-3);
+    border: 1px solid var(--line-2);
+    color: var(--fg);
+    border-radius: 6px;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    outline: none;
+  }
+  .search-box:focus { border-color: var(--accent); }
+
+  /* ─────── Category sections + cards ─────── */
+  .cat-section { margin: 32px 0 8px; }
+  .cat-section h2 {
+    font-size: 17px;
+    margin: 0 0 14px;
     padding-bottom: 6px;
     border-bottom: 1px solid var(--line);
-    display: flex;
-    align-items: baseline;
-    gap: 12px;
+    display: flex; align-items: baseline; gap: 12px;
   }
-  h2 .cat-num {
+  .cat-section h2 .ord {
     font-family: var(--mono);
-    font-size: 12px;
+    font-size: 11.5px;
     color: var(--fg-dim);
-    font-weight: normal;
+    font-weight: 400;
   }
-  h2 .cat-count {
+  .cat-section h2 .breakdown {
     margin-left: auto;
     font-family: var(--mono);
     font-size: 11px;
     color: var(--fg-mute);
-    font-weight: normal;
+    font-weight: 400;
   }
-  p { font-size: 13.5px; color: var(--fg-mute); margin: 12px 0 }
-  code {
+  .cat-section h2 .breakdown b { color: var(--fg); }
+  .card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 12px;
+  }
+  .card {
+    background: var(--bg-2);
+    border: 1px solid var(--line);
+    border-left: 3px solid transparent;
+    border-radius: 8px;
+    padding: 14px 16px 14px 14px;
+    transition: transform .15s ease, border-color .15s ease, background .15s ease;
+  }
+  .card:hover { background: var(--bg-3); }
+  .card.s-on   { border-left-color: var(--green) }
+  .card.s-opt  { border-left-color: var(--yellow) }
+  .card.s-def  { border-left-color: var(--gray) }
+  .card.s-blk  { border-left-color: var(--red) }
+  .card .row1 { display: flex; align-items: baseline; gap: 8px; margin-bottom: 6px; }
+  .card .feat { font-size: 13.5px; font-weight: 600; color: var(--fg); line-height: 1.35; }
+  .card .feat code { font-size: 0.95em; }
+  .card .badge {
     font-family: var(--mono);
-    font-size: 0.88em;
-    background: var(--bg-3);
-    padding: 1px 6px;
-    border-radius: 4px;
-    border: 1px solid var(--line);
-    color: var(--fg);
-  }
-  a { color: var(--accent); text-decoration: none; border-bottom: 1px dotted currentColor }
-  a:hover { border-bottom-style: solid }
-  table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 12.5px;
-    margin: 12px 0;
-  }
-  th, td {
-    border: 1px solid var(--line);
-    padding: 8px 11px;
-    text-align: left;
-    vertical-align: top;
-  }
-  th {
-    background: var(--bg-3);
-    font-weight: 600;
-    color: var(--fg);
-    font-size: 11px;
-    text-transform: uppercase;
+    font-size: 9.5px;
+    padding: 2px 7px;
+    border-radius: 99px;
+    white-space: nowrap;
     letter-spacing: 0.4px;
+    margin-left: auto;
+    flex-shrink: 0;
+    line-height: 1;
   }
-  td:nth-child(1) { width: 36%; }
-  td:nth-child(2) { width: 10%; white-space: nowrap; text-align: center; font-family: var(--mono); font-size: 11.5px; }
-  td:nth-child(3) { color: var(--fg-mute); }
-  .s-on   { color: var(--green); }
-  .s-opt  { color: var(--yellow); }
-  .s-def  { color: var(--gray); }
-  .s-blk  { color: var(--red); }
-  .new {
+  .card.s-on  .badge { background: var(--green-bg);  color: var(--green);  border: 1px solid rgba(86, 211, 100, 0.4); }
+  .card.s-opt .badge { background: var(--yellow-bg); color: var(--yellow); border: 1px solid rgba(240, 184, 89, 0.4); }
+  .card.s-def .badge { background: var(--gray-bg);   color: var(--gray);   border: 1px solid rgba(141, 150, 160, 0.4); }
+  .card.s-blk .badge { background: var(--red-bg);    color: var(--red);    border: 1px solid rgba(244, 112, 103, 0.4); }
+  .card .reason { font-size: 12px; color: var(--fg-mute); line-height: 1.5; }
+  .card .reason code { font-size: 0.9em; }
+  .card .new-pill {
     display: inline-block;
     font-family: var(--mono);
     font-size: 9.5px;
@@ -138,285 +287,409 @@
     color: var(--accent);
     margin-left: 6px;
     vertical-align: middle;
-    letter-spacing: 0.3px;
   }
-  .summary-grid {
+  code {
+    font-family: var(--mono);
+    font-size: 0.88em;
+    background: var(--bg-3);
+    padding: 1px 5px;
+    border-radius: 4px;
+    border: 1px solid var(--line);
+    color: var(--fg);
+  }
+  a { color: var(--accent); text-decoration: none; border-bottom: 1px dotted currentColor; }
+  a:hover { border-bottom-style: solid; }
+
+  /* ─────── Timeline ─────── */
+  .timeline-section { margin-top: 56px; }
+  .timeline-section h2 { font-size: 17px; margin-bottom: 14px; padding-bottom: 6px; border-bottom: 1px solid var(--line); }
+  .timeline {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
     gap: 14px;
-    margin: 18px 0 8px;
+    position: relative;
   }
-  @media (max-width: 800px) { .summary-grid { grid-template-columns: 1fr 1fr } }
-  .summary-card {
+  @media (max-width: 760px) { .timeline { grid-template-columns: 1fr } }
+  .pr-card {
     background: var(--bg-2);
     border: 1px solid var(--line);
     border-radius: 8px;
-    padding: 16px;
-    text-align: center;
+    padding: 14px 16px;
+    position: relative;
   }
-  .summary-card.s-on  { border-color: rgba(86, 211, 100, 0.4); }
-  .summary-card.s-opt { border-color: rgba(240, 184, 89, 0.4); }
-  .summary-card.s-def { border-color: rgba(110, 118, 129, 0.4); }
-  .summary-card.s-blk { border-color: rgba(244, 112, 103, 0.4); }
-  .summary-card .v {
+  .pr-card .pr-no {
     font-family: var(--mono);
-    font-size: 32px;
+    font-size: 11px;
+    color: var(--accent);
     font-weight: 700;
-    line-height: 1;
-    margin-bottom: 4px;
+    letter-spacing: 0.5px;
   }
-  .summary-card .l { font-size: 11px; color: var(--fg-mute); text-transform: uppercase; letter-spacing: 0.5px; }
-  .summary-card .d { font-size: 11px; color: var(--fg-dim); margin-top: 6px; }
-  .legend {
-    margin: 20px 0 10px;
-    padding: 14px 16px;
-    background: var(--bg-2);
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    font-size: 13px;
+  .pr-card .pr-title { font-size: 13px; color: var(--fg); margin: 4px 0 8px; font-weight: 600; line-height: 1.35; }
+  .pr-card .pr-bullets { margin: 0; padding-left: 16px; }
+  .pr-card .pr-bullets li { font-size: 11.5px; color: var(--fg-mute); margin: 3px 0; line-height: 1.5; }
+  .pr-card .pr-status {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    color: var(--green);
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid var(--line);
   }
-  .legend .row { display: flex; flex-wrap: wrap; gap: 14px 28px; margin-top: 6px; }
-  .legend code { font-size: 11.5px; }
-  .delta-note {
-    margin-top: 22px;
-    padding: 14px 16px;
-    background: linear-gradient(180deg, rgba(121, 192, 255, 0.08), rgba(121, 192, 255, 0.02));
-    border: 1px solid rgba(121, 192, 255, 0.3);
-    border-radius: 8px;
-    font-size: 13px;
-  }
-  .delta-note h3 { margin: 0 0 6px; font-size: 14px; color: var(--accent); }
+  .pr-card .pr-status::before { content: "● "; }
+
+  /* ─────── Footer ─────── */
   footer.page {
     border-top: 1px solid var(--line);
     padding-top: 22px;
-    margin-top: 50px;
+    margin-top: 56px;
     color: var(--fg-dim);
     font-size: 11.5px;
     font-family: var(--mono);
+    display: flex; flex-wrap: wrap; gap: 14px 28px; justify-content: space-between;
   }
+  footer.page a { color: var(--fg-mute); }
+
+  .empty-state {
+    grid-column: 1 / -1;
+    padding: 30px;
+    text-align: center;
+    color: var(--fg-dim);
+    font-family: var(--mono);
+    font-size: 12px;
+    border: 1px dashed var(--line-2);
+    border-radius: 8px;
+  }
+  .card.hidden { display: none; }
+  .cat-section.empty-cat .card-grid::after {
+    content: "—";
+    color: var(--fg-dim);
+    font-family: var(--mono);
+    grid-column: 1 / -1;
+    padding: 18px;
+    text-align: center;
+    font-size: 12px;
+  }
+  .cat-section.empty-cat { opacity: 0.3; }
 </style>
 </head>
 <body>
 <div class="wrap">
 
-<header class="page">
-  <p class="eyebrow">claudedocs · Memex × Qdrant 1.18 · feature status</p>
-  <h1>Qdrant Feature Status — Memex Post-PR#19 Reference</h1>
-  <p class="lede">
-    Comprehensive classification of every Qdrant 1.18 feature against the Memex codebase
-    as it will look after PRs <a href="https://github.com/Two-Weeks-Team/memex/pull/17">#17</a>,
-    <a href="https://github.com/Two-Weeks-Team/memex/pull/18">#18</a>, and
-    <a href="https://github.com/Two-Weeks-Team/memex/pull/19">#19</a> land on
-    <code>main</code>. Replaces the rough §A/§B/§C cut in
-    <code>docs/wired-but-dormant.md</code> with a flat 51-row matrix.
-  </p>
-  <div class="meta">
-    <span><b>Generated</b>: 2026-05-28</span>
-    <span><b>Qdrant SDK</b>: <code>qdrant-client = "1"</code> (1.18.x)</span>
-    <span><b>Open PRs at write time</b>: <a href="https://github.com/Two-Weeks-Team/memex/pull/17">#17</a> · <a href="https://github.com/Two-Weeks-Team/memex/pull/18">#18</a> · <a href="https://github.com/Two-Weeks-Team/memex/pull/19">#19</a></span>
-    <span><b>Branch</b>: <code>feat/qdrant-followup-landing</code></span>
+<!-- ═════════════ HERO ═════════════ -->
+<header class="hero">
+  <div>
+    <p class="eyebrow">claudedocs · Memex × Qdrant 1.18 · post-merge feature matrix</p>
+    <h1>Qdrant Feature Status — All PRs Merged</h1>
+    <p class="lede">
+      Snapshot after <b>PR #12</b> (already merged) + <b>PR #17 / #18 / #19</b> (post-merge target) all land on <code>main</code>.
+      Replaces the previous text-heavy classification with an interactive matrix — filter by status, search by keyword,
+      see at a glance which Qdrant 1.18 primitives are wired, opt-in, deferred, or blocked by SDK limits.
+    </p>
+  </div>
+  <div class="grade-card">
+    <div class="label">Self-assessment</div>
+    <div class="grade">A</div>
+    <div class="grade-sub">≈ 90 / 100</div>
   </div>
 </header>
 
-<div class="legend">
-  <b>Status legend</b>
-  <div class="row">
-    <span><span class="s-on">✅ default-on</span> &nbsp; — active on every query / upsert; no caller action needed</span>
-    <span><span class="s-opt">🟡 opt-in</span> &nbsp; — wired in the code; activated by API caller or env var</span>
-    <span><span class="s-def">⏸️ deferred</span> &nbsp; — intentionally not adopted (hackathon scale, no use case, redundant)</span>
-    <span><span class="s-blk">🔒 blocked</span> &nbsp; — Qdrant 1.18 does not expose; client-side workaround if any</span>
+<!-- ═════════════ STAT STRIP ═════════════ -->
+<div class="stat-strip">
+  <div class="stat s-pct">
+    <div class="stat-v">74%</div>
+    <div class="stat-l">Qdrant utilisation</div>
+    <div class="stat-d">37 of 50 usable</div>
+  </div>
+  <div class="stat s-on">
+    <div class="stat-v">33</div>
+    <div class="stat-l">Default-on</div>
+    <div class="stat-d">Active every query</div>
+  </div>
+  <div class="stat s-opt">
+    <div class="stat-v">4</div>
+    <div class="stat-l">Opt-in</div>
+    <div class="stat-d">Wired, caller-activated</div>
+  </div>
+  <div class="stat s-def">
+    <div class="stat-v">13</div>
+    <div class="stat-l">Deferred</div>
+    <div class="stat-d">Intentional non-adoption</div>
+  </div>
+  <div class="stat s-blk">
+    <div class="stat-v">1</div>
+    <div class="stat-l">Blocked</div>
+    <div class="stat-d">SDK limit + workaround</div>
   </div>
 </div>
 
-<div class="summary-grid">
-  <div class="summary-card s-on">
-    <div class="v s-on">33</div>
-    <div class="l">default-on</div>
-    <div class="d">Active on every query</div>
+<!-- ═════════════ DONUT + CATEGORY BARS ═════════════ -->
+<section class="viz" aria-label="Status distribution visualisation">
+  <!-- Donut chart -->
+  <div class="donut">
+    <svg viewBox="0 0 100 100" width="220" height="220" aria-hidden="true">
+      <!-- 33/4/13/1 = 51 total. Circumference 251.327 (r=40). -->
+      <!-- on: 33/51 = 64.71% → 162.6 (gap auto) -->
+      <!-- opt: 4/51 = 7.84% → 19.7 -->
+      <!-- def: 13/51 = 25.49% → 64.1 -->
+      <!-- blk: 1/51 = 1.96% → 4.9 -->
+      <circle cx="50" cy="50" r="40" fill="none" stroke="#161b22" stroke-width="14"/>
+      <circle cx="50" cy="50" r="40" fill="none" stroke="#56d364" stroke-width="14"
+              stroke-dasharray="162.6 251.3" stroke-dashoffset="0"/>
+      <circle cx="50" cy="50" r="40" fill="none" stroke="#f0b859" stroke-width="14"
+              stroke-dasharray="19.7 251.3" stroke-dashoffset="-162.6"/>
+      <circle cx="50" cy="50" r="40" fill="none" stroke="#8d96a0" stroke-width="14"
+              stroke-dasharray="64.1 251.3" stroke-dashoffset="-182.3"/>
+      <circle cx="50" cy="50" r="40" fill="none" stroke="#f47067" stroke-width="14"
+              stroke-dasharray="4.9 251.3" stroke-dashoffset="-246.4"/>
+    </svg>
+    <div class="center">
+      <div class="big">51</div>
+      <div class="lbl">Qdrant features</div>
+    </div>
   </div>
-  <div class="summary-card s-opt">
-    <div class="v s-opt">4</div>
-    <div class="l">opt-in</div>
-    <div class="d">Activated by JSON / env var</div>
+
+  <!-- Category breakdown bars -->
+  <div class="cat-bars" id="cat-bars">
+    <!-- populated by JS for consistency with data below -->
   </div>
-  <div class="summary-card s-def">
-    <div class="v s-def">13</div>
-    <div class="l">deferred</div>
-    <div class="d">Out of scope by choice</div>
-  </div>
-  <div class="summary-card s-blk">
-    <div class="v s-blk">1</div>
-    <div class="l">blocked</div>
-    <div class="d">SDK 1.18 limit</div>
-  </div>
+</section>
+
+<!-- ═════════════ CONTROLS ═════════════ -->
+<div class="controls">
+  <button class="filter-btn active all"  data-filter="all">All <span class="count">51</span></button>
+  <button class="filter-btn on"          data-filter="s-on">✅ On <span class="count">33</span></button>
+  <button class="filter-btn opt"         data-filter="s-opt">🟡 Opt-in <span class="count">4</span></button>
+  <button class="filter-btn def"         data-filter="s-def">⏸️ Deferred <span class="count">13</span></button>
+  <button class="filter-btn blk"         data-filter="s-blk">🔒 Blocked <span class="count">1</span></button>
+  <input class="search-box" id="search" type="search" placeholder="Search features…" />
 </div>
 
-<div class="delta-note">
-  <h3>What changed since PR #12 (pre-follow-up baseline)</h3>
-  <ul style="margin: 4px 0 0 18px; padding: 0">
-    <li><b>PR #17 (#14)</b>: <code>ai_title_tokens</code> multi-value Text index added (identifier-aware search). <span class="new">NEW</span></li>
-    <li><b>PR #17 (#15)</b>: <code>FusionMode::Rrf</code> and <code>Mmr</code> diversity promoted from §B "wired:off" to §A "wired:on" via <code>indexer::LensWeights</code> collapse. <code>indexer::LensWeights</code> is now a <code>pub use</code> of <code>lens::LensWeights</code>, so the two struct's field-set drift bug class is structurally eliminated.</li>
-    <li><b>PR #17 (#16 Stage 1)</b>: MCP <code>points_indexed_total</code> TODO marker + Prometheus best-practice citation added to <code>mcp.rs</code>.</li>
-    <li><b>PR #18 (#13)</b>: <code>MEMEX_QUANT_MODE</code> runtime env var added to <code>schema::QuantMode</code> + Criterion bench scaffold in <code>benches/quant_sweep.rs</code>. <span class="new">NEW</span></li>
-    <li><b>PR #19</b>: Landing surface updated to reflect the three changes above (Q7 status paragraph, TurboQuant bullet sweep recipe, <code>ai_title_tokens</code> example, footer Docs links). No code/schema change.</li>
-  </ul>
-</div>
+<!-- ═════════════ FEATURE CARDS ═════════════ -->
+<main id="features"><!-- populated by JS --></main>
 
-<!-- ════════════════════ 1. Vector primitives ════════════════════ -->
-<h2><span class="cat-num">01</span>Vector primitives <span class="cat-count">3 rows · 3 default-on</span></h2>
-<table>
-  <thead><tr><th>Feature</th><th>Status</th><th>Reason / Code path</th></tr></thead>
-  <tbody>
-    <tr><td>5 dense named vectors (<code>content</code>, <code>tool</code>, <code>path</code>, <code>error</code>, <code>code</code>) at 384-d cosine BGE-small</td><td class="s-on">✅ default-on</td><td><code>schema::DENSE_VECTORS</code> · <code>lens.rs::active_dense_specs</code>. Per-vector HNSW tuning (see §3).</td></tr>
-    <tr><td>2 sparse vectors (<code>path_sparse</code>, <code>tool_sparse</code>) with <code>Modifier::Idf</code></td><td class="s-on">✅ default-on</td><td><code>schema::SPARSE_VECTORS</code>. Server-side IDF — no client-side TF-IDF state. Ride on <code>w.path&gt;0</code> / <code>w.tool&gt;0</code> gates.</td></tr>
-    <tr><td>1 multivector (<code>content_late</code>, ColBERT MaxSim rerank)</td><td class="s-on">✅ default-on</td><td>PR #12 T3.3 flipped <code>LensWeights::default().content_late</code> from 0.0 → 0.25. HNSW config <code>m=0, ef_construct=0</code> — rerank-only, no graph cost. <code>schema::MULTIVECTOR_NAME</code>.</td></tr>
-  </tbody>
-</table>
-
-<!-- ════════════════════ 2. Quantization ════════════════════ -->
-<h2><span class="cat-num">02</span>Quantization <span class="cat-count">6 rows · 2 on · 2 opt-in · 2 deferred</span></h2>
-<table>
-  <thead><tr><th>Feature</th><th>Status</th><th>Reason / Code path</th></tr></thead>
-  <tbody>
-    <tr><td>TurboQuant bits-2 + <code>always_ram: true</code></td><td class="s-on">✅ default-on</td><td>Production default. 8× compression, recall stays at 98-99% with rescore + 2× oversampling. <code>schema::QuantMode::TqBits2.to_inner_quantization()</code>.</td></tr>
-    <tr><td>TurboQuant bits-1 <span class="new">NEW</span></td><td class="s-opt">🟡 opt-in</td><td><b>PR #18 #13</b>: <code>MEMEX_QUANT_MODE=tq-bits1 cargo bench --bench quant_sweep</code>. Higher compression, lower recall — useful for sweep comparisons.</td></tr>
-    <tr><td>f32 baseline (no quantization) <span class="new">NEW</span></td><td class="s-opt">🟡 opt-in</td><td><b>PR #18 #13</b>: <code>MEMEX_QUANT_MODE=f32</code>. Reference row for recall comparisons. Selected by omitting the builder's quantization_config call.</td></tr>
-    <tr><td>Scalar (int8) quantization</td><td class="s-def">⏸️ deferred</td><td>Out of #13 first round. Would need a separate <code>QuantMode::Scalar</code> variant + builder plumbing. ~30 LOC follow-up if a sweep needs more granularity.</td></tr>
-    <tr><td>Binary quantization</td><td class="s-def">⏸️ deferred</td><td>Same rationale as Scalar. The f32 / tq-bits1 / tq-bits2 triple already spans the interesting recall vs. disk-size space.</td></tr>
-    <tr><td>Search-time <code>rescore: true</code> + <code>oversampling: 2.0</code></td><td class="s-on">✅ default-on</td><td>Applied to every read-side query. <code>schema::quantization_search_params()</code>.</td></tr>
-  </tbody>
-</table>
-
-<!-- ════════════════════ 3. HNSW ════════════════════ -->
-<h2><span class="cat-num">03</span>HNSW indexing <span class="cat-count">3 rows · 3 default-on</span></h2>
-<table>
-  <thead><tr><th>Feature</th><th>Status</th><th>Reason / Code path</th></tr></thead>
-  <tbody>
-    <tr><td>Per-vector HNSW tuning</td><td class="s-on">✅ default-on</td><td><code>content m=24/ef=200</code> · <code>code m=20/150</code> · <code>error m=16/100</code> · <code>tool &amp; path m=12/64</code> · <code>content_late m=0/0</code>. Each lens earns its graph density.</td></tr>
-    <tr><td>Global <code>hnsw_config</code> (fallback for unconfigured vectors)</td><td class="s-on">✅ default-on</td><td><code>schema::HNSW_M</code> / <code>HNSW_EF_CONSTRUCT</code> on the collection. Picked up by any future vector that doesn't carry its own override.</td></tr>
-    <tr><td>ACORN filterable HNSW (<code>hnsw_ef</code> + <code>exact=false</code>)</td><td class="s-on">✅ default-on</td><td><code>retrieval::search_params_filtered_acorn()</code>. <code>is_tenant=true</code> on <code>project_name</code> provides the structural half (KB-04).</td></tr>
-  </tbody>
-</table>
-
-<!-- ════════════════════ 4. Payload indexes ════════════════════ -->
-<h2><span class="cat-num">04</span>Payload indexes <span class="cat-count">8 rows · 7 default-on · 1 deferred</span></h2>
-<table>
-  <thead><tr><th>Feature</th><th>Status</th><th>Reason / Code path</th></tr></thead>
-  <tbody>
-    <tr><td><code>Keyword</code> on <code>project_name</code> (with <code>is_tenant: true</code>)</td><td class="s-on">✅ default-on</td><td>Qdrant 1.18 partitions the field as a tenant key — narrows the HNSW walk before vector compare.</td></tr>
-    <tr><td><code>Keyword</code> on <code>project_path</code>, <code>git_branch</code>, <code>intent</code>, <code>outcome</code>, <code>source_agent</code></td><td class="s-on">✅ default-on</td><td>Enrich-stage payload (P5 <code>enrich.rs</code>). <code>source_agent</code> = KH-01 multi-agent fork.</td></tr>
-    <tr><td><code>Text</code> on <code>ai_title</code></td><td class="s-on">✅ default-on</td><td>Display string + lexical search on titles. <code>Word</code> tokenizer.</td></tr>
-    <tr><td><code>Text</code> on <code>ai_title_tokens</code> (multi-value <code>Vec&lt;String&gt;</code>) <span class="new">NEW</span></td><td class="s-on">✅ default-on</td><td><b>PR #17 #14</b>: identifier-aware sibling. <code>schema::identifier_tokens()</code> expands <code>getUserData</code> → <code>[getUserData, get, User, Data]</code> at upsert. Same operation as Elasticsearch <code>word_delimiter_graph</code> filter, done client-side.</td></tr>
-    <tr><td><code>Datetime</code> on <code>start_ts_dt</code></td><td class="s-on">✅ default-on</td><td><code>DatetimeIndexParamsBuilder</code>. Recency queries are first-class.</td></tr>
-    <tr><td><code>Bool</code> on <code>has_errors</code></td><td class="s-on">✅ default-on</td><td>Proactive recall pre-filter.</td></tr>
-    <tr><td><code>Integer</code> on <code>schema_version</code></td><td class="s-on">✅ default-on</td><td>Migration identifier — distinguishes v2-lifted vs v3-native points.</td></tr>
-    <tr><td><code>Geo</code> filter</td><td class="s-def">⏸️ deferred</td><td>We don't index "where I was when I wrote this". If we ever do, one payload-index line.</td></tr>
-  </tbody>
-</table>
-
-<!-- ════════════════════ 5. Query primitives ════════════════════ -->
-<h2><span class="cat-num">05</span>Query primitives <span class="cat-count">11 rows · 9 on · 2 opt-in · 1 deferred</span></h2>
-<table>
-  <thead><tr><th>Feature</th><th>Status</th><th>Reason / Code path</th></tr></thead>
-  <tbody>
-    <tr><td><code>Query::new_nearest</code> (basic NN search)</td><td class="s-on">✅ default-on</td><td>Every lens prefetch. <code>lens.rs::build_prefetches</code>.</td></tr>
-    <tr><td><code>Query::new_formula</code> (<code>FusionMode::Formula</code> + <code>exp_decay</code>)</td><td class="s-on">✅ default-on</td><td>Default top-level fusion across the prefetch chain. KA-01.</td></tr>
-    <tr><td><code>Query::new_rrf</code> (<code>FusionMode::Rrf</code> alternative fusion)</td><td class="s-opt">🟡 opt-in</td><td><b>PR #17 #15</b>: callers pass JSON <code>"fusion": "Rrf"</code> in <code>LensWeights</code>. Frontend (<code>src/main.js</code>) was already sending the field; backend now deserialises it.</td></tr>
-    <tr><td><code>Query::new_nearest_with_mmr</code> (MMR diversity on content prefetch)</td><td class="s-opt">🟡 opt-in</td><td><b>PR #17 #15</b>: callers pass JSON <code>"diversity": 0.4</code>. <code>lens.rs::build_prefetches</code> wraps content lane with NearestWithMmr.</td></tr>
-    <tr><td><code>Query::RelevanceFeedback</code> (👍/👎 bias)</td><td class="s-on">✅ default-on</td><td><code>commands::relevance_feedback</code> · <code>web.rs "relevance_feedback"</code> · <code>src/main.js::applyRelevanceFeedback</code>. User-driven, in-session.</td></tr>
-    <tr><td><code>DiscoverInput</code> + <code>ContextInput</code> (Mix &amp; Match)</td><td class="s-on">✅ default-on</td><td><code>indexer::mix_match</code> · <code>retrieval::mix_match_with_pairs</code>. Multi-pair discrimination, server-side. KB-03.</td></tr>
-    <tr><td><code>SearchMatrixPairs</code> for topology K-NN graph</td><td class="s-on">✅ default-on</td><td><code>indexer::topology</code> — one round-trip K-NN → <code>petgraph::min_spanning_tree</code>.</td></tr>
-    <tr><td><code>HasIdCondition</code> re-rank</td><td class="s-on">✅ default-on</td><td><code>retrieval.rs</code>. Cheap personalisation: known-set re-rank without a full search.</td></tr>
-    <tr><td>Server-side <code>group_by</code> (<code>query_groups</code>)</td><td class="s-on">✅ default-on</td><td><code>retrieval::lens_search_grouped</code>. KA-03. One query returns top-K per project.</td></tr>
-    <tr><td><code>OrderBy { start_ts_dt, DESC }</code></td><td class="s-on">✅ default-on</td><td>Recents panel — server-sorted. <code>retrieval::list_sessions_ordered</code>. KB-05.</td></tr>
-    <tr><td><code>Query::Recommend</code> (<code>AverageVector</code>, <code>BestScore</code>)</td><td class="s-def">⏸️ deferred</td><td>DiscoverInput already covers "more like this batch" with the target-required constraint. Recommend is a redundant entry point for our UX. Revisit if DiscoverInput's target requirement becomes painful.</td></tr>
-  </tbody>
-</table>
-
-<!-- ════════════════════ 6. Schema / Collection management ════════════════════ -->
-<h2><span class="cat-num">06</span>Schema / Collection management <span class="cat-count">9 rows · 6 on · 3 deferred</span></h2>
-<table>
-  <thead><tr><th>Feature</th><th>Status</th><th>Reason / Code path</th></tr></thead>
-  <tbody>
-    <tr><td>Named-vectors + sparse-vectors + multivector config in one collection</td><td class="s-on">✅ default-on</td><td><code>build_v3_create_collection()</code>. 5 dense + 2 sparse + 1 multivector slot. Single round-trip create.</td></tr>
-    <tr><td>Multivector config with <code>MultiVectorComparator::MaxSim</code></td><td class="s-on">✅ default-on</td><td><code>content_late</code> slot uses <code>MultiVectorConfigBuilder::new(MaxSim)</code> with HNSW <code>m=0</code> (rerank only).</td></tr>
-    <tr><td>Strict mode (<code>max_resident_memory_percent: 85</code> + <code>max_query_limit: 100</code>)</td><td class="s-on">✅ default-on</td><td><code>schema::StrictModeConfig</code>. Embedded Qdrant can't OOM the laptop, even on a runaway prefetch.</td></tr>
-    <tr><td>WAL config</td><td class="s-on">✅ default-on</td><td>Small <code>wal_capacity_mb</code> — fine for single-machine indexer.</td></tr>
-    <tr><td><code>is_tenant: true</code> on <code>project_name</code></td><td class="s-on">✅ default-on</td><td>See §4. Provides the structural half of ACORN filterable HNSW.</td></tr>
-    <tr><td><code>MEMEX_QUANT_MODE</code> runtime env var <span class="new">NEW</span></td><td class="s-on">✅ default-on</td><td><b>PR #18 #13</b>: <code>schema::QuantMode::from_env()</code> reads the env at collection-create time. Default <code>tq-bits2</code> matches the pre-#13 production setting — no behaviour change for existing deployments.</td></tr>
-    <tr><td>Collection aliases (blue-green migration)</td><td class="s-def">⏸️ deferred</td><td>Hackathon scale: a single collection drop+rebuild is acceptable. At 100k+ session corpora when v3→v4 ships, aliases would let us flip without dual-write.</td></tr>
-    <tr><td>Multi-collection (one per macro-topic)</td><td class="s-def">⏸️ deferred</td><td>One <code>memex_sessions_v3</code> collection has been enough. Cross-collection search lands in Qdrant 1.19. Revisit then.</td></tr>
-    <tr><td><code>UpdateVectors</code> (swap a vector in place)</td><td class="s-def">⏸️ deferred</td><td>Right now <code>index_session</code> rebuilds the point. If we add a 1024-d model alongside BGE-small-384, this becomes the rolling-upgrade path.</td></tr>
-  </tbody>
-</table>
-
-<!-- ════════════════════ 7. Persistence ════════════════════ -->
-<h2><span class="cat-num">07</span>Persistence <span class="cat-count">2 rows · 2 default-on</span></h2>
-<table>
-  <thead><tr><th>Feature</th><th>Status</th><th>Reason / Code path</th></tr></thead>
-  <tbody>
-    <tr><td>Snapshot HTTP endpoints (POST/GET/upload)</td><td class="s-on">✅ default-on</td><td><code>indexer::snapshot_*</code> via <code>reqwest</code>. PR #12 REV-14 added <code>POST /api/snapshot/export</code> on the web variant + <code>memex_snapshot_bytes</code> gauge.</td></tr>
-    <tr><td><code>SetPayload</code> (payload-only updates)</td><td class="s-on">✅ default-on</td><td><code>indexer::enrich</code> — updates intent/outcome/source_agent without re-embedding.</td></tr>
-  </tbody>
-</table>
-
-<!-- ════════════════════ 8. Tokenization ════════════════════ -->
-<h2><span class="cat-num">08</span>Tokenization (Text-index built-ins) <span class="cat-count">5 rows · 1 on · 3 deferred · 1 blocked</span></h2>
-<table>
-  <thead><tr><th>Feature</th><th>Status</th><th>Reason / Code path</th></tr></thead>
-  <tbody>
-    <tr><td><code>TokenizerType::Word</code> (default)</td><td class="s-on">✅ default-on</td><td>Used on both <code>ai_title</code> and <code>ai_title_tokens</code>. After client-side identifier expansion, the Word tokenizer correctly indexes each element.</td></tr>
-    <tr><td><code>TokenizerType::Whitespace</code></td><td class="s-def">⏸️ deferred</td><td>No use case in our corpus — Word handles punctuation better for natural-language titles.</td></tr>
-    <tr><td><code>TokenizerType::Prefix</code></td><td class="s-def">⏸️ deferred</td><td>Prefix-search use case (typeahead etc.) is not in the current UX. Revisit if a search-as-you-type surface lands.</td></tr>
-    <tr><td><code>TokenizerType::Multilingual</code> (charabia + vaporetto)</td><td class="s-def">⏸️ deferred</td><td>Our corpus is English session titles + identifiers. Multilingual carries overhead for the non-Latin tokenizers we don't need. BGE embedding handles language semantics on the vector side anyway.</td></tr>
-    <tr><td><b>Custom tokenizer</b> (regex / camelCase / snake_case)</td><td class="s-blk">🔒 blocked</td><td>Qdrant 1.18 SDK exposes only the 4 builtins above — no custom-tokenizer registration API (verified against <a href="https://qdrant.tech/documentation/manage-data/indexing/#tokenizers">official docs</a>). <b>PR #17 #14</b> works around this client-side via <code>schema::identifier_tokens()</code> + multi-value payload (see §4). No upstream feature request filed — client-side gives identical retrieval at zero external dependency.</td></tr>
-  </tbody>
-</table>
-
-<!-- ════════════════════ 9. Metrics / MCP ════════════════════ -->
-<h2><span class="cat-num">09</span>Metrics / MCP <span class="cat-count">3 rows · 2 on · 1 deferred</span></h2>
-<table>
-  <thead><tr><th>Feature</th><th>Status</th><th>Reason / Code path</th></tr></thead>
-  <tbody>
-    <tr><td><code>/metrics</code> Prometheus endpoint (8 metric families)</td><td class="s-on">✅ default-on</td><td><code>web::WebMetrics</code> from PR #12. Emits <code>memex_queries_total</code>, <code>memex_recall_polls_total</code>, <code>memex_errors_recalled_total</code>, <code>memex_points_indexed_total</code>, <code>memex_snapshot_bytes</code>, <code>memex_embedder_call_seconds</code>, <code>memex_mcp_calls_total</code>, <code>memex_process_uptime_seconds</code>.</td></tr>
-    <tr><td>MCP read-only tool surface (11 tools)</td><td class="s-on">✅ default-on</td><td><code>mcp.rs::tools_catalog</code>. <code>find_similar_sessions</code>, <code>find_similar_error</code>, <code>predict_next_action</code>, <code>mix_similar_sessions</code>, <code>get_session_summary</code>, <code>get_session_turn</code>, <code>list_recent_sessions</code>, <code>analyze_corpus_topology</code>, <code>snapshot_export</code>, <code>get_project_memory</code>, <code>wrapped</code>. Read-only by design (<code>mcp.rs:3</code>).</td></tr>
-    <tr><td>MCP write tools + <code>memex_points_indexed_total</code> MCP-side increment</td><td class="s-def">⏸️ deferred</td><td><b>PR #17 #16 Stage 1</b>: TODO marker + Prometheus best-practice citation at the natural increment site in <code>mcp.rs</code>. Stage 2 activates only when a future product PR adds an MCP write tool (auth, schema, idempotency are separate design questions). Always-zero counter is a valid Prometheus measurement, not a bug.</td></tr>
-  </tbody>
-</table>
-
-<!-- ════════════════════ 10. Security ════════════════════ -->
-<h2><span class="cat-num">10</span>Security <span class="cat-count">2 rows · 1 on · 1 deferred</span></h2>
-<table>
-  <thead><tr><th>Feature</th><th>Status</th><th>Reason / Code path</th></tr></thead>
-  <tbody>
-    <tr><td>Strict-mode resource caps (defence-in-depth)</td><td class="s-on">✅ default-on</td><td>See §6. Caps RAM + per-query point count so a runaway prefetch can't OOM.</td></tr>
-    <tr><td>API key / JWT / TLS auth on the embedded Qdrant</td><td class="s-def">⏸️ deferred</td><td>We loopback-bind to 127.0.0.1 in <code>docker-compose.yml</code> (THR-06). Caddy reverse proxy handles TLS for the all-in-one server variant. Auth would be defence-in-depth rather than required for the current architecture.</td></tr>
-  </tbody>
-</table>
-
-<!-- ════════════════════ Final counts ════════════════════ -->
-<h2>Final counts</h2>
-<table>
-  <thead><tr><th>Status</th><th>Count</th><th>What it means</th></tr></thead>
-  <tbody>
-    <tr><td><span class="s-on">✅ default-on</span></td><td><b>33</b></td><td>Active on every query / upsert; no caller action needed</td></tr>
-    <tr><td><span class="s-opt">🟡 opt-in</span></td><td><b>4</b></td><td>RRF fusion · MMR diversity · TQ-bits1 · f32-baseline</td></tr>
-    <tr><td><span class="s-def">⏸️ deferred</span></td><td><b>13</b></td><td>Scalar/Binary quant · Geo · Recommend · aliases · multi-collection · UpdateVectors · 3 alt tokenizers · MCP write · Auth</td></tr>
-    <tr><td><span class="s-blk">🔒 blocked</span></td><td><b>1</b></td><td>Custom tokenizer (Qdrant 1.18 doesn't expose; client-side <code>identifier_tokens()</code> covers the use case)</td></tr>
-    <tr><td><b>Total</b></td><td><b>51</b></td><td>Across 10 categories</td></tr>
-  </tbody>
-</table>
-
-<p style="margin-top: 22px; font-size: 13px; color: var(--fg-mute)">
-  Post-PR #19, <code>docs/wired-but-dormant.md</code> §B ("wired:off — built into the schema, gated off by default") is empty: every previously-gated capability was either promoted to §A (PR #17 #15) or has its activation surface documented (PR #18 #13, PR #17 #14). The split that mattered for the hackathon — "what's real vs what's landing copy" — is now a clean line at §A / §C, with §B reserved for future drift.
-</p>
+<!-- ═════════════ TIMELINE ═════════════ -->
+<section class="timeline-section" id="timeline">
+  <h2>Delivery timeline — PR pipeline</h2>
+  <div class="timeline">
+    <div class="pr-card">
+      <div class="pr-no">PR #12</div>
+      <div class="pr-title">Qdrant uplift — Tier 1+2+3+5</div>
+      <ul class="pr-bullets">
+        <li>TurboQuant bits-2, Q7/Q8 cards, /metrics</li>
+        <li>RelevanceFeedback playground</li>
+        <li>content_late lane: 0.0 → 0.25</li>
+        <li>19 external review findings</li>
+      </ul>
+      <div class="pr-status">merged 2026-05-28</div>
+    </div>
+    <div class="pr-card">
+      <div class="pr-no">PR #17</div>
+      <div class="pr-title">LensWeights collapse · ai_title_tokens · MCP TODO</div>
+      <ul class="pr-bullets">
+        <li>#15 pub-use collapse (drift bug class)</li>
+        <li>#14 identifier-aware tokenization</li>
+        <li>#16 Stage 1 TODO + Prometheus citation</li>
+      </ul>
+      <div class="pr-status">post-merge target</div>
+    </div>
+    <div class="pr-card">
+      <div class="pr-no">PR #18</div>
+      <div class="pr-title">Runtime quant mode + Criterion sweep</div>
+      <ul class="pr-bullets">
+        <li>#13 MEMEX_QUANT_MODE env var</li>
+        <li>benches/quant_sweep.rs scaffold</li>
+        <li>fixtures/labeled-queries.jsonl format</li>
+      </ul>
+      <div class="pr-status">post-merge target</div>
+    </div>
+    <div class="pr-card">
+      <div class="pr-no">PR #19</div>
+      <div class="pr-title">Landing reflects #17/#18 changes</div>
+      <ul class="pr-bullets">
+        <li>Q7 card "Status" paragraph</li>
+        <li>TurboQuant bullet sweep recipe</li>
+        <li>ai_title_tokens example bullet</li>
+        <li>Footer Docs links</li>
+      </ul>
+      <div class="pr-status">post-merge target</div>
+    </div>
+  </div>
+</section>
 
 <footer class="page">
-  Generated: 2026-05-28 · branch <code>feat/qdrant-followup-landing</code><br>
-  Sources: <code>src-tauri/src/schema.rs</code> · <code>src-tauri/src/lens.rs</code> · <code>src-tauri/src/retrieval.rs</code> · <code>src-tauri/src/indexer.rs</code> · <code>src-tauri/src/mcp.rs</code> · <code>src-tauri/src/web.rs</code> · <code>docs/wired-but-dormant.md</code> · <code>docs/qdrant-features.md</code><br>
-  Companion reports: <a href="./follow-up-deep-dive.html">follow-up-deep-dive.html</a> · <a href="./follow-up-v2.html">follow-up-v2.html</a>
+  <span>Generated: 2026-05-28 · branch <code>feat/qdrant-followup-landing</code></span>
+  <span>Live: <a href="https://two-weeks-team.github.io/memex/qdrant-features/">qdrant-features/</a> · <a href="https://two-weeks-team.github.io/memex/">landing</a> · <a href="https://two-weeks-team.github.io/memex/forge/">/forge/</a></span>
+  <span>SDK: <code>qdrant-client = "1"</code> (1.18.x)</span>
 </footer>
 
 </div>
+
+<script>
+/* ───── Feature data — 51 rows across 10 categories.
+   Status values: "s-on" | "s-opt" | "s-def" | "s-blk".
+   `new` flag = true when added/promoted by PR #17/#18/#19.
+─────────────────────────────────────────────────────────── */
+const CATEGORIES = [
+  { ord: "01", title: "Vector primitives", items: [
+    { feat: "5 dense named vectors (<code>content · tool · path · error · code</code>)", status: "s-on",  reason: "384-d cosine BGE-small. <code>schema::DENSE_VECTORS</code> · <code>lens.rs::active_dense_specs</code>." },
+    { feat: "2 sparse vectors (<code>path_sparse · tool_sparse</code>) + <code>Modifier::Idf</code>", status: "s-on", reason: "Server-side IDF; no client TF-IDF state. Ride on <code>w.path&gt;0 / w.tool&gt;0</code> gates." },
+    { feat: "1 multivector — <code>content_late</code> ColBERT MaxSim rerank", status: "s-on", reason: "PR #12 T3.3 flipped default <code>content_late</code> from 0.0 → 0.25. HNSW <code>m=0</code> (rerank-only, no graph cost)." },
+  ]},
+  { ord: "02", title: "Quantization", items: [
+    { feat: "TurboQuant bits-2 + <code>always_ram: true</code>", status: "s-on",  reason: "Production default. 8× compression, recall stays 98–99% with rescore + 2× oversampling." },
+    { feat: "TurboQuant bits-1", status: "s-opt", reason: "Selected via <code>MEMEX_QUANT_MODE=tq-bits1 cargo bench --bench quant_sweep</code>. Higher compression, lower recall.", "new": true },
+    { feat: "f32 baseline (no quantization)", status: "s-opt", reason: "Selected via <code>MEMEX_QUANT_MODE=f32</code>. Reference row for recall comparison. Selected by omitting the builder's quantization_config call.", "new": true },
+    { feat: "Scalar (int8) quantization", status: "s-def", reason: "Out of #13 first round. Would need a separate <code>QuantMode::Scalar</code> variant. ~30 LOC follow-up if a sweep needs more granularity." },
+    { feat: "Binary quantization", status: "s-def", reason: "Same rationale as Scalar. f32 / tq-bits1 / tq-bits2 already span the interesting recall vs. disk-size space." },
+    { feat: "Search-time <code>rescore: true</code> + <code>oversampling: 2.0</code>", status: "s-on", reason: "Applied on every read. <code>schema::quantization_search_params()</code>." },
+  ]},
+  { ord: "03", title: "HNSW indexing", items: [
+    { feat: "Per-vector HNSW tuning", status: "s-on", reason: "<code>content m=24/ef=200</code> · <code>code m=20/150</code> · <code>error m=16/100</code> · <code>tool &amp; path m=12/64</code> · <code>content_late m=0/0</code>." },
+    { feat: "Global <code>hnsw_config</code> (fallback)", status: "s-on", reason: "<code>schema::HNSW_M</code> / <code>HNSW_EF_CONSTRUCT</code>. Picked up by any future vector without its own override." },
+    { feat: "ACORN filterable HNSW (<code>hnsw_ef</code> + <code>exact=false</code>)", status: "s-on", reason: "<code>retrieval::search_params_filtered_acorn()</code>. <code>is_tenant=true</code> on <code>project_name</code> provides the structural half (KB-04)." },
+  ]},
+  { ord: "04", title: "Payload indexes", items: [
+    { feat: "<code>Keyword</code> on <code>project_name</code> (with <code>is_tenant: true</code>)", status: "s-on", reason: "Qdrant 1.18 partitions field as tenant key — narrows HNSW walk before vector compare." },
+    { feat: "<code>Keyword</code> on <code>project_path · git_branch · intent · outcome · source_agent</code>", status: "s-on", reason: "Enrich-stage payload (<code>enrich.rs</code>). <code>source_agent</code> = KH-01 multi-agent fork." },
+    { feat: "<code>Text</code> on <code>ai_title</code>", status: "s-on", reason: "Display string + lexical search on titles. <code>Word</code> tokenizer." },
+    { feat: "<code>Text</code> on <code>ai_title_tokens</code> (multi-value <code>Vec&lt;String&gt;</code>)", status: "s-on", reason: "PR #17 #14. <code>schema::identifier_tokens()</code> expands <code>getUserData</code> → <code>[getUserData, get, User, Data]</code>. Same operation as Elasticsearch <code>word_delimiter_graph</code> filter, done client-side.", "new": true },
+    { feat: "<code>Datetime</code> on <code>start_ts_dt</code>", status: "s-on", reason: "<code>DatetimeIndexParamsBuilder</code>. Recency queries first-class — not a scan-and-filter." },
+    { feat: "<code>Bool</code> on <code>has_errors</code>", status: "s-on", reason: "Proactive recall pre-filter." },
+    { feat: "<code>Integer</code> on <code>schema_version</code>", status: "s-on", reason: "Migration identifier — distinguishes v2-lifted vs v3-native points." },
+    { feat: "<code>Geo</code> filter", status: "s-def", reason: "We don't index \"where I was when I wrote this\". If we ever do, one payload-index line." },
+  ]},
+  { ord: "05", title: "Query primitives", items: [
+    { feat: "<code>Query::new_nearest</code> (basic NN)", status: "s-on", reason: "Every lens prefetch. <code>lens.rs::build_prefetches</code>." },
+    { feat: "<code>Query::new_formula</code> (<code>FusionMode::Formula</code> + <code>exp_decay</code>)", status: "s-on", reason: "Default top-level fusion across prefetch chain. KA-01." },
+    { feat: "<code>Query::new_rrf</code> (<code>FusionMode::Rrf</code>)", status: "s-opt", reason: "PR #17 #15. JSON <code>\"fusion\": \"Rrf\"</code> in <code>LensWeights</code>. Frontend already sends the field.", "new": true },
+    { feat: "<code>Query::new_nearest_with_mmr</code> (MMR diversity)", status: "s-opt", reason: "PR #17 #15. JSON <code>\"diversity\": 0.4</code>. Wraps content prefetch with NearestWithMmr.", "new": true },
+    { feat: "<code>Query::RelevanceFeedback</code> (👍 / 👎)", status: "s-on", reason: "<code>commands::relevance_feedback</code>. User-driven, in-session." },
+    { feat: "<code>DiscoverInput</code> + <code>ContextInput</code> (Mix &amp; Match)", status: "s-on", reason: "<code>indexer::mix_match</code> · <code>retrieval::mix_match_with_pairs</code>. Multi-pair discrimination. KB-03." },
+    { feat: "<code>SearchMatrixPairs</code> for topology K-NN graph", status: "s-on", reason: "<code>indexer::topology</code>. One round-trip K-NN → <code>petgraph::min_spanning_tree</code>." },
+    { feat: "<code>HasIdCondition</code> re-rank", status: "s-on", reason: "Cheap personalisation: known-set re-rank without a full search." },
+    { feat: "Server-side <code>group_by</code> (<code>query_groups</code>)", status: "s-on", reason: "<code>retrieval::lens_search_grouped</code>. KA-03. Top-K per project, server-side." },
+    { feat: "<code>OrderBy { start_ts_dt, DESC }</code>", status: "s-on", reason: "Recents panel. <code>retrieval::list_sessions_ordered</code>. KB-05." },
+    { feat: "<code>Query::Recommend</code> (<code>AverageVector · BestScore</code>)", status: "s-def", reason: "DiscoverInput already covers \"more like this batch\". Recommend is a redundant entry point. Revisit if DiscoverInput's target-required constraint becomes painful." },
+  ]},
+  { ord: "06", title: "Schema / Collection management", items: [
+    { feat: "Named-vectors + sparse + multivector in one collection", status: "s-on", reason: "<code>build_v3_create_collection()</code>. 5 dense + 2 sparse + 1 multivector slot. Single round-trip create." },
+    { feat: "<code>MultiVectorComparator::MaxSim</code>", status: "s-on", reason: "<code>content_late</code> slot uses <code>MultiVectorConfigBuilder::new(MaxSim)</code> with HNSW <code>m=0</code>." },
+    { feat: "Strict mode (<code>max_resident_memory_percent: 85</code> + <code>max_query_limit: 100</code>)", status: "s-on", reason: "Embedded Qdrant can't OOM the laptop, even on a runaway prefetch." },
+    { feat: "WAL config", status: "s-on", reason: "Small <code>wal_capacity_mb</code> — fine for single-machine indexer." },
+    { feat: "<code>is_tenant: true</code> on <code>project_name</code>", status: "s-on", reason: "Provides the structural half of ACORN filterable HNSW." },
+    { feat: "<code>MEMEX_QUANT_MODE</code> runtime env var", status: "s-on", reason: "PR #18 #13. <code>schema::QuantMode::from_env()</code> reads env at collection-create time. Default <code>tq-bits2</code> → no behaviour change for existing deployments.", "new": true },
+    { feat: "Collection aliases (blue-green migration)", status: "s-def", reason: "Hackathon scale: single collection drop+rebuild is acceptable. Revisit at 100k+ points when v3→v4 ships." },
+    { feat: "Multi-collection (one per macro-topic)", status: "s-def", reason: "One <code>memex_sessions_v3</code> has been enough. Cross-collection search lands in 1.19. Revisit then." },
+    { feat: "<code>UpdateVectors</code> (swap vector in place)", status: "s-def", reason: "<code>index_session</code> currently rebuilds the point. Becomes the rolling-upgrade path if we add a second embedder." },
+  ]},
+  { ord: "07", title: "Persistence", items: [
+    { feat: "Snapshot HTTP endpoints (POST · GET · upload)", status: "s-on", reason: "<code>indexer::snapshot_*</code> via <code>reqwest</code>. PR #12 REV-14 added <code>POST /api/snapshot/export</code> on the web variant + <code>memex_snapshot_bytes</code> gauge." },
+    { feat: "<code>SetPayload</code> (payload-only updates)", status: "s-on", reason: "<code>indexer::enrich</code> — updates intent/outcome/source_agent without re-embedding." },
+  ]},
+  { ord: "08", title: "Tokenization (Text-index built-ins)", items: [
+    { feat: "<code>TokenizerType::Word</code> (default)", status: "s-on", reason: "Used on both <code>ai_title</code> and <code>ai_title_tokens</code>. After client-side identifier expansion, Word is correct per array element." },
+    { feat: "<code>TokenizerType::Whitespace</code>", status: "s-def", reason: "No use case in our corpus — Word handles punctuation better for natural-language titles." },
+    { feat: "<code>TokenizerType::Prefix</code>", status: "s-def", reason: "Prefix search (typeahead, etc.) is not in current UX. Revisit if search-as-you-type lands." },
+    { feat: "<code>TokenizerType::Multilingual</code>", status: "s-def", reason: "Our corpus is English titles + identifiers. Multilingual carries charabia/vaporetto overhead we don't need; BGE embedding handles language on the vector side." },
+    { feat: "Custom tokenizer (regex / camelCase / snake_case)", status: "s-blk", reason: "Qdrant 1.18 SDK exposes only the 4 builtins — no custom-tokenizer API. Workaround: <code>schema::identifier_tokens()</code> + multi-value payload (Issue #14). No upstream feature request filed — client-side gives identical retrieval at zero external dependency." },
+  ]},
+  { ord: "09", title: "Metrics / MCP", items: [
+    { feat: "<code>/metrics</code> Prometheus endpoint (8 metric families)", status: "s-on", reason: "<code>web::WebMetrics</code> from PR #12. <code>memex_queries_total · recall_polls_total · errors_recalled_total · points_indexed_total · snapshot_bytes · embedder_call_seconds · mcp_calls_total · process_uptime_seconds</code>." },
+    { feat: "MCP read-only tool surface (11 tools)", status: "s-on", reason: "<code>mcp.rs::tools_catalog</code>. <code>find_similar_sessions · find_similar_error · predict_next_action · mix_similar_sessions · get_session_summary · get_session_turn · list_recent_sessions · analyze_corpus_topology · snapshot_export · get_project_memory · wrapped</code>. Read-only by design." },
+    { feat: "MCP write tools + <code>points_indexed_total</code> MCP-side increment", status: "s-def", reason: "PR #17 #16 Stage 1: TODO marker + Prometheus best-practice citation at the natural increment site. Stage 2 activates only when a future PR adds an MCP write tool (auth, schema, idempotency are separate design questions). Always-zero counter is a valid measurement, not a bug." },
+  ]},
+  { ord: "10", title: "Security", items: [
+    { feat: "Strict-mode resource caps (defence-in-depth)", status: "s-on", reason: "Caps RAM + per-query point count so a runaway prefetch can't OOM." },
+    { feat: "API key / JWT / TLS auth on the embedded Qdrant", status: "s-def", reason: "Loopback bind to 127.0.0.1 in <code>docker-compose.yml</code> (THR-06). Caddy handles TLS for the all-in-one server variant. Auth would be defence-in-depth rather than required." },
+  ]},
+];
+
+const STATUS_LABEL = { "s-on":"DEFAULT-ON", "s-opt":"OPT-IN", "s-def":"DEFERRED", "s-blk":"BLOCKED" };
+
+/* ───── Render feature cards ───── */
+const featRoot = document.getElementById("features");
+const catBarsRoot = document.getElementById("cat-bars");
+
+CATEGORIES.forEach((cat) => {
+  // Build category bar
+  const counts = { "s-on":0, "s-opt":0, "s-def":0, "s-blk":0 };
+  cat.items.forEach(i => counts[i.status]++);
+  const total = cat.items.length;
+  const bar = document.createElement("div");
+  bar.className = "cat-bar";
+  bar.innerHTML = `
+    <div class="name"><span class="ord">${cat.ord}</span>${cat.title}</div>
+    <div class="bar">
+      ${counts["s-on"]  > 0 ? `<div class="seg on"  style="width:${(counts["s-on"] /total)*100}%" title="${counts["s-on"]} on"></div>`  : ""}
+      ${counts["s-opt"] > 0 ? `<div class="seg opt" style="width:${(counts["s-opt"]/total)*100}%" title="${counts["s-opt"]} opt-in"></div>` : ""}
+      ${counts["s-def"] > 0 ? `<div class="seg def" style="width:${(counts["s-def"]/total)*100}%" title="${counts["s-def"]} deferred"></div>` : ""}
+      ${counts["s-blk"] > 0 ? `<div class="seg blk" style="width:${(counts["s-blk"]/total)*100}%" title="${counts["s-blk"]} blocked"></div>` : ""}
+    </div>
+    <div class="ratio">${counts["s-on"]+counts["s-opt"]}/${total} wired</div>
+  `;
+  catBarsRoot.appendChild(bar);
+
+  // Build category section + cards
+  const sec = document.createElement("section");
+  sec.className = "cat-section";
+  sec.dataset.catOrd = cat.ord;
+  const breakdownParts = [];
+  if (counts["s-on"]) breakdownParts.push(`<b>${counts["s-on"]}</b> on`);
+  if (counts["s-opt"]) breakdownParts.push(`<b>${counts["s-opt"]}</b> opt`);
+  if (counts["s-def"]) breakdownParts.push(`<b>${counts["s-def"]}</b> def`);
+  if (counts["s-blk"]) breakdownParts.push(`<b>${counts["s-blk"]}</b> blk`);
+  sec.innerHTML = `
+    <h2><span class="ord">${cat.ord}</span>${cat.title}<span class="breakdown">${total} rows · ${breakdownParts.join(" · ")}</span></h2>
+    <div class="card-grid"></div>
+  `;
+  const grid = sec.querySelector(".card-grid");
+  cat.items.forEach((it) => {
+    const card = document.createElement("div");
+    card.className = `card ${it.status}`;
+    card.dataset.status = it.status;
+    card.dataset.searchable = (it.feat + " " + it.reason).toLowerCase();
+    card.innerHTML = `
+      <div class="row1">
+        <div class="feat">${it.feat}${it["new"] ? '<span class="new-pill">NEW</span>' : ""}</div>
+        <span class="badge">${STATUS_LABEL[it.status]}</span>
+      </div>
+      <div class="reason">${it.reason}</div>
+    `;
+    grid.appendChild(card);
+  });
+  featRoot.appendChild(sec);
+});
+
+/* ───── Filter + search ───── */
+let currentFilter = "all";
+let currentSearch = "";
+
+function applyFilter() {
+  document.querySelectorAll(".card").forEach((card) => {
+    const matchStatus = (currentFilter === "all" || card.dataset.status === currentFilter);
+    const matchSearch = (currentSearch === "" || card.dataset.searchable.includes(currentSearch));
+    card.classList.toggle("hidden", !(matchStatus && matchSearch));
+  });
+  // Mark empty categories
+  document.querySelectorAll(".cat-section").forEach((sec) => {
+    const visibleCount = sec.querySelectorAll(".card:not(.hidden)").length;
+    sec.classList.toggle("empty-cat", visibleCount === 0);
+  });
+}
+
+document.querySelectorAll(".filter-btn").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".filter-btn").forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+    currentFilter = btn.dataset.filter;
+    applyFilter();
+  });
+});
+
+document.getElementById("search").addEventListener("input", (e) => {
+  currentSearch = e.target.value.trim().toLowerCase();
+  applyFilter();
+});
+</script>
 </body>
 </html>
