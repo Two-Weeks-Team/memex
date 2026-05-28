@@ -2050,6 +2050,7 @@ POST /collections/{c}/snapshots/upload?priority=snapshot</pre>
         </header>
         <p class="qd-what"><b>What it is.</b> Five Qdrant 1.18 primitives folded into a single query plan: a <code>prefetch</code> chain (one lane per non-zero weight — 5 dense + 2 sparse by default), fused server-side via <code>Query::new_formula</code> with <code>exp_decay</code> over <code>start_ts_dt</code>, optionally diversified by <code>MMR</code>, optionally biased by <code>Query::RelevanceFeedback</code> from 👍/👎 on prior results. Alternative fusion: <code>FusionMode::Rrf</code> (rank-based).</p>
         <p class="qd-why"><b>Why it matters.</b> The naive approach is to fetch 1 000 raw points and re-rank in Rust. That hammers IO. Server-side Formula folds fusion + recency + diversity + feedback into one query plan; the client only sees the final top-K. One round-trip, no client re-score.</p>
+        <p class="qd-why"><b>Status.</b> The MMR diversity knob and RRF fusion alternative are <b>exposed on the public JSON API</b> (web + Tauri + MCP) — pass <code>"diversity": 0.4</code> or <code>"fusion": "Rrf"</code> inside <code>LensWeights</code> and the backend honours them. Defaults stay conservative (<code>FusionMode::Formula</code>, <code>diversity: None</code>) so existing callers see no change. The two knobs were promoted from <em>wired:off</em> to <em>wired:on</em> when <code>indexer::LensWeights</code> was collapsed into the canonical <code>lens::LensWeights</code> (a single struct, no more lossy <code>From</code> adapter).</p>
 <pre>QueryPointsBuilder::new(<span class="s">"memex_sessions_v3"</span>)
   .add_prefetch(<span class="c">/* 5 dense + 2 sparse lanes */</span>)
   .query(Query::new_formula(formula_with_exp_decay))
@@ -2158,12 +2159,12 @@ VectorsConfig { multivectors: { <span class="s">"content_late"</span>: MultiVect
       <h3>And the small things that make it fast</h3>
       <ul class="qd-bullets" data-stagger>
         <li><b>Deterministic point ids.</b> <code>point_id = uuid_v5(session_id)</code> — upserts are idempotent; rebuilds don't duplicate.</li>
-        <li><b>TurboQuant bits-2 + 2× oversampling + rescore.</b> 2-bit per dim · 2× oversampling guard · rescore on. The compression is real; the accuracy holds. Each of the five lenses still has its own HNSW graph — recall &amp; latency tuned per lens.</li>
+        <li><b>TurboQuant bits-2 + 2× oversampling + rescore.</b> 2-bit per dim · 2× oversampling guard · rescore on. The compression is real; the accuracy holds. Each of the five lenses still has its own HNSW graph — recall &amp; latency tuned per lens. Sweep configurations at runtime via <code>MEMEX_QUANT_MODE=f32|tq-bits1|tq-bits2 cargo bench --bench quant_sweep</code> — no source edit, no rebuild between rows.</li>
         <li><b>Per-vector HNSW tuning.</b> <code>content m=24/ef=200</code> · <code>code m=20/150</code> · <code>error m=16/100</code> · <code>tool &amp; path m=12/64</code> — each lens gets its own graph density, paid for what it earns.</li>
         <li><b>Server-side <code>group_by</code>.</b> One query returns top-K results per project — no client-side bucketing pass over the result list.</li>
         <li><b>Tenant-flagged keyword index.</b> <code>project_name</code> is created with <code>is_tenant: true</code> — Qdrant optimizes the field as a partition key, so per-project queries narrow before the HNSW walk.</li>
         <li><b>Datetime payload index.</b> <code>start_ts_dt</code> is built via <code>DatetimeIndexParamsBuilder</code> — recency queries (<em>"sessions since last week"</em>) are first-class, not a scan-and-filter.</li>
-        <li><b>Full-text payload index.</b> <code>ai_title</code> is indexed with <code>FieldType::Text</code> — lexical search on session titles runs alongside vector search, in one call.</li>
+        <li><b>Full-text payload index.</b> <code>ai_title</code> is indexed with <code>FieldType::Text</code> — lexical search on session titles runs alongside vector search, in one call. A sibling <code>ai_title_tokens</code> multi-value index expands <code>getUserData</code> → <code>[getUserData, get, User, Data]</code> at index time, so identifier-shaped titles match camelCase / snake_case queries (Qdrant 1.18 ships four builtin tokenizers and no custom-tokenizer API; we split client-side via <code>schema::identifier_tokens()</code>, same operation as Elasticsearch's <code>word_delimiter_graph</code> filter).</li>
         <li><b>Server-side FormulaQuery.</b> Prefetches carry per-vector recency decay, applied server-side — no client round-trip to re-score.</li>
         <li><b>Strict-mode resource caps.</b> <code>max_resident_memory_percent: 85</code> + <code>max_query_limit: 100</code> — the embedded Qdrant can't OOM your laptop, even on a runaway prefetch.</li>
         <li><b><code>SetPayload</code> + <code>HasIdCondition</code>.</b> Payload-only updates skip the embedder (fast metadata edits); known-set re-rank without a full search (cheap personalization paths).</li>
@@ -2523,6 +2524,8 @@ VectorsConfig { multivectors: { <span class="s">"content_late"</span>: MultiVect
         <ul>
           <li><a href="https://github.com/Two-Weeks-Team/memex/blob/main/docs/architecture.md" target="_blank" rel="noopener">Architecture</a></li>
           <li><a href="https://github.com/Two-Weeks-Team/memex/blob/main/docs/qdrant-features.md" target="_blank" rel="noopener">Qdrant features</a></li>
+          <li><a href="https://github.com/Two-Weeks-Team/memex/blob/main/docs/wired-but-dormant.md" target="_blank" rel="noopener">Wired-but-dormant</a></li>
+          <li><a href="https://github.com/Two-Weeks-Team/memex/blob/main/docs/benchmarks.md" target="_blank" rel="noopener">Benchmarks</a></li>
           <li><a href="https://github.com/Two-Weeks-Team/memex/blob/main/docs/agent-integration.md" target="_blank" rel="noopener">Agent integration</a></li>
           <li><a href="https://github.com/Two-Weeks-Team/memex/blob/main/deploy/web/README.md" target="_blank" rel="noopener">Server / Docker</a></li>
         </ul>
