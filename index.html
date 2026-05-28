@@ -1,921 +1,1031 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Memex — Your AI session history as a navigable spatial memory</title>
-  <meta name="description" content="Time Machine for ~/.claude/projects. Six Qdrant primitives wired into one non-chatbot UI. Built for Qdrant Vector Space Day 2026." />
-  <meta property="og:title" content="Memex — non-chatbot UI for AI session history" />
-  <meta property="og:description" content="Six Qdrant primitives. Zero LLM at runtime. Built for VSD 2026." />
-  <meta property="og:type" content="website" />
-  <meta property="og:url" content="https://sgwannabe.github.io/memex/" />
-  <link rel="icon" type="image/png" href="docs/img/topology.png" />
-  <style>
-    :root {
-      --bg-0: #0f0f12;
-      --bg-1: #16161a;
-      --bg-2: #1c1c1e;
-      --bg-3: #232325;
-      --bg-glass: rgba(255, 255, 255, 0.04);
-      --bg-glass-hi: rgba(255, 255, 255, 0.08);
-      --border: rgba(255, 255, 255, 0.10);
-      --border-strong: rgba(255, 255, 255, 0.20);
-      --fg: rgba(255, 255, 255, 0.96);
-      --fg-2: rgba(255, 255, 255, 0.62);
-      --fg-3: rgba(255, 255, 255, 0.40);
-      --accent: #0a84ff;
-      --accent-soft: rgba(10, 132, 255, 0.18);
-      --magenta: #bf5af2;
-      --green: #30d158;
-      --yellow: #ffd60a;
-      --red: #ff453a;
-      --sans: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Pretendard Variable", "Inter", system-ui, sans-serif;
-      --mono: "SF Mono", "JetBrains Mono", ui-monospace, monospace;
-      color-scheme: dark;
-    }
-    * { box-sizing: border-box; }
-    html, body {
-      margin: 0; padding: 0;
-      background: var(--bg-0);
-      color: var(--fg);
-      font-family: var(--sans);
-      -webkit-font-smoothing: antialiased;
-      line-height: 1.55;
-    }
-    a { color: var(--accent); text-decoration: none; }
-    a:hover { text-decoration: underline; }
-    code, pre { font-family: var(--mono); }
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>memex — Sense It, Spark Memory</title>
+<meta name="description" content="Turn every moment into living trails of meaning, connection, and intelligence. Memex indexes your Claude Code &amp; Codex session history into a navigable, associative memory backed by Qdrant — five named-vector lenses, MST topology, proactive recall, and 11 MCP tools for any agent. 100% local. No LLM at runtime." />
+<meta name="theme-color" content="#050507" />
+<meta property="og:type" content="website" />
+<meta property="og:url" content="https://two-weeks-team.github.io/memex/" />
+<meta property="og:title" content="memex — Sense It, Spark Memory" />
+<meta property="og:description" content="Turn every moment into living trails of meaning, connection, and intelligence." />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="memex — Sense It, Spark Memory" />
+<meta name="twitter:description" content="Turn every moment into living trails of meaning, connection, and intelligence." />
+<style>
+/* ─── design tokens ─────────────────────────────────────────────────────── */
+:root{
+  color-scheme: dark;
+  --bg:#050507;
+  --bg2:#0a0a10;
+  --bg3:#0d0d14;
+  --fg:#ededf2;
+  --fg-mute:#a0a0ad;
+  --fg-low:#666674;
+  --line:rgba(255,255,255,.08);
+  --line-2:rgba(255,255,255,.14);
+  --card:#0c0c12;
+  --card-hi:#11111a;
+  --accent:#ffd60a;          /* spark gold */
+  --mag:#bf5af2;
+  --ok:#34c759;
+  /* five lens colors — match docs/qdrant-features.md */
+  --L-content:#6cd6ff;
+  --L-tool:#ffb454;
+  --L-path:#b5e48c;
+  --L-error:#ff6b7a;
+  --L-code:#c792ea;
+  /* trail colors — meaning / connection / intelligence */
+  --T-meaning:#b5e48c;
+  --T-connect:#6cd6ff;
+  --T-intel:#ffd60a;
+  --maxw:1180px;
+  --r-sm:8px; --r-md:14px; --r-lg:20px;
+}
+*{ box-sizing:border-box; }
+html,body{ margin:0; padding:0; }
+html{ scroll-behavior:smooth; }
+body{
+  background:var(--bg);
+  color:var(--fg);
+  font:16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, "Helvetica Neue", Helvetica, Arial, sans-serif;
+  -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale;
+  text-rendering:optimizeLegibility;
+  overflow-x:hidden;
+}
+a{ color:#9cd2ff; text-decoration:none; border-bottom:1px solid rgba(156,210,255,.22); transition:border-color .15s ease, color .15s ease; }
+a:hover{ color:#cfe7ff; border-bottom-color:rgba(156,210,255,.55); }
+a:focus-visible{ outline:2px solid var(--accent); outline-offset:3px; border-radius:3px; }
+.skip{ position:absolute; left:-9999px; top:0; background:var(--accent); color:#111; padding:10px 14px; border-radius:0 0 var(--r-sm) 0; font-weight:600; }
+.skip:focus{ left:0; z-index:100; }
+.wrap{ max-width:var(--maxw); margin:0 auto; padding:0 24px; }
+h1,h2,h3,h4{ letter-spacing:-.015em; line-height:1.18; margin:0 0 .4em; font-weight:650; }
+h2{ font-size:clamp(26px, 3.6vw, 38px); }
+h3{ font-size:18px; font-weight:600; }
+p{ margin:0 0 1em; color:var(--fg); }
+p.muted, .muted{ color:var(--fg-mute); }
+code, pre{ font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace; font-size:13.5px; }
+code{ background:rgba(255,255,255,.07); padding:.12em .42em; border-radius:5px; border:1px solid rgba(255,255,255,.06); }
+pre{ background:#0a0a12; border:1px solid var(--line); border-radius:10px; padding:14px 16px; overflow-x:auto; color:#dcdce6; }
+pre .c{ color:#7a7a86; } pre .p{ color:#bf5af2; }
+hr{ border:0; border-top:1px solid var(--line); margin:0; }
 
-    /* --- ambient background ---------------------------------------- */
-    body::before {
-      content: "";
-      position: fixed; inset: 0; pointer-events: none; z-index: -1;
-      background:
-        radial-gradient(ellipse 80% 60% at 50% -10%, rgba(10, 132, 255, 0.22), transparent 60%),
-        radial-gradient(ellipse 60% 50% at 100% 20%, rgba(191, 90, 242, 0.16), transparent 60%),
-        radial-gradient(ellipse 60% 60% at 0% 70%, rgba(48, 209, 88, 0.10), transparent 60%);
-    }
+/* ─── nav ───────────────────────────────────────────────────────────────── */
+.nav{ position:sticky; top:0; z-index:50; backdrop-filter:saturate(160%) blur(14px); -webkit-backdrop-filter:saturate(160%) blur(14px); background:rgba(5,5,7,.72); border-bottom:1px solid var(--line); }
+.nav .row{ display:flex; align-items:center; gap:20px; padding:12px 24px; max-width:var(--maxw); margin:0 auto; }
+.nav .brand{ display:flex; align-items:center; gap:10px; font-weight:700; letter-spacing:-.01em; border:0; color:var(--fg); }
+.nav .brand svg{ width:22px; height:22px; }
+.nav .links{ display:flex; gap:18px; margin-left:auto; flex-wrap:wrap; }
+.nav .links a{ color:var(--fg-mute); font-size:14px; border:0; }
+.nav .links a:hover{ color:var(--fg); }
+.nav .cta{ background:var(--accent); color:#0a0a10; padding:7px 13px; border-radius:999px; font-weight:600; font-size:13.5px; border:0; }
+.nav .cta:hover{ background:#ffe34a; color:#0a0a10; }
+@media (max-width:720px){ .nav .links{ display:none; } .nav .row{ padding:10px 16px; } }
 
-    /* --- nav -------------------------------------------------------- */
-    nav.top {
-      position: sticky; top: 0; z-index: 50;
-      display: flex; align-items: center; justify-content: space-between;
-      padding: 14px 28px;
-      background: rgba(15, 15, 18, 0.72);
-      backdrop-filter: saturate(160%) blur(14px);
-      border-bottom: 1px solid var(--border);
-    }
-    nav.top .brand {
-      display: flex; align-items: center; gap: 10px;
-      font-weight: 700; letter-spacing: 0.3px; font-size: 15px;
-    }
-    nav.top .brand-dot {
-      width: 12px; height: 12px; border-radius: 50%;
-      background: linear-gradient(135deg, var(--magenta) 0%, var(--accent) 100%);
-      box-shadow: 0 0 18px rgba(191, 90, 242, 0.55);
-    }
-    nav.top .links { display: flex; gap: 22px; font-size: 13px; color: var(--fg-2); }
-    nav.top .links a { color: var(--fg-2); }
-    nav.top .links a:hover { color: var(--fg); text-decoration: none; }
-    nav.top .badge {
-      display: inline-flex; align-items: center; gap: 6px;
-      font-family: var(--mono); font-size: 11px;
-      padding: 4px 10px; border-radius: 999px;
-      background: var(--accent-soft); color: var(--accent);
-      border: 1px solid rgba(10, 132, 255, 0.35);
-    }
+/* ─── hero ──────────────────────────────────────────────────────────────── */
+.hero{ position:relative; min-height:min(940px, 100vh); overflow:hidden; padding:0; }
+.hero canvas{ position:absolute; inset:0; width:100%; height:100%; display:block; }
+.hero .veil{ position:absolute; inset:0; pointer-events:none;
+  background:
+    radial-gradient(60% 60% at 50% 110%, rgba(191,90,242,.10), transparent 70%),
+    radial-gradient(80% 60% at 50% -10%, rgba(108,214,255,.07), transparent 70%),
+    linear-gradient(180deg, rgba(5,5,7,0) 0%, rgba(5,5,7,.18) 40%, rgba(5,5,7,.45) 75%, rgba(5,5,7,.85) 100%);
+}
+.hero .stage{ position:relative; z-index:2; max-width:var(--maxw); margin:0 auto; padding:84px 24px 64px; min-height:inherit; display:flex; flex-direction:column; justify-content:flex-end; }
+.hero .eyebrow{ display:inline-flex; gap:8px; align-items:center; color:var(--fg-mute); font-size:13px; letter-spacing:.06em; text-transform:uppercase; margin-bottom:20px;
+  opacity:0; animation:rise 1.1s 1.4s ease forwards; }
+.hero .eyebrow .dot{ width:7px; height:7px; border-radius:50%; background:var(--accent); box-shadow:0 0 10px var(--accent); }
+.hero h1{ font-size:clamp(42px, 7.2vw, 92px); line-height:1.02; letter-spacing:-.025em; font-weight:700; margin:0 0 18px; }
+.hero h1 .a{ display:inline-block; opacity:0; transform:translateY(20px); animation:rise 1.2s ease forwards; }
+.hero h1 .a1{ animation-delay:1.5s; color:var(--fg); }
+.hero h1 .a2{ animation-delay:1.9s; color:#fff; }
+.hero h1 .comma{ color:var(--fg-mute); margin:0 .08em; }
+.hero h1 .a3{ animation-delay:2.3s; background:linear-gradient(90deg, var(--T-meaning), var(--T-connect) 50%, var(--T-intel)); -webkit-background-clip:text; background-clip:text; color:transparent; }
+.hero .sub{ font-size:clamp(17px, 2vw, 22px); color:var(--fg-mute); max-width:740px; opacity:0; animation:rise 1.1s 2.8s ease forwards; }
+.hero .sub strong{ color:var(--fg); font-weight:500; }
+.hero .pills{ display:flex; gap:8px; flex-wrap:wrap; margin-top:24px; opacity:0; animation:rise 1s 3.2s ease forwards; }
+.hero .pill{ font-size:12px; letter-spacing:.04em; text-transform:uppercase; padding:6px 11px; border-radius:999px; border:1px solid var(--line-2); color:var(--fg-mute); background:rgba(255,255,255,.02); }
+.hero .pill b{ color:var(--fg); font-weight:600; }
+.hero .ctas{ display:flex; gap:12px; flex-wrap:wrap; margin-top:32px; opacity:0; animation:rise 1s 3.5s ease forwards; }
+.btn{ display:inline-flex; align-items:center; gap:8px; padding:13px 20px; border-radius:999px; font-weight:600; font-size:15px; border:1px solid var(--line-2); color:var(--fg); background:rgba(255,255,255,.04); transition:transform .15s ease, background .15s ease, border-color .15s ease; }
+.btn:hover{ background:rgba(255,255,255,.10); border-color:rgba(255,255,255,.28); color:var(--fg); transform:translateY(-1px); }
+.btn.primary{ background:var(--accent); color:#0a0a10; border-color:transparent; }
+.btn.primary:hover{ background:#ffe34a; color:#0a0a10; }
+.btn:focus-visible{ outline:2px solid var(--accent); outline-offset:3px; }
+.hero .legend{ position:absolute; right:24px; bottom:24px; display:flex; gap:14px; align-items:center; font-size:11.5px; color:var(--fg-low); z-index:2;
+  opacity:0; animation:fade 1s 4s ease forwards; }
+.hero .legend .swatch{ width:9px; height:9px; border-radius:50%; display:inline-block; vertical-align:middle; margin-right:5px; box-shadow:0 0 8px currentColor; }
+.hero .legend .L1{ color:var(--T-meaning); } .hero .legend .L2{ color:var(--T-connect); } .hero .legend .L3{ color:var(--T-intel); }
+@media (max-width:720px){
+  .hero .stage{ padding:64px 18px 96px; }
+  .hero .legend{ position:static; margin-top:28px; }
+}
+@keyframes rise { from { opacity:0; transform:translateY(20px); } to { opacity:1; transform:translateY(0); } }
+@keyframes fade { from { opacity:0; } to { opacity:1; } }
+@keyframes pulse { 0%,100%{ opacity:.5; } 50%{ opacity:1; } }
 
-    /* --- container -------------------------------------------------- */
-    .wrap { max-width: 1160px; margin: 0 auto; padding: 0 28px; }
+/* ─── section scaffolding ───────────────────────────────────────────────── */
+section{ padding:88px 0; border-top:1px solid var(--line); position:relative; }
+section.tight{ padding:64px 0; }
+.eyebrow-2{ color:var(--mag); font-size:12px; letter-spacing:.16em; text-transform:uppercase; font-weight:600; margin:0 0 14px; }
+.lead{ font-size:18px; color:var(--fg-mute); max-width:780px; margin:0 0 36px; }
+.lead strong{ color:var(--fg); font-weight:500; }
+.kicker{ display:inline-block; color:var(--fg-low); font-size:13px; letter-spacing:.06em; text-transform:uppercase; margin-bottom:10px; }
 
-    /* --- hero ------------------------------------------------------- */
-    section.hero {
-      padding: 96px 0 64px;
-      text-align: center;
-    }
-    .hero .eyebrow {
-      display: inline-flex; align-items: center; gap: 6px;
-      font-family: var(--mono); font-size: 11.5px;
-      color: var(--magenta);
-      padding: 5px 12px; border-radius: 999px;
-      background: rgba(191, 90, 242, 0.10);
-      border: 1px solid rgba(191, 90, 242, 0.32);
-      margin-bottom: 22px;
-    }
-    .hero h1 {
-      font-size: clamp(40px, 8vw, 84px);
-      line-height: 1.02;
-      margin: 0 0 18px;
-      letter-spacing: -0.02em;
-      font-weight: 700;
-      background: linear-gradient(180deg, #ffffff 0%, rgba(255, 255, 255, 0.6) 110%);
-      -webkit-background-clip: text;
-      background-clip: text;
-      color: transparent;
-    }
-    .hero .tagline {
-      font-size: clamp(18px, 2.4vw, 24px);
-      color: var(--fg-2);
-      max-width: 720px; margin: 0 auto 18px;
-      line-height: 1.4;
-    }
-    .hero .lede {
-      font-size: 15px; color: var(--fg-3);
-      max-width: 720px; margin: 0 auto 36px;
-    }
-    .hero .lede em { color: var(--fg-2); font-style: italic; }
-    .hero .cta {
-      display: inline-flex; gap: 12px; flex-wrap: wrap; justify-content: center;
-    }
-    .btn {
-      display: inline-flex; align-items: center; gap: 8px;
-      font-family: var(--sans); font-weight: 600; font-size: 14px;
-      padding: 11px 20px; border-radius: 10px;
-      border: 1px solid var(--border);
-      background: var(--bg-glass);
-      color: var(--fg);
-      text-decoration: none !important;
-      cursor: pointer;
-      transition: transform 80ms ease, background 160ms ease, border-color 160ms ease;
-    }
-    .btn:hover { background: var(--bg-glass-hi); border-color: var(--border-strong); transform: translateY(-1px); }
-    .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-    .btn.primary:hover { background: #1a90ff; }
-    .btn .arrow { font-size: 14px; opacity: 0.8; }
+/* ─── intro / not-a-bot ─────────────────────────────────────────────────── */
+.intro .grid{ display:grid; grid-template-columns:1fr 1fr; gap:34px; margin-top:28px; }
+.intro .card{ background:var(--card); border:1px solid var(--line); border-radius:var(--r-lg); padding:26px; }
+.intro .card h3{ display:flex; align-items:center; gap:10px; margin-bottom:8px; }
+.intro .card h3 .em{ width:22px; height:22px; display:inline-flex; align-items:center; justify-content:center; border-radius:6px; background:rgba(255,255,255,.06); font-size:14px; }
+.intro .card p{ color:var(--fg-mute); margin:0; }
+@media (max-width:760px){ .intro .grid{ grid-template-columns:1fr; } }
 
-    /* --- MCP badge under the hero CTAs ---------------------------- */
-    .mcp-badge {
-      margin: 22px auto 0;
-      max-width: 720px;
-      text-align: left;
-      border: 1px solid rgba(120, 220, 180, 0.32);
-      background: rgba(120, 220, 180, 0.06);
-      border-radius: 12px;
-      padding: 12px 16px;
-      color: var(--fg-2);
-      font-size: 13.5px;
-    }
-    .mcp-badge[open] { background: rgba(120, 220, 180, 0.10); }
-    .mcp-badge summary {
-      cursor: pointer;
-      list-style: none;
-      display: flex; align-items: center; gap: 10px;
-      font-weight: 500;
-    }
-    .mcp-badge summary::-webkit-details-marker { display: none; }
-    .mcp-badge summary strong { color: rgb(150, 240, 210); font-weight: 600; }
-    .mcp-dot {
-      width: 8px; height: 8px; border-radius: 50%;
-      background: rgb(120, 220, 180);
-      box-shadow: 0 0 0 4px rgba(120, 220, 180, 0.18);
-      flex: 0 0 8px;
-    }
-    .mcp-badge .mcp-cmd { margin-top: 12px; }
-    .mcp-badge pre {
-      background: rgba(0, 0, 0, 0.32);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 10px 12px;
-      font-size: 12.5px;
-      overflow-x: auto;
-      color: var(--fg);
-    }
-    .mcp-badge code { font-family: var(--mono, ui-monospace, SFMono-Regular, monospace); }
-    .mcp-badge .mcp-tools {
-      margin: 10px 0 0;
-      font-size: 12.5px;
-      line-height: 1.55;
-      color: var(--fg-2);
-    }
-    .mcp-badge .mcp-tools code {
-      background: rgba(255, 255, 255, 0.06);
-      padding: 1px 6px;
-      border-radius: 4px;
-    }
+/* ─── lenses ────────────────────────────────────────────────────────────── */
+.lenses .lens-row{ display:grid; grid-template-columns:repeat(5, 1fr); gap:14px; margin-top:32px; }
+.lens{ background:var(--card); border:1px solid var(--line); border-radius:var(--r-md); padding:18px; position:relative; overflow:hidden; }
+.lens::before{ content:""; position:absolute; left:0; right:0; top:0; height:3px; background:currentColor; opacity:.85; }
+.lens .nm{ display:flex; align-items:baseline; gap:8px; font-family:ui-monospace, "SF Mono", monospace; font-size:12.5px; color:var(--fg-mute); letter-spacing:.06em; text-transform:uppercase; margin-bottom:8px; }
+.lens .nm b{ color:currentColor; font-weight:700; letter-spacing:.04em; }
+.lens h3{ font-size:18px; margin:0 0 6px; color:var(--fg); }
+.lens p{ color:var(--fg-mute); font-size:14.5px; margin:0; }
+.lens.L-content{ color:var(--L-content); } .lens.L-tool{ color:var(--L-tool); }
+.lens.L-path{ color:var(--L-path); } .lens.L-error{ color:var(--L-error); }
+.lens.L-code{ color:var(--L-code); }
+@media (max-width:980px){ .lenses .lens-row{ grid-template-columns:repeat(2, 1fr); } }
+@media (max-width:520px){ .lenses .lens-row{ grid-template-columns:1fr; } }
 
-    /* --- hero screenshots strip ------------------------------------ */
-    .shots {
-      margin: 56px auto 0;
-      display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px;
-      max-width: 1080px;
-    }
-    .shots .shot {
-      position: relative;
-      border-radius: 14px; overflow: hidden;
-      border: 1px solid var(--border);
-      background: var(--bg-2);
-      box-shadow: 0 22px 60px rgba(0, 0, 0, 0.55);
-      transition: transform 280ms ease, border-color 280ms ease;
-    }
-    .shots .shot:hover { transform: translateY(-4px); border-color: var(--border-strong); }
-    .shots .shot img { display: block; width: 100%; height: auto; }
-    .shots .shot .cap {
-      position: absolute; left: 12px; bottom: 12px; right: 12px;
-      font-family: var(--sans); font-size: 11.5px; color: var(--fg);
-      padding: 6px 10px; border-radius: 7px;
-      background: rgba(15, 15, 18, 0.72);
-      border: 1px solid var(--border-strong);
-      backdrop-filter: blur(8px);
-    }
+.lens-slider{ margin-top:36px; background:var(--card); border:1px solid var(--line); border-radius:var(--r-md); padding:20px 22px; }
+.lens-slider h3{ margin:0 0 12px; }
+.lens-slider .row{ display:flex; align-items:center; gap:14px; margin:8px 0; font-family:ui-monospace, monospace; font-size:13px; }
+.lens-slider .row .nm{ width:90px; color:var(--fg-mute); }
+.lens-slider .row .bar{ flex:1; height:6px; background:rgba(255,255,255,.06); border-radius:3px; position:relative; overflow:hidden; }
+.lens-slider .row .fill{ position:absolute; left:0; top:0; bottom:0; background:currentColor; border-radius:3px; }
+.lens-slider .row .v{ width:42px; text-align:right; color:var(--fg-mute); }
+.lens-slider .row.l-c{ color:var(--L-content); } .lens-slider .row.l-t{ color:var(--L-tool); }
+.lens-slider .row.l-p{ color:var(--L-path); } .lens-slider .row.l-e{ color:var(--L-error); }
+.lens-slider .row.l-k{ color:var(--L-code); }
+.lens-slider .cap{ font-size:13px; color:var(--fg-low); margin-top:10px; }
 
-    /* --- "not a chatbot" anchor ------------------------------------ */
-    section.not-bot {
-      padding: 96px 0 32px;
-    }
-    .not-bot .vsd-quote {
-      max-width: 760px; margin: 0 auto 36px;
-      padding: 22px 28px;
-      border-left: 3px solid var(--magenta);
-      background: linear-gradient(90deg, rgba(191, 90, 242, 0.08) 0%, transparent 100%);
-      border-radius: 0 14px 14px 0;
-      font-size: 17px; line-height: 1.55;
-    }
-    .not-bot .vsd-quote .src {
-      display: block; margin-top: 10px;
-      font-family: var(--mono); font-size: 11.5px; color: var(--fg-3);
-    }
-    .not-bot table.contrast {
-      width: 100%; max-width: 980px; margin: 0 auto;
-      border-collapse: collapse;
-      font-size: 14px;
-    }
-    .not-bot table.contrast th,
-    .not-bot table.contrast td {
-      padding: 13px 18px;
-      text-align: left;
-      vertical-align: top;
-      border-bottom: 1px solid var(--border);
-    }
-    .not-bot table.contrast th {
-      font-family: var(--mono); font-size: 11px;
-      font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px;
-      color: var(--fg-3);
-    }
-    .not-bot table.contrast th:last-child {
-      color: var(--accent);
-    }
-    .not-bot table.contrast td:first-child { color: var(--fg-3); }
-    .not-bot table.contrast td:last-child { color: var(--fg); font-weight: 500; }
+/* ─── three-column feature grids ────────────────────────────────────────── */
+.feature-grid{ display:grid; grid-template-columns:repeat(3, 1fr); gap:18px; margin-top:32px; }
+.fcard{ background:var(--card); border:1px solid var(--line); border-radius:var(--r-md); padding:22px; }
+.fcard h3{ font-size:17px; margin-bottom:8px; display:flex; align-items:center; gap:8px; }
+.fcard h3 .badge{ font-size:11px; letter-spacing:.06em; text-transform:uppercase; padding:2px 7px; border-radius:999px; border:1px solid var(--line-2); color:var(--fg-mute); font-weight:600; }
+.fcard p{ color:var(--fg-mute); font-size:14.5px; margin:0; }
+.fcard p + p{ margin-top:8px; }
+.fcard .mono{ display:block; font-family:ui-monospace, monospace; font-size:12.5px; color:#cfe7ff; margin-top:10px; padding:8px 10px; background:rgba(108,214,255,.06); border:1px solid rgba(108,214,255,.18); border-radius:6px; }
+@media (max-width:900px){ .feature-grid{ grid-template-columns:1fr 1fr; } }
+@media (max-width:560px){ .feature-grid{ grid-template-columns:1fr; } }
 
-    /* --- features grid --------------------------------------------- */
-    section.features { padding: 64px 0; }
-    section h2 {
-      font-size: clamp(28px, 4vw, 40px);
-      letter-spacing: -0.015em;
-      margin: 0 0 6px;
-      font-weight: 700;
-    }
-    section h2 .num {
-      display: inline-flex; align-items: center; justify-content: center;
-      width: 36px; height: 36px; border-radius: 50%;
-      background: linear-gradient(135deg, var(--magenta) 0%, var(--accent) 100%);
-      color: white; font-size: 17px; font-weight: 700;
-      margin-right: 12px; vertical-align: -6px;
-    }
-    section .h-sub {
-      font-size: 15px; color: var(--fg-2);
-      margin: 0 0 36px;
-      max-width: 720px;
-    }
-    .grid {
-      display: grid; gap: 18px;
-      grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-    }
-    .card {
-      position: relative;
-      padding: 22px 22px 24px;
-      background: var(--bg-2);
-      border: 1px solid var(--border);
-      border-radius: 14px;
-      transition: transform 200ms ease, border-color 200ms ease;
-    }
-    .card:hover { transform: translateY(-3px); border-color: var(--border-strong); }
-    .card .icon {
-      display: inline-flex; align-items: center; justify-content: center;
-      width: 40px; height: 40px; border-radius: 10px;
-      font-size: 20px;
-      background: var(--bg-glass-hi);
-      border: 1px solid var(--border);
-      margin-bottom: 14px;
-    }
-    .card h3 {
-      margin: 0 0 4px; font-size: 17px; font-weight: 600;
-    }
-    .card .qprim {
-      display: block; font-family: var(--mono); font-size: 10.5px;
-      color: var(--accent); margin-bottom: 12px;
-      letter-spacing: 0.2px;
-    }
-    .card p { margin: 0; color: var(--fg-2); font-size: 13.5px; line-height: 1.55; }
-    .card .badge-new {
-      position: absolute; top: 14px; right: 14px;
-      font-family: var(--mono); font-size: 9.5px;
-      padding: 2px 8px; border-radius: 999px;
-      background: linear-gradient(135deg, var(--magenta) 0%, var(--accent) 100%);
-      color: #fff; font-weight: 700;
-      letter-spacing: 0.4px;
-    }
+/* ─── topology preview ──────────────────────────────────────────────────── */
+.topo-vis{ margin-top:32px; background:var(--card); border:1px solid var(--line); border-radius:var(--r-lg); padding:22px; display:grid; grid-template-columns:1.3fr 1fr; gap:24px; align-items:center; }
+.topo-vis svg{ width:100%; height:auto; display:block; }
+.topo-vis .why h3{ margin-top:0; }
+.topo-vis .why p{ color:var(--fg-mute); margin:0 0 .7em; }
+@media (max-width:760px){ .topo-vis{ grid-template-columns:1fr; } }
 
-    /* --- predict spotlight ----------------------------------------- */
-    section.predict {
-      padding: 64px 0;
-    }
-    .spotlight {
-      display: grid; grid-template-columns: 1.1fr 1fr; gap: 36px;
-      align-items: center;
-      padding: 36px;
-      background: linear-gradient(135deg, rgba(191, 90, 242, 0.12) 0%, rgba(10, 132, 255, 0.06) 100%);
-      border: 1px solid rgba(191, 90, 242, 0.32);
-      border-radius: 18px;
-    }
-    .spotlight h3 {
-      font-size: clamp(22px, 3vw, 30px);
-      margin: 0 0 10px;
-      letter-spacing: -0.01em;
-    }
-    .spotlight p { color: var(--fg-2); font-size: 14.5px; margin: 0 0 16px; }
-    .spotlight ul { color: var(--fg-2); font-size: 14px; padding-left: 18px; margin: 0; }
-    .spotlight ul li { margin-bottom: 6px; }
-    .spotlight .demo-card {
-      padding: 18px;
-      background: rgba(15, 15, 18, 0.72);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      box-shadow: 0 18px 50px rgba(0, 0, 0, 0.55);
-    }
-    .spotlight .demo-card .row {
-      display: grid; grid-template-columns: 28px 1fr;
-      gap: 10px; padding: 10px 0;
-      border-bottom: 1px solid var(--border);
-    }
-    .spotlight .demo-card .row:last-child { border-bottom: none; }
-    .spotlight .demo-card .rank {
-      width: 28px; height: 28px; border-radius: 50%;
-      display: flex; align-items: center; justify-content: center;
-      font-family: var(--mono); font-weight: 700; font-size: 12px;
-      background: linear-gradient(135deg, var(--magenta), var(--accent));
-      color: white;
-    }
-    .spotlight .demo-card .head { font-size: 12px; }
-    .spotlight .demo-card .head strong { color: var(--fg); }
-    .spotlight .demo-card .head .meta { font-family: var(--mono); color: var(--fg-3); font-size: 10.5px; }
-    .spotlight .demo-card .ex {
-      margin-top: 5px;
-      font-family: var(--mono); font-size: 11px;
-      padding: 5px 8px; border-radius: 5px;
-      background: rgba(0, 0, 0, 0.35); color: var(--fg);
-      display: block;
-    }
-    .spotlight .demo-card .src {
-      margin-top: 4px;
-      font-size: 10.5px; color: var(--fg-3);
-    }
+/* ─── recall demo ───────────────────────────────────────────────────────── */
+.recall{ background:var(--card); border:1px solid var(--line); border-radius:var(--r-lg); padding:24px; margin-top:30px; display:grid; grid-template-columns:1fr 1fr; gap:22px; }
+.recall .term{ background:#070710; border:1px solid var(--line); border-radius:10px; padding:14px 16px; font-family:ui-monospace, monospace; font-size:13px; color:#dcdce6; min-height:200px; }
+.recall .term .line{ display:block; opacity:0; animation:rise .5s ease forwards; }
+.recall .term .err{ color:#ff8a96; }
+.recall .term .ok{ color:#a3e07f; }
+.recall .term .mute{ color:#7c7c89; }
+.recall .why h3{ margin-top:0; }
+.recall .why p{ color:var(--fg-mute); margin:0 0 .8em; }
+@media (max-width:760px){ .recall{ grid-template-columns:1fr; } }
 
-    /* --- architecture ---------------------------------------------- */
-    section.arch {
-      padding: 64px 0;
-    }
-    .arch-box {
-      padding: 28px;
-      background: var(--bg-2);
-      border: 1px solid var(--border);
-      border-radius: 14px;
-      font-family: var(--mono); font-size: 12px;
-      color: var(--fg-2);
-      overflow-x: auto;
-      white-space: pre;
-      line-height: 1.5;
-    }
+/* ─── companion / wrapped / loopbreaker ─────────────────────────────────── */
+.cwl{ display:grid; grid-template-columns:repeat(3, 1fr); gap:18px; margin-top:30px; }
+.cwl .cl{ background:var(--card); border:1px solid var(--line); border-radius:var(--r-md); padding:24px; position:relative; overflow:hidden; }
+.cwl .cl::before{ content:""; position:absolute; inset:0; pointer-events:none; opacity:.05; background-image: radial-gradient(circle at 20% 0%, currentColor, transparent 50%); }
+.cwl .cl h3{ display:flex; align-items:center; gap:10px; font-size:18px; margin-bottom:6px; }
+.cwl .cl .hk{ font-family:ui-monospace, monospace; font-size:11.5px; color:var(--fg-mute); letter-spacing:.04em; }
+.cwl .cl p{ color:var(--fg-mute); font-size:14.5px; margin:.6em 0 0; }
+.cwl .cl.c1{ color:#6cd6ff; }
+.cwl .cl.c2{ color:#ffb454; }
+.cwl .cl.c3{ color:#ff6b7a; }
+@media (max-width:880px){ .cwl{ grid-template-columns:1fr; } }
 
-    /* --- install ---------------------------------------------------- */
-    section.install { padding: 64px 0; }
-    .steps {
-      display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px;
-    }
-    .step {
-      padding: 22px;
-      background: var(--bg-2);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-    }
-    .step .step-num {
-      display: inline-flex; align-items: center; justify-content: center;
-      width: 26px; height: 26px; border-radius: 50%;
-      background: var(--accent-soft); color: var(--accent);
-      font-family: var(--mono); font-weight: 700; font-size: 13px;
-      margin-bottom: 10px;
-    }
-    .step h4 { margin: 0 0 6px; font-size: 15px; font-weight: 600; }
-    .step p { margin: 0 0 12px; color: var(--fg-2); font-size: 13px; }
-    .step pre {
-      margin: 0;
-      padding: 12px 14px;
-      background: rgba(0, 0, 0, 0.40);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      font-size: 12px; line-height: 1.55;
-      color: var(--fg);
-      overflow-x: auto;
-    }
+/* ─── architecture diagram ──────────────────────────────────────────────── */
+.arch-wrap{ margin-top:34px; background:linear-gradient(180deg, #0a0a14, #07070d); border:1px solid var(--line); border-radius:var(--r-lg); padding:28px; }
+.arch-wrap svg{ width:100%; height:auto; display:block; }
+.arch-legend{ display:flex; flex-wrap:wrap; gap:20px; margin-top:18px; font-size:13px; color:var(--fg-mute); }
+.arch-legend span b{ color:var(--fg); font-weight:600; }
 
-    /* --- run it your way (app vs server) --------------------------- */
-    section.run { padding: 64px 0; }
-    .run-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin-top: 8px; }
-    .run-card {
-      position: relative; padding: 24px;
-      background: var(--bg-2); border: 1px solid var(--border); border-radius: 16px;
-    }
-    .run-card.featured {
-      background: linear-gradient(135deg, rgba(10, 132, 255, 0.10) 0%, rgba(191, 90, 242, 0.08) 100%);
-      border-color: rgba(10, 132, 255, 0.34);
-    }
-    .run-card .rc-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
-    .run-card .rc-head .ic { font-size: 22px; }
-    .run-card h3 { margin: 0; font-size: 18px; font-weight: 650; }
-    .run-card .rc-sub { color: var(--fg-2); font-size: 13.5px; margin: 0 0 14px; line-height: 1.5; }
-    .run-card .rc-sub em { color: var(--fg); font-style: normal; font-weight: 600; }
-    .run-card pre {
-      margin: 0 0 14px; padding: 12px 14px;
-      background: rgba(0, 0, 0, 0.42); border: 1px solid var(--border);
-      border-radius: 9px; font-size: 12.5px; line-height: 1.6; color: var(--fg); overflow-x: auto;
-    }
-    .run-card pre .c { color: var(--fg-3); }
-    .run-card pre .p { color: var(--green); }
-    .chiprow { display: flex; flex-wrap: wrap; gap: 7px; }
-    .chip {
-      font-family: var(--mono); font-size: 11px; padding: 4px 9px; border-radius: 999px;
-      background: var(--bg-glass-hi); border: 1px solid var(--border); color: var(--fg-2);
-    }
-    .chip.on { color: var(--green); border-color: rgba(48, 209, 88, 0.34); background: rgba(48, 209, 88, 0.08); }
-    .run-shots {
-      margin-top: 22px; display: grid; grid-template-columns: 1.5fr 1fr; gap: 14px;
-    }
-    .run-shots .shot {
-      position: relative; border-radius: 14px; overflow: hidden;
-      border: 1px solid var(--border); background: var(--bg-2);
-      box-shadow: 0 22px 60px rgba(0, 0, 0, 0.5);
-      transition: transform 280ms ease, border-color 280ms ease;
-    }
-    .run-shots .shot:hover { transform: translateY(-4px); border-color: var(--border-strong); }
-    .run-shots .shot img { display: block; width: 100%; height: auto; }
-    .run-shots .shot .cap {
-      position: absolute; left: 12px; bottom: 12px; right: 12px;
-      font-size: 11.5px; color: var(--fg);
-      padding: 6px 10px; border-radius: 7px;
-      background: rgba(15, 15, 18, 0.74);
-      border: 1px solid var(--border-strong);
-      backdrop-filter: blur(8px);
-    }
+/* ─── mcp tools grid ────────────────────────────────────────────────────── */
+.tools{ display:grid; grid-template-columns:repeat(2, 1fr); gap:12px; margin-top:30px; }
+.tool{ background:var(--card); border:1px solid var(--line); border-radius:var(--r-md); padding:16px 18px; display:flex; gap:14px; align-items:flex-start; }
+.tool .n{ font-family:ui-monospace, monospace; font-size:12.5px; color:var(--accent); font-weight:600; padding-top:2px; min-width:22px; }
+.tool .nm{ font-family:ui-monospace, monospace; font-size:13.5px; color:#cfe7ff; }
+.tool .ds{ color:var(--fg-mute); font-size:14px; margin:.25em 0 0; display:block; }
+@media (max-width:820px){ .tools{ grid-template-columns:1fr; } }
 
-    /* --- footer ----------------------------------------------------- */
-    footer {
-      margin-top: 96px;
-      padding: 36px 28px;
-      border-top: 1px solid var(--border);
-      text-align: center;
-      color: var(--fg-3);
-      font-size: 12.5px;
-    }
-    footer a { color: var(--fg-2); }
-    footer .credits {
-      margin-top: 8px; font-family: var(--mono); font-size: 11px;
-    }
+/* ─── run blocks ────────────────────────────────────────────────────────── */
+.run-grid{ display:grid; grid-template-columns:1fr 1fr; gap:22px; margin-top:28px; }
+.run-card{ background:var(--card); border:1px solid var(--line); border-radius:var(--r-lg); padding:24px; position:relative; }
+.run-card.featured{ border-color:rgba(255,214,10,.28); box-shadow:0 0 0 1px rgba(255,214,10,.10) inset, 0 6px 24px rgba(255,214,10,.04); }
+.run-card .head{ display:flex; align-items:center; gap:12px; margin-bottom:10px; }
+.run-card .head .ic{ width:34px; height:34px; display:inline-flex; align-items:center; justify-content:center; background:rgba(255,255,255,.05); border:1px solid var(--line); border-radius:8px; font-size:18px; }
+.run-card .new{ position:absolute; top:18px; right:18px; background:var(--accent); color:#0a0a10; font-size:11px; font-weight:700; letter-spacing:.06em; padding:3px 8px; border-radius:999px; }
+.run-card p.sub{ color:var(--fg-mute); margin-bottom:14px; }
+.chiprow{ display:flex; flex-wrap:wrap; gap:6px; margin-top:14px; }
+.chip{ font-size:11.5px; padding:4px 9px; border-radius:999px; border:1px solid var(--line-2); color:var(--fg-mute); }
+.chip.on{ color:#cfe7ff; border-color:rgba(108,214,255,.34); background:rgba(108,214,255,.06); }
+@media (max-width:760px){ .run-grid{ grid-template-columns:1fr; } }
 
-    @media (max-width: 760px) {
-      .shots { grid-template-columns: 1fr; }
-      .spotlight { grid-template-columns: 1fr; padding: 24px; }
-      .steps { grid-template-columns: 1fr; }
-      .run-grid { grid-template-columns: 1fr; }
-      .run-shots { grid-template-columns: 1fr; }
-      nav.top .links { display: none; }
-    }
-  </style>
+/* ─── footer ────────────────────────────────────────────────────────────── */
+footer{ padding:56px 0 80px; border-top:1px solid var(--line); }
+footer .row{ display:grid; grid-template-columns:2fr 1fr 1fr 1fr; gap:30px; }
+footer h4{ font-size:13px; letter-spacing:.06em; text-transform:uppercase; color:var(--fg-mute); font-weight:600; margin:0 0 12px; }
+footer ul{ list-style:none; margin:0; padding:0; display:grid; gap:6px; }
+footer li a{ color:var(--fg); border:0; font-size:14.5px; }
+footer li a:hover{ color:#cfe7ff; }
+footer .brand-block p{ color:var(--fg-mute); font-size:14px; max-width:380px; }
+footer .fine{ margin-top:42px; padding-top:22px; border-top:1px solid var(--line); display:flex; flex-wrap:wrap; gap:14px; justify-content:space-between; color:var(--fg-low); font-size:13px; }
+@media (max-width:780px){ footer .row{ grid-template-columns:1fr 1fr; } }
+@media (max-width:520px){ footer .row{ grid-template-columns:1fr; } }
+
+/* ─── reduced motion fallback ───────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce){
+  *, *::before, *::after{ animation-duration:.01ms !important; animation-iteration-count:1 !important; transition-duration:.01ms !important; }
+  .hero h1 .a, .hero .eyebrow, .hero .sub, .hero .pills, .hero .ctas, .hero .legend{ opacity:1 !important; transform:none !important; animation:none !important; }
+  .recall .term .line{ opacity:1 !important; animation:none !important; }
+}
+</style>
 </head>
 <body>
-  <nav class="top">
-    <div class="brand">
-      <span class="brand-dot"></span> Memex
-      <span class="badge" style="margin-left:8px">Qdrant VSD 2026</span>
-    </div>
-    <div class="links">
-      <a href="#features">Features</a>
-      <a href="#predict">Predict</a>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="nav" role="banner">
+  <div class="row">
+    <a class="brand" href="#top" aria-label="memex — home">
+      <svg viewBox="0 0 22 22" aria-hidden="true">
+        <circle cx="11" cy="11" r="9" fill="none" stroke="currentColor" stroke-width="1.4"/>
+        <circle cx="11" cy="11" r="2.4" fill="currentColor"/>
+        <circle cx="3.5" cy="6" r="1.1" fill="currentColor"/>
+        <circle cx="19" cy="14" r="1.1" fill="currentColor"/>
+        <circle cx="14.5" cy="3.5" r="1.1" fill="currentColor"/>
+        <line x1="11" y1="11" x2="3.5" y2="6" stroke="currentColor" stroke-width="1"/>
+        <line x1="11" y1="11" x2="19" y2="14" stroke="currentColor" stroke-width="1"/>
+        <line x1="11" y1="11" x2="14.5" y2="3.5" stroke="currentColor" stroke-width="1"/>
+      </svg>
+      <span>memex</span>
+    </a>
+    <nav class="links" aria-label="Primary">
+      <a href="#lenses">Lenses</a>
+      <a href="#topology">Topology</a>
+      <a href="#recall">Recall</a>
+      <a href="#agents">Agents</a>
+      <a href="#architecture">Architecture</a>
+      <a href="#mcp">11 MCP tools</a>
       <a href="#run">Run</a>
-      <a href="#install">Install</a>
-      <a href="https://github.com/Two-Weeks-Team/memex" target="_blank" rel="noopener">GitHub ↗</a>
+    </nav>
+    <a class="cta" href="https://github.com/Two-Weeks-Team/memex" target="_blank" rel="noopener">GitHub ↗</a>
+  </div>
+</header>
+
+<main id="main">
+
+<!-- ════════════════════ HERO · constellation arrives ════════════════════ -->
+<section id="top" class="hero" aria-label="Hero — a constellation of moments resolves on its own">
+  <canvas id="constellation" aria-hidden="true"></canvas>
+  <div class="veil" aria-hidden="true"></div>
+  <div class="stage">
+    <div class="eyebrow"><span class="dot"></span>For Qdrant Vector Space Day 2026 · Think Outside the Bot</div>
+    <h1 aria-label="memex — Sense It, Spark Memory">
+      <span class="a a1">memex —</span>
+      <span class="a a2">Sense It<span class="comma">,</span></span>
+      <span class="a a3">Spark Memory<span style="color:var(--fg-mute);">.</span></span>
+    </h1>
+    <p class="sub">Turn every moment into <strong>living trails</strong> of meaning, connection, and intelligence. Memex indexes your past Claude Code &amp; Codex sessions into a navigable, associative memory — so the right thought surfaces on its own when the situation calls it up.</p>
+    <div class="pills" role="list">
+      <span class="pill" role="listitem"><b>100%</b> local</span>
+      <span class="pill" role="listitem"><b>No LLM</b> at runtime</span>
+      <span class="pill" role="listitem"><b>Qdrant</b>-native (5 named vectors)</span>
+      <span class="pill" role="listitem"><b>MCP</b> · stdio + HTTP</span>
     </div>
-  </nav>
+    <div class="ctas">
+      <a class="btn primary" href="#architecture">See how it works ↓</a>
+      <a class="btn" href="https://github.com/Two-Weeks-Team/memex" target="_blank" rel="noopener">View on GitHub ↗</a>
+      <a class="btn" href="https://two-weeks-team.github.io/memex/forge/" target="_blank" rel="noopener">36-scene gallery ↗</a>
+    </div>
+  </div>
+  <div class="legend" aria-hidden="true">
+    <span><i class="swatch L1"></i>meaning</span>
+    <span><i class="swatch L2"></i>connection</span>
+    <span><i class="swatch L3"></i>intelligence</span>
+  </div>
+</section>
 
-  <section class="hero">
-    <div class="wrap">
-      <div class="eyebrow">🗄️ Anthropic이 잊어도 Memex는 기억합니다</div>
-      <h1>Your AI session history<br>survives Anthropic's silent migrations.</h1>
-      <p class="tagline">
-        Claude Code rewrites its session storage every few months
-        <strong style="color:var(--fg)">without announcement</strong> and
-        auto-updates silently delete the old files
-        (<a href="https://github.com/anthropics/claude-code/issues/41591" target="_blank" rel="noopener">#41591</a> ·
-        <a href="https://github.com/anthropics/claude-code/issues/54907" target="_blank" rel="noopener">#54907</a> ·
-        <a href="https://github.com/anthropics/claude-code/issues/48782" target="_blank" rel="noopener">#48782</a>).
-        Memex reads both the legacy <code>~/.claude/transcripts/</code>
-        and modern <code>~/.claude/projects/</code> paths, indexes them
-        into a local Qdrant you own, and gives you a snapshot button.
-      </p>
-      <p class="lede">
-        <em>Vannevar Bush imagined the original
-        <a href="https://en.wikipedia.org/wiki/Memex" target="_blank" rel="noopener">Memex</a>
-        in 1945 — a personal knowledge machine built on associative trails,
-        not search boxes.</em> Eighty years later this is its desktop reincarnation —
-        wrapped in a non-chatbot UI powered by six Qdrant primitives.
-      </p>
-      <div class="cta">
-        <a class="btn primary" href="https://github.com/Two-Weeks-Team/memex" target="_blank" rel="noopener">
-          View on GitHub <span class="arrow">↗</span>
-        </a>
-        <a class="btn" href="#run">
-          Run it <span class="arrow">↓</span>
-        </a>
-        <a class="btn" href="#predict">
-          See predict in action <span class="arrow">→</span>
-        </a>
+<!-- ════════════════════ INTRO · why a memex, why not a bot ════════════════════ -->
+<section class="intro" aria-labelledby="intro-h">
+  <div class="wrap">
+    <p class="eyebrow-2">What it is</p>
+    <h2 id="intro-h">An associative memory for your AI work — not another chatbot.</h2>
+    <p class="lead">Memex reads <code>~/.claude/projects/**/*.jsonl</code> and <code>~/.codex/sessions/**/*.jsonl</code>, embeds every session into <strong>five named vectors</strong>, and stores them in a local Qdrant collection. Then it gives you spatial surfaces — sliders, a topology galaxy, mix &amp; match, proactive recall, and an agent-memory layer — to <em>arrive at</em> the right past moment, not search for it.</p>
+    <div class="grid">
+      <div class="card">
+        <h3><span class="em" aria-hidden="true">🜨</span>Local-first &amp; LLM-free at runtime</h3>
+        <p>One embedder (BGE-small, 384-d) runs once at index time. Every surface — sliders, MST, recall, Wrapped — is deterministic Qdrant math on a local store. Zero network calls during use. Your session text never leaves your laptop.</p>
       </div>
-
-      <details class="mcp-badge">
-        <summary>
-          <span class="mcp-dot"></span>
-          <strong>Works as an MCP server</strong>
-          — connect any AI agent (Claude Code, Codex, Cursor) to your local memex
-        </summary>
-        <div class="mcp-cmd">
-          <pre><code># one-time wiring — any MCP-aware AI agent can now call Memex tools
-claude mcp add memex /path/to/memex/src-tauri/target/release/memex mcp
-
-# or let Memex print the exact line for your machine
-memex install-mcp --run</code></pre>
-          <p class="mcp-tools">
-            9 tools exposed: <code>find_similar_sessions</code> ·
-            <code>find_similar_error</code> ·
-            <code>predict_next_action</code> ·
-            <code>mix_similar_sessions</code> ·
-            <code>get_session_summary</code> ·
-            <code>get_session_turn</code> ·
-            <code>list_recent_sessions</code> ·
-            <code>analyze_corpus_topology</code> ·
-            <code>snapshot_export</code>.
-            All stay 100 % local — no telemetry, no LLM call inside the server.
-          </p>
-        </div>
-      </details>
-
-      <div class="shots">
-        <div class="shot">
-          <img src="docs/img/stack.png" alt="Time Machine layered card stack" />
-          <span class="cap">🪟 Time Machine stack</span>
-        </div>
-        <div class="shot">
-          <img src="docs/img/topology.png" alt="3D Topology galaxy with cluster labels" />
-          <span class="cap">🌌 Topology galaxy</span>
-        </div>
-        <div class="shot">
-          <img src="docs/img/replay.png" alt="Replay engine — turn-by-turn animation" />
-          <span class="cap">⏯ Replay engine</span>
-        </div>
+      <div class="card">
+        <h3><span class="em" aria-hidden="true">⟁</span>Associative, not interrogative</h3>
+        <p>A chatbot waits for a query. A memex notices the moment. SessionStart injects a Companion <em>primer</em>; a repeated-error pattern surfaces a <em>Loop Breaker</em>; the topology galaxy lets you drift between adjacent sessions by named-vector affinity. The visitor is a recipient, not an operator.</p>
       </div>
     </div>
-  </section>
+  </div>
+</section>
 
-  <section class="not-bot">
-    <div class="wrap">
-      <h2>Why this isn't a chatbot</h2>
-      <p class="h-sub">Qdrant Vector Space Day 2026's prompt is unusually direct:</p>
-
-      <div class="vsd-quote">
-        <strong>"Think Outside the Bot."</strong> Forget the classical RAG
-        chatbot. Reimagine vector search beyond conversational interfaces —
-        <em>multi-modal apps, intelligent recommendations, advanced vector
-        search.</em>
-        <span class="src">— Qdrant VSD 2026 hackathon prompt</span>
-      </div>
-
-      <table class="contrast">
-        <thead>
-          <tr>
-            <th>The obvious RAG-chatbot version of this</th>
-            <th>What Memex does instead</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td>A text box asking "what session am I looking for?"</td>
-            <td>A 3D <strong>Time Machine card deck</strong> showing every past session — ↑↓/wheel to time-travel.</td>
-          </tr>
-          <tr>
-            <td>Embed + retrieve + LLM-summarize a session.</td>
-            <td><strong>Replay</strong> the session turn-by-turn with Bash terminals, Edit diffs, Read snippets — exactly as you saw them live.</td>
-          </tr>
-          <tr>
-            <td>"Have I seen this error before?" → RAG → LLM → text answer.</td>
-            <td>A banner slides in with the past session whose <strong>error named-vector</strong> neighborhood matches — zero LLM calls.</td>
-          </tr>
-          <tr>
-            <td>"What's the shape of my work?" → LLM writes a paragraph.</td>
-            <td><strong>3D topology galaxy</strong> from Qdrant's Distance Matrix API, with auto-labeled clusters and cross-project bridge edges.</td>
-          </tr>
-          <tr>
-            <td>"What should I do next?" → LLM completion + tool-use.</td>
-            <td><strong>Predict next-action</strong> — embed the active session, find similar past sessions in Qdrant, surface what past-you did from a comparable position. No LLM.</td>
-          </tr>
-        </tbody>
-      </table>
+<!-- ════════════════════ FIVE LENSES ════════════════════ -->
+<section id="lenses" aria-labelledby="lenses-h">
+  <div class="wrap">
+    <p class="eyebrow-2">The geometry</p>
+    <h2 id="lenses-h">Five named-vector lenses on the same conversation.</h2>
+    <p class="lead">Every session becomes <strong>one point</strong> in Qdrant with five orthogonal embeddings — five ways of asking "what is this session about?". Weight any subset and Qdrant fuses them in a single Universal Query. No RRF, no two-round hack: real multi-vector scoring with continuous weights.</p>
+    <div class="lens-row">
+      <div class="lens L-content"><div class="nm"><b>content</b> · 384-d</div><h3>What was said</h3><p>The semantic core — user intent, assistant reasoning, project topic. The default lens; drop it to 0 to feel what the others see.</p></div>
+      <div class="lens L-tool"><div class="nm"><b>tool</b> · 384-d</div><h3>Which tools fired</h3><p>The shape of the agent's action — Bash, Edit, Read, WebFetch — independent of words. Surfaces tool-shape twins.</p></div>
+      <div class="lens L-path"><div class="nm"><b>path</b> · 384-d</div><h3>Which files were touched</h3><p>The repo-coordinate footprint. Find sessions that worked the same code paths, even if the prose was unrelated.</p></div>
+      <div class="lens L-error"><div class="nm"><b>error</b> · 384-d</div><h3>What broke</h3><p>Built from <em>only</em> the error spans. The recall surface keys on this lens to ask: "have I solved this exact failure before?"</p></div>
+      <div class="lens L-code"><div class="nm"><b>code</b> · 384-d</div><h3>Which code shapes</h3><p>Identifier and snippet density — function names, types, APIs. Surfaces sessions that wrote near the same code, even across projects.</p></div>
     </div>
-  </section>
 
-  <section class="features" id="features">
-    <div class="wrap">
-      <h2><span class="num">6</span>Qdrant primitives, six surfaces</h2>
-      <p class="h-sub">
-        Each surface in Memex maps to a different Qdrant primitive — together
-        they cover named vectors → matrix sampling → discovery → payload
-        filtering → snapshots → recommendation. None of these are the
-        "embed-and-summarize" loop of classical RAG.
-      </p>
+    <div class="lens-slider" aria-label="An illustrative lens-weight configuration">
+      <h3>An illustrative slider configuration <span class="muted" style="font-weight:400;font-size:14px">— "what did past-me run when this error fired in this file?"</span></h3>
+      <div class="row l-c"><span class="nm">content</span><span class="bar"><span class="fill" style="width:25%"></span></span><span class="v">0.50</span></div>
+      <div class="row l-t"><span class="nm">tool</span>   <span class="bar"><span class="fill" style="width:35%"></span></span><span class="v">0.70</span></div>
+      <div class="row l-p"><span class="nm">path</span>   <span class="bar"><span class="fill" style="width:60%"></span></span><span class="v">1.20</span></div>
+      <div class="row l-e"><span class="nm">error</span>  <span class="bar"><span class="fill" style="width:90%"></span></span><span class="v">1.80</span></div>
+      <div class="row l-k"><span class="nm">code</span>   <span class="bar"><span class="fill" style="width:20%"></span></span><span class="v">0.40</span></div>
+      <p class="cap">Weights run 0 – 2. One Qdrant query, five named vectors, server-side fusion. Slider values shown above are illustrative — your real ones live in the desktop app and the web UI.</p>
+    </div>
+  </div>
+</section>
 
-      <div class="grid">
-        <div class="card">
-          <div class="icon">🪟</div>
-          <h3>Time Machine stack</h3>
-          <span class="qprim">payload-only scroll · no vectors</span>
-          <p>Boot the app and every past session appears as a 3D layered card deck. Arrow keys time-travel. No search box. Ever.</p>
-        </div>
+<!-- ════════════════════ TOPOLOGY · MST galaxy ════════════════════ -->
+<section id="topology" aria-labelledby="topology-h">
+  <div class="wrap">
+    <p class="eyebrow-2">The map</p>
+    <h2 id="topology-h">Topology — your corpus as a minimum-spanning galaxy.</h2>
+    <p class="lead">Every session is a node, colored by project. Edges connect each session to its nearest content-vector neighbor — a <strong>Minimum Spanning Tree</strong> over cosine distance. Drift along the edges and you walk the conceptual neighborhood, not the timeline.</p>
 
-        <div class="card">
-          <div class="icon">🌌</div>
-          <h3>Topology galaxy</h3>
-          <span class="qprim">Distance Matrix API · search_matrix_pairs</span>
-          <p>WebGL scene of your corpus. Force-directed cluster auto-labels ("code + shell · Bash×1350 Edit×1032"). Yellow bridges = ideas that jumped between projects.</p>
-        </div>
-
-        <div class="card">
-          <div class="icon">🧪</div>
-          <h3>Mix &amp; Match</h3>
-          <span class="qprim">Discovery API · ContextInputPair</span>
-          <p>Drop sessions as positives + negatives. Qdrant returns sessions near the positives and far from the negatives. Recommendation, not retrieval.</p>
-        </div>
-
-        <div class="card">
-          <div class="icon">🔔</div>
-          <h3>Proactive recall</h3>
-          <span class="qprim">error named-vector + has_errors filter</span>
-          <p>While you work in another Claude Code session, Memex watches for fresh tool errors. Match a past resolution? A banner slides in with the link.</p>
-        </div>
-
-        <div class="card">
-          <span class="badge-new">NEW</span>
-          <div class="icon">🔮</div>
-          <h3>Predict next-action</h3>
-          <span class="qprim">content vector + neighbor pivot walk</span>
-          <p>Embed your last few turns, find K similar past sessions, locate the pivot turn, walk forward — surface what past-you did next. Ranked by frequency × similarity.</p>
-        </div>
-
-        <div class="card">
-          <div class="icon">⏯</div>
-          <h3>Replay engine</h3>
-          <span class="qprim">payload source_path · on-demand re-parse</span>
-          <p>Turn-by-turn animation of any past session with Bash terminals, Edit -/+ diffs, Read snippets. ⏮ ⏯ ⏭ controls, 1×/2×/4×/8×.</p>
-        </div>
-
-        <div class="card">
-          <div class="icon">🔍</div>
-          <h3>Lens slider</h3>
-          <span class="qprim">5 named vectors per point · parallel query</span>
-          <p>The "advanced vector search" axis — intentionally last. Five named vectors (content, tool, path, error, code), weighted by sliders. Per-vector contribution chips on every hit.</p>
-        </div>
-
-        <div class="card">
-          <div class="icon">📦</div>
-          <h3>Snapshot</h3>
-          <span class="qprim">Qdrant HTTP snapshot API</span>
-          <p>One portable file holding your entire indexed memory. Export, archive, share, restore on another machine.</p>
-        </div>
+    <div class="topo-vis">
+      <svg viewBox="0 0 520 320" role="img" aria-label="Illustrative MST galaxy with 14 session nodes connected by their nearest content-vector neighbor.">
+        <defs>
+          <radialGradient id="hg" cx="50%" cy="50%" r="50%">
+            <stop offset="0%" stop-color="#ffd60a" stop-opacity=".25"/>
+            <stop offset="100%" stop-color="#ffd60a" stop-opacity="0"/>
+          </radialGradient>
+        </defs>
+        <rect width="520" height="320" fill="transparent"/>
+        <!-- MST edges (drawn first so nodes sit on top) -->
+        <g stroke="rgba(255,255,255,.18)" stroke-width="1" fill="none">
+          <line x1="90" y1="90" x2="160" y2="60"/>
+          <line x1="160" y1="60" x2="230" y2="110"/>
+          <line x1="230" y1="110" x2="300" y2="80"/>
+          <line x1="300" y1="80" x2="380" y2="130"/>
+          <line x1="380" y1="130" x2="440" y2="80"/>
+          <line x1="230" y1="110" x2="200" y2="190"/>
+          <line x1="200" y1="190" x2="130" y2="230"/>
+          <line x1="200" y1="190" x2="280" y2="220"/>
+          <line x1="280" y1="220" x2="360" y2="240"/>
+          <line x1="280" y1="220" x2="340" y2="170"/>
+          <line x1="340" y1="170" x2="380" y2="130"/>
+          <line x1="160" y1="60" x2="90" y2="160"/>
+          <line x1="90" y1="160" x2="130" y2="230"/>
+        </g>
+        <!-- nodes — 4 project colors -->
+        <g>
+          <circle cx="90"  cy="90"  r="6" fill="#6cd6ff"/>
+          <circle cx="160" cy="60"  r="6" fill="#6cd6ff"/>
+          <circle cx="230" cy="110" r="8" fill="#ffd60a"/>
+          <circle cx="300" cy="80"  r="5" fill="#bf5af2"/>
+          <circle cx="380" cy="130" r="6" fill="#bf5af2"/>
+          <circle cx="440" cy="80"  r="5" fill="#b5e48c"/>
+          <circle cx="90"  cy="160" r="5" fill="#6cd6ff"/>
+          <circle cx="130" cy="230" r="6" fill="#b5e48c"/>
+          <circle cx="200" cy="190" r="9" fill="#ffd60a"/>
+          <circle cx="280" cy="220" r="6" fill="#ff6b7a"/>
+          <circle cx="340" cy="170" r="5" fill="#ff6b7a"/>
+          <circle cx="360" cy="240" r="5" fill="#ff6b7a"/>
+        </g>
+        <!-- soft halo on the focused node -->
+        <circle cx="200" cy="190" r="34" fill="url(#hg)"/>
+        <text x="208" y="186" fill="#fff" font-size="11" font-family="ui-monospace,Menlo,monospace">you are here</text>
+      </svg>
+      <div class="why">
+        <h3>Drift, don't search</h3>
+        <p>A timeline tells you <em>when</em>. A topology tells you <em>near what</em>. The MST keeps the graph <strong>connected and sparse</strong> — every node has at least one neighbor, no node is more than a handful of hops from any other.</p>
+        <p>Click an edge and you've crossed a conceptual border in one move. Two seemingly unrelated projects often turn out to share an edge — and that edge is usually the insight you forgot you had.</p>
       </div>
     </div>
-  </section>
+  </div>
+</section>
 
-  <section class="predict" id="predict">
-    <div class="wrap">
-      <div class="spotlight">
-        <div>
-          <h3>🔮 What past-you did next</h3>
-          <p>
-            The killer surface for a hackathon themed
-            <em>"intelligent recommendations"</em>. Click any session — Memex
-            queries the corpus for similar past sessions, finds the conversational
-            pivot in each one, walks <code>horizon</code> turns forward, and
-            aggregates the tool calls.
-          </p>
-          <ul>
-            <li><strong>Zero LLM</strong> — pure vector neighbors + tool-call frequency.</li>
-            <li>Cards rank by <code>frequency × similarity</code>.</li>
-            <li>Each pick links back to the <em>exact</em> source-turn-index — click to Replay it.</li>
-            <li>Mines your own engineering history as ground truth.</li>
-          </ul>
-        </div>
-        <div class="demo-card">
-          <div class="row">
-            <div class="rank">1</div>
-            <div>
-              <div class="head">
-                🖥 <strong>Bash</strong>
-                <span class="meta">· 67% · sim 65%</span>
-              </div>
-              <code class="ex">cargo build --release</code>
-              <div class="src">● project-redesign · turn #486 →</div>
-            </div>
-          </div>
-          <div class="row">
-            <div class="rank">2</div>
-            <div>
-              <div class="head">
-                ✏️ <strong>Edit</strong>
-                <span class="meta">· 33% · sim 64%</span>
-              </div>
-              <code class="ex">src-tauri/Cargo.toml</code>
-              <div class="src">● project-tool-a · turn #312 →</div>
-            </div>
-          </div>
-        </div>
+<!-- ════════════════════ MIX & MATCH ════════════════════ -->
+<section id="mix" aria-labelledby="mix-h">
+  <div class="wrap">
+    <p class="eyebrow-2">The arithmetic</p>
+    <h2 id="mix-h">Mix &amp; match — interpolate between two moments, get the third.</h2>
+    <p class="lead">Vector arithmetic on session embeddings. Pick two sessions A and B, slide a single knob, and Qdrant returns the sessions that live on the line between them. Discover overlap you didn't know you had.</p>
+    <div class="feature-grid">
+      <div class="fcard">
+        <h3>A + B <span class="badge">linear</span></h3>
+        <p>Combine two sessions' content vectors with a 50/50 weight and search. Surfaces sessions that share the <em>intersection</em> of both topics — not the union.</p>
+        <code class="mono">mix_similar_sessions(a, b, weight=0.5)</code>
+      </div>
+      <div class="fcard">
+        <h3>A − B <span class="badge">delta</span></h3>
+        <p>What's in A but not in B. Subtraction in vector space surfaces "this session, minus that obvious context" — useful for de-duping the same project from another angle.</p>
+        <code class="mono">mix_similar_sessions(a, b, weight=-1.0)</code>
+      </div>
+      <div class="fcard">
+        <h3>(A + B) / 2 <span class="badge">centroid</span></h3>
+        <p>The conceptual midpoint of a small cluster — feed three or four sessions, get the centroid, and find the "average" of that idea-cloud. Where in your past corpus does that idea already live?</p>
+        <code class="mono">centroid(sessions[]) → search</code>
       </div>
     </div>
-  </section>
+  </div>
+</section>
 
-  <section class="arch">
-    <div class="wrap">
-      <h2>Architecture</h2>
-      <p class="h-sub">
-        One desktop binary. One local Qdrant. Zero network calls after install.
-        Your <code>~/.claude/projects/**/*.jsonl</code> never leaves the machine.
-      </p>
-      <div class="arch-box">~/.claude/projects/  ──[ walkdir + serde_json ]──▶  parser.rs
-                                                       │
-                                                       ▼ 5 string extracts
-                                            ┌──────────────────────────┐
-                                            │ indexer.rs               │
-                                            │  fastembed BGE-small     │
-                                            │  qdrant-client 1.18      │
-                                            │  predict_next_actions()  │
-                                            └────────┬─────────────────┘
-                                                     │ gRPC / HTTP
-                                                     ▼
-                                            ┌──────────────────────────┐
-                                            │ local Qdrant 1.18        │
-                                            │ 5 named vectors × point  │
-                                            │ payload-indexed metadata │
-                                            └──────────────────────────┘
-
-                                            ↑ Tauri 2 webview ──▶ vanilla JS UI
-                                            ↑ commands.rs ── thin IPC wrappers</div>
+<!-- ════════════════════ PROACTIVE RECALL ════════════════════ -->
+<section id="recall" aria-labelledby="recall-h">
+  <div class="wrap">
+    <p class="eyebrow-2">The reflex</p>
+    <h2 id="recall-h">Proactive recall — the error lens reaches for you.</h2>
+    <p class="lead">Every ~12 seconds the desktop app polls <code>tail_recent_errors()</code>. On a fresh error, it embeds the error text with BGE-small and queries the dedicated <code>error</code> named vector with a <code>has_errors = true</code> payload filter — asking, on your behalf, <em>"have I solved a similar failure before?"</em>. If yes, the next-action hint surfaces as an OS notification before you ask.</p>
+    <div class="recall">
+      <div class="term" id="recall-term" aria-live="polite">
+        <span class="line mute"># a fresh agent error just landed in this session</span>
+        <span class="line err">  Error: failed to connect to Qdrant gRPC at :6334 (connection refused)</span>
+        <span class="line mute"># memex polls every ~12s, embeds the error, queries the `error` named vector</span>
+        <span class="line">  → <span class="ok">match</span>  project-x  · 4 days ago  · solved: <code>docker compose up qdrant</code></span>
+        <span class="line">  → <span class="ok">match</span>  project-y  · 11 days ago · solved: started qdrant container first</span>
+        <span class="line mute"># OS notification fires — past-you's next action, surfaced on its own</span>
+      </div>
+      <div class="why">
+        <h3>The dedicated error lens earns its keep</h3>
+        <p>The <code>error</code> vector is built from <em>only</em> the error spans — not the surrounding chat. So "connection refused on :6334" doesn't get drowned out by the user's pleasantries. The payload filter <code>has_errors = true</code> keeps the search inside sessions that actually broke.</p>
+        <p>Five sliders, five lenses — but recall is the one that <em>moves first</em>. The proactive loop is what makes a memex feel alive.</p>
+      </div>
     </div>
-  </section>
+  </div>
+</section>
 
-  <section class="run" id="run">
-    <div class="wrap">
-      <h2>Run it your way</h2>
-      <p class="h-sub">
-        The same Rust core and the same six Qdrant primitives — two ways to run.
-        Take the native macOS app, or the new <strong>single Docker image</strong>
-        that bundles Qdrant, the web UI, a JSON API, and an MCP server in one
-        container.
+<!-- ════════════════════ AGENT MEMORY · Companion / Wrapped / Loop Breaker ════════════════════ -->
+<section id="agents" aria-labelledby="agents-h">
+  <div class="wrap">
+    <p class="eyebrow-2">The agent layer</p>
+    <h2 id="agents-h">Companion · Wrapped · Loop Breaker — memory in the agent's turn.</h2>
+    <p class="lead">Three surfaces that put Memex into the model's context window without a plugin — through host hooks and MCP. Each is gated to stay quiet until it has something concrete to say.</p>
+    <div class="cwl">
+      <div class="cl c1">
+        <h3>🜨 Companion <span class="hk">SessionStart hook</span></h3>
+        <p>A 200–500 token <strong>primer</strong> at session start — past intents, decisions, known pitfalls in this cwd — composed deterministically from the corpus, no LLM. The cold-start killer.</p>
+        <p class="muted" style="font-size:13.5px;margin-top:10px"><code>compose_memory_primer(cwd) → injected context</code></p>
+      </div>
+      <div class="cl c2">
+        <h3>🜚 Wrapped <span class="hk">CLI · MCP tool</span></h3>
+        <p>An engineering "Spotify Wrapped" of your corpus — top tools, top file extensions, intent / arc / outcome distribution, <em>repeated decisions</em> ("I keep re-deciding the same thing"), debugging fingerprint, cross-agent Claude ↔ Codex split. Pure payload aggregation, deterministic.</p>
+        <p class="muted" style="font-size:13.5px;margin-top:10px"><code>generate_wrapped_report(window_days=30) → markdown</code></p>
+      </div>
+      <div class="cl c3">
+        <h3>🜉 Loop Breaker <span class="hk">PostToolUse hook</span></h3>
+        <p>After every Bash tool call, a tiny watcher looks at the last few turns. On a repeated-error stuck pattern, it surfaces "what past-you ran next" — a single pivot, not a wall of text. Fail-open: if the engine's down, your session continues without it.</p>
+        <p class="muted" style="font-size:13.5px;margin-top:10px"><code>loopcheck(last_turns) → notify(pivot)</code></p>
+      </div>
+    </div>
+    <p class="muted" style="margin-top:22px;font-size:14px">Hooks live in your gitignored <code>.claude/settings.local.json</code> — never committed. Inputs are <a href="https://github.com/Two-Weeks-Team/memex/blob/main/docs/agent-integration.md" target="_blank" rel="noopener">redacted</a> for tokens / keys / private blocks before they ever touch the index. See the full guide → <a href="https://github.com/Two-Weeks-Team/memex/blob/main/docs/agent-integration.md" target="_blank" rel="noopener">docs/agent-integration.md</a>.</p>
+  </div>
+</section>
+
+<!-- ════════════════════ ARCHITECTURE ════════════════════ -->
+<section id="architecture" aria-labelledby="arch-h">
+  <div class="wrap">
+    <p class="eyebrow-2">The pipeline</p>
+    <h2 id="arch-h">Architecture — one screen, edge to edge.</h2>
+    <p class="lead">From append-only JSONL on disk to a typed MCP tool an agent can call — the whole path is one Rust binary, one Qdrant collection, and one embedder. The same core ships as a desktop app (Tauri) <em>and</em> as a single Docker image.</p>
+
+    <div class="arch-wrap" role="img" aria-labelledby="arch-h" aria-describedby="arch-cap">
+      <svg viewBox="0 0 1100 540" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <defs>
+          <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#7a7a86"/>
+          </marker>
+          <linearGradient id="lensgrad" x1="0" x2="1" y1="0" y2="0">
+            <stop offset="0%"   stop-color="#6cd6ff"/>
+            <stop offset="25%"  stop-color="#ffb454"/>
+            <stop offset="50%"  stop-color="#b5e48c"/>
+            <stop offset="75%"  stop-color="#ff6b7a"/>
+            <stop offset="100%" stop-color="#c792ea"/>
+          </linearGradient>
+          <style>
+            .lbl { font: 600 13px ui-sans-serif, -apple-system, system-ui, sans-serif; fill:#ededf2; }
+            .sub { font: 400 11.5px ui-monospace, "SF Mono", Menlo, monospace; fill:#9a9aa6; }
+            .lns { font: 600 11.5px ui-monospace, "SF Mono", Menlo, monospace; }
+            .box { fill:#0d0d14; stroke:#23232c; stroke-width:1.2; rx:10; ry:10; }
+            .boxhi { fill:#10101a; stroke:#33334a; stroke-width:1.4; rx:10; ry:10; }
+            .arrow { stroke:#7a7a86; stroke-width:1.2; fill:none; }
+          </style>
+        </defs>
+
+        <!-- Layer 1 : sources -->
+        <rect class="box" x="30" y="30"  width="220" height="78"/>
+        <text class="lbl" x="50"  y="58">Claude Code sessions</text>
+        <text class="sub" x="50"  y="78">~/.claude/projects/&lt;cwd&gt;/&lt;uuid&gt;.jsonl</text>
+        <text class="sub" x="50"  y="94">append-only · source of truth</text>
+
+        <rect class="box" x="30" y="124" width="220" height="78"/>
+        <text class="lbl" x="50"  y="152">Codex CLI sessions</text>
+        <text class="sub" x="50"  y="172">~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl</text>
+        <text class="sub" x="50"  y="188">parsed via session_meta envelope</text>
+
+        <!-- arrows source → parser -->
+        <path class="arrow" d="M 250 69  L 310 69"  marker-end="url(#ar)"/>
+        <path class="arrow" d="M 250 163 L 310 163" marker-end="url(#ar)"/>
+
+        <!-- Layer 2 : parser -->
+        <rect class="boxhi" x="310" y="46"  width="200" height="140"/>
+        <text class="lbl" x="330" y="74">parser.rs</text>
+        <text class="sub" x="330" y="94">scan_dir() · parse_session()</text>
+        <text class="sub" x="330" y="112">→ Session / Turn / ToolCall</text>
+        <text class="sub" x="330" y="138">5 string extracts per session:</text>
+        <text class="sub" x="330" y="154" fill="#cfe7ff">content · tool · path</text>
+        <text class="sub" x="330" y="170" fill="#cfe7ff">error   · code</text>
+
+        <!-- arrow parser → indexer -->
+        <path class="arrow" d="M 510 116 L 580 116" marker-end="url(#ar)"/>
+
+        <!-- Layer 3 : indexer + embedder -->
+        <rect class="boxhi" x="580" y="46"  width="220" height="140"/>
+        <text class="lbl" x="600" y="74">indexer.rs · Embedder</text>
+        <text class="sub" x="600" y="94">fastembed BGE-small-en-v1.5</text>
+        <text class="sub" x="600" y="110">384-d cosine · Mutex-wrapped</text>
+        <text class="sub" x="600" y="138">lens_search · mix_match · topology</text>
+        <text class="sub" x="600" y="154">recall · snapshot_export / import</text>
+        <text class="sub" x="600" y="170">predict_next_action</text>
+
+        <!-- arrow indexer → qdrant -->
+        <path class="arrow" d="M 800 116 L 870 116" marker-end="url(#ar)"/>
+
+        <!-- Layer 4 : qdrant -->
+        <rect class="boxhi" x="870" y="30"  width="200" height="172"/>
+        <text class="lbl" x="890" y="58">Qdrant 1.18.1</text>
+        <text class="sub" x="890" y="78">collection: memex_sessions</text>
+        <text class="sub" x="890" y="96">point_id = uuid_v5(session_id)</text>
+        <text class="sub" x="890" y="116">5 named vectors per point:</text>
+        <rect x="890" y="124" width="160" height="8" fill="url(#lensgrad)" rx="4"/>
+        <text class="lns" x="890" y="148" fill="#6cd6ff">content</text>
+        <text class="lns" x="940" y="148" fill="#ffb454">tool</text>
+        <text class="lns" x="975" y="148" fill="#b5e48c">path</text>
+        <text class="lns" x="890" y="166" fill="#ff6b7a">error</text>
+        <text class="lns" x="930" y="166" fill="#c792ea">code</text>
+        <text class="sub" x="890" y="186">+ payload (project, branch, …)</text>
+
+        <!-- Layer 5 : five capability lanes -->
+        <g>
+          <rect class="box" x="50"  y="244" width="180" height="64"/>
+          <text class="lbl" x="64" y="270">Lens slider</text>
+          <text class="sub" x="64" y="288">multi-vector Universal Query</text>
+
+          <rect class="box" x="250" y="244" width="180" height="64"/>
+          <text class="lbl" x="264" y="270">Topology · MST</text>
+          <text class="sub" x="264" y="288">nearest content-vector edges</text>
+
+          <rect class="box" x="450" y="244" width="180" height="64"/>
+          <text class="lbl" x="464" y="270">Mix &amp; match</text>
+          <text class="sub" x="464" y="288">vector arithmetic on points</text>
+
+          <rect class="box" x="650" y="244" width="180" height="64"/>
+          <text class="lbl" x="664" y="270">Proactive recall</text>
+          <text class="sub" x="664" y="288">error lens + has_errors filter</text>
+
+          <rect class="box" x="850" y="244" width="200" height="64"/>
+          <text class="lbl" x="864" y="270">Predict next-action</text>
+          <text class="sub" x="864" y="288">k-NN over neighbor outcomes</text>
+        </g>
+
+        <!-- arrows qdrant → capabilities -->
+        <path class="arrow" d="M 970 202 L 970 222 L 140 222 L 140 244" marker-end="url(#ar)"/>
+        <path class="arrow" d="M 340 222 L 340 244" marker-end="url(#ar)"/>
+        <path class="arrow" d="M 540 222 L 540 244" marker-end="url(#ar)"/>
+        <path class="arrow" d="M 740 222 L 740 244" marker-end="url(#ar)"/>
+        <path class="arrow" d="M 950 222 L 950 244" marker-end="url(#ar)"/>
+
+        <!-- Layer 6 : MCP server -->
+        <rect class="boxhi" x="280" y="350" width="540" height="74"/>
+        <text class="lbl" x="300" y="378">MCP server · 11 typed tools</text>
+        <text class="sub" x="300" y="398">stdio transport · in-process for the desktop app</text>
+        <text class="sub" x="300" y="414">HTTP transport · :8765/mcp · for the all-in-one container</text>
+
+        <!-- arrows capabilities → MCP -->
+        <path class="arrow" d="M 140 308 L 140 340 L 290 340 L 290 350" marker-end="url(#ar)"/>
+        <path class="arrow" d="M 340 308 L 340 350" marker-end="url(#ar)"/>
+        <path class="arrow" d="M 540 308 L 540 350" marker-end="url(#ar)"/>
+        <path class="arrow" d="M 740 308 L 740 350" marker-end="url(#ar)"/>
+        <path class="arrow" d="M 950 308 L 950 340 L 810 340 L 810 350" marker-end="url(#ar)"/>
+
+        <!-- Layer 7 : surfaces -->
+        <rect class="box" x="40"  y="456" width="220" height="62"/>
+        <text class="lbl" x="60" y="482">Desktop · Tauri</text>
+        <text class="sub" x="60" y="500">native window · OS notifications</text>
+
+        <rect class="box" x="280" y="456" width="240" height="62"/>
+        <text class="lbl" x="300" y="482">Server · single Docker image</text>
+        <text class="sub" x="300" y="500">browser UI · JSON API · MCP :8765</text>
+
+        <rect class="box" x="540" y="456" width="240" height="62"/>
+        <text class="lbl" x="560" y="482">Agent hooks (Claude · Codex)</text>
+        <text class="sub" x="560" y="500">SessionStart · PostToolUse · SessionEnd</text>
+
+        <rect class="box" x="800" y="456" width="260" height="62"/>
+        <text class="lbl" x="820" y="482">Any MCP host (Cursor, others)</text>
+        <text class="sub" x="820" y="500">pull-only via /.mcp.json</text>
+
+        <!-- arrows MCP → surfaces -->
+        <path class="arrow" d="M 550 424 L 550 440 L 150 440 L 150 456" marker-end="url(#ar)"/>
+        <path class="arrow" d="M 550 424 L 550 456" marker-end="url(#ar)"/>
+        <path class="arrow" d="M 550 424 L 550 440 L 660 440 L 660 456" marker-end="url(#ar)"/>
+        <path class="arrow" d="M 550 424 L 550 440 L 930 440 L 930 456" marker-end="url(#ar)"/>
+      </svg>
+      <p id="arch-cap" class="muted" style="margin-top:14px;font-size:13.5px;text-align:center">
+        From append-only JSONL on disk to a typed MCP tool an agent can call — one Rust binary, one Qdrant collection, one embedder.
       </p>
+    </div>
 
-      <div class="run-grid">
-        <div class="run-card">
-          <div class="rc-head"><span class="ic">🖥</span><h3>Desktop app · macOS</h3></div>
-          <p class="rc-sub">
-            A real window, OS notifications, and <em>live</em> proactive recall
-            that watches your sessions as you work.
-          </p>
-          <pre><span class="c"># build from source (Apple Silicon)</span>
+    <div class="arch-legend" aria-label="Architecture facts">
+      <span><b>Embedder</b> · fastembed BGE-small-en-v1.5 (384-d, cosine)</span>
+      <span><b>Vector store</b> · Qdrant 1.18.1, collection <code>memex_sessions</code></span>
+      <span><b>Point id</b> · uuid_v5(session_id) — stable across rebuilds</span>
+      <span><b>Hosts</b> · Tauri (desktop), single-image container (server), MCP clients (agents)</span>
+    </div>
+  </div>
+</section>
+
+<!-- ════════════════════ 11 MCP TOOLS ════════════════════ -->
+<section id="mcp" aria-labelledby="mcp-h">
+  <div class="wrap">
+    <p class="eyebrow-2">The surface for agents</p>
+    <h2 id="mcp-h">11 MCP tools — the same on stdio and HTTP.</h2>
+    <p class="lead">Every Memex capability is a typed tool an agent can call. Wire <code>/.mcp.json</code> (stdio) for the desktop binary, or point <code>claude mcp add --transport http</code> at the all-in-one server. The tool surface is the same; the transport changes.</p>
+    <div class="tools" role="list">
+      <div class="tool" role="listitem"><span class="n">01</span><div><span class="nm">find_similar_sessions</span><span class="ds">Lens-weighted nearest neighbors of a query string. The slider surface in one call.</span></div></div>
+      <div class="tool" role="listitem"><span class="n">02</span><div><span class="nm">find_similar_error</span><span class="ds">Search the dedicated <code>error</code> vector with <code>has_errors=true</code> — the recall reflex, available to agents.</span></div></div>
+      <div class="tool" role="listitem"><span class="n">03</span><div><span class="nm">predict_next_action</span><span class="ds">Given the current session state, surface what past-you did next at the same juncture.</span></div></div>
+      <div class="tool" role="listitem"><span class="n">04</span><div><span class="nm">mix_similar_sessions</span><span class="ds">Vector arithmetic on session points: A+B, A−B, weighted blends.</span></div></div>
+      <div class="tool" role="listitem"><span class="n">05</span><div><span class="nm">get_session_summary</span><span class="ds">Deterministic, payload-driven session digest — intents, outcomes, tools, file paths.</span></div></div>
+      <div class="tool" role="listitem"><span class="n">06</span><div><span class="nm">get_session_turn</span><span class="ds">Random-access into a session at a specific turn index — round-trip-friendly for follow-up tools.</span></div></div>
+      <div class="tool" role="listitem"><span class="n">07</span><div><span class="nm">list_recent_sessions</span><span class="ds">Time-windowed listing for catch-up panels and Companion priming.</span></div></div>
+      <div class="tool" role="listitem"><span class="n">08</span><div><span class="nm">analyze_corpus_topology</span><span class="ds">Compute the MST over content vectors, return nodes and edges for the galaxy surface.</span></div></div>
+      <div class="tool" role="listitem"><span class="n">09</span><div><span class="nm">snapshot_export</span><span class="ds">Qdrant snapshot to disk — portable, reproducible, replayable.</span></div></div>
+      <div class="tool" role="listitem"><span class="n">10</span><div><span class="nm">get_project_memory</span><span class="ds">A cwd-scoped Companion primer — past intents, decisions, pitfalls — composed deterministically, ~200–500 tokens.</span></div></div>
+      <div class="tool" role="listitem"><span class="n">11</span><div><span class="nm">generate_wrapped_report</span><span class="ds">A one-page corpus digest — top tools, repeated decisions, debugging fingerprint, cross-agent split — pure payload aggregation, no LLM.</span></div></div>
+    </div>
+    <p class="muted" style="margin-top:18px;font-size:14px">Tool registry source: <a href="https://github.com/Two-Weeks-Team/memex/blob/main/src-tauri/src/mcp.rs" target="_blank" rel="noopener">src-tauri/src/mcp.rs</a>. Wiring guide: <a href="https://github.com/Two-Weeks-Team/memex/blob/main/docs/agent-integration.md" target="_blank" rel="noopener">docs/agent-integration.md</a>.</p>
+  </div>
+</section>
+
+<!-- ════════════════════ RUN IT YOUR WAY ════════════════════ -->
+<section id="run" aria-labelledby="run-h">
+  <div class="wrap">
+    <p class="eyebrow-2">Run it</p>
+    <h2 id="run-h">Run it your way — desktop or single Docker image.</h2>
+    <p class="lead">The same Rust core. Two ways to host it. Pick the native macOS app for live recall in the menu bar, or the all-in-one container that bundles Qdrant + web UI + JSON API + MCP — pre-baked embedder, auto-indexes on boot, fully offline.</p>
+    <div class="run-grid">
+      <div class="run-card">
+        <div class="head"><span class="ic" aria-hidden="true">🖥</span><h3>Desktop · macOS (Tauri)</h3></div>
+        <p class="sub">A real window, OS notifications, and <em>live</em> proactive recall that watches your sessions as you work.</p>
+<pre><span class="c"># build from source (Apple Silicon)</span>
 <span class="p">$</span> npm install &amp;&amp; npm run tauri build
 <span class="p">$</span> open src-tauri/target/release/bundle/macos/Memex.app</pre>
-          <div class="chiprow">
-            <span class="chip on">native UX</span>
-            <span class="chip on">live recall</span>
-            <span class="chip on">OS notifications</span>
-            <span class="chip">macOS only</span>
-          </div>
-        </div>
+        <div class="chiprow"><span class="chip on">native UX</span><span class="chip on">live recall</span><span class="chip on">OS notifications</span><span class="chip">macOS only</span></div>
+      </div>
 
-        <div class="run-card featured">
-          <span class="badge-new">NEW</span>
-          <div class="rc-head"><span class="ic">🐳</span><h3>Server · one Docker image</h3></div>
-          <p class="rc-sub">
-            Qdrant + web UI + JSON API + MCP in <em>one</em> container. The
-            embedding model is pre-baked and the corpus auto-indexes on boot, so
-            it runs <em>fully offline</em>.
-          </p>
-          <pre><span class="c"># one command — Qdrant boots inside the image</span>
+      <div class="run-card featured">
+        <span class="new">NEW</span>
+        <div class="head"><span class="ic" aria-hidden="true">🐳</span><h3>Server · one Docker image</h3></div>
+        <p class="sub">Qdrant + web UI + JSON API + MCP in <em>one</em> container. The embedder is pre-baked; the corpus auto-indexes on boot — fully offline.</p>
+<pre><span class="c"># one command — Qdrant boots inside the image</span>
 <span class="p">$</span> docker run -p 8765:8765 memex-allinone
 <span class="c"># browser UI · JSON API · MCP — all on :8765</span></pre>
-          <div class="chiprow">
-            <span class="chip on">any OS (browser)</span>
-            <span class="chip on">JSON API</span>
-            <span class="chip on">MCP over HTTP</span>
-            <span class="chip on">offline</span>
-            <span class="chip on">non-root</span>
-          </div>
-        </div>
-      </div>
-
-      <div class="run-shots">
-        <div class="shot">
-          <img src="docs/img/web/web-timemachine.png" alt="Memex web UI in a browser — Time Machine deck, Lens sliders, and Predict panel, served over HTTP" loading="lazy" />
-          <span class="cap">🌐 The whole UI in a browser — zero install</span>
-        </div>
-        <div class="shot">
-          <img src="docs/img/web/web-topology.png" alt="Topology galaxy rendered in the browser over HTTP" loading="lazy" />
-          <span class="cap">🌌 Topology, served over HTTP</span>
-        </div>
-      </div>
-
-      <details class="mcp-badge" style="margin-top:22px">
-        <summary>
-          <span class="mcp-dot"></span>
-          <strong>Connect any agent over MCP — two transports</strong>
-          — HTTP/SSE for the server, or stdio inside the container
-        </summary>
-        <div class="mcp-cmd">
-          <pre><code># remote MCP over HTTP (recommended for the server)
-claude mcp add --transport http memex-web http://localhost:8765/mcp
-
-# …or stdio, the same binary inside the running container
-claude mcp add memex-web -- docker exec -i memex-allinone memex mcp</code></pre>
-          <p class="mcp-tools">
-            The same 9 tools on both transports · 100 % local · no LLM inside the
-            server. Full run guide →
-            <a href="https://github.com/Two-Weeks-Team/memex/blob/main/deploy/web/README.md" target="_blank" rel="noopener">deploy/web/README.md</a>.
-          </p>
-        </div>
-      </details>
-    </div>
-  </section>
-
-  <section class="install" id="install">
-    <div class="wrap">
-      <h2>Install the desktop app</h2>
-      <p class="h-sub">
-        macOS 11+ (Apple Silicon recommended). Tested on macOS 26.5 / arm64.
-        Linux + Windows builds are roadmap items.
-      </p>
-      <div class="steps">
-        <div class="step">
-          <div class="step-num">1</div>
-          <h4>Clone &amp; install JS deps</h4>
-          <pre>gh repo clone Two-Weeks-Team/memex ~/memex
-cd ~/memex
-npm install</pre>
-        </div>
-        <div class="step">
-          <div class="step-num">2</div>
-          <h4>Start Qdrant locally</h4>
-          <pre># Binary (arm64 macOS):
-mkdir -p .qdrant && curl -sL \
-  https://github.com/qdrant/qdrant/releases/download/v1.18.1/qdrant-aarch64-apple-darwin.tar.gz \
-  | tar xz -C .qdrant
-./.qdrant/qdrant &amp;</pre>
-        </div>
-        <div class="step">
-          <div class="step-num">3</div>
-          <h4>Index <code>~/.claude/projects</code></h4>
-          <pre>cargo build --release --manifest-path src-tauri/Cargo.toml
-./src-tauri/target/release/memex scan --index
-# ~130 MB BGE-small ONNX downloads on first run, cached.</pre>
-        </div>
-        <div class="step">
-          <div class="step-num">4</div>
-          <h4>Launch the app</h4>
-          <pre>npm run tauri build
-open src-tauri/target/release/bundle/macos/Memex.app</pre>
-        </div>
+        <div class="chiprow"><span class="chip on">any OS (browser)</span><span class="chip on">JSON API</span><span class="chip on">MCP over HTTP</span><span class="chip on">offline</span><span class="chip on">non-root</span></div>
       </div>
     </div>
-  </section>
 
-  <footer>
-    <div>
-      <a href="https://github.com/Two-Weeks-Team/memex">GitHub</a> ·
-      <a href="https://github.com/Two-Weeks-Team/memex/blob/main/LICENSE">Apache 2.0</a> ·
-      <a href="https://github.com/Two-Weeks-Team/memex/blob/main/docs/architecture.md">Architecture</a> ·
-      <a href="https://github.com/Two-Weeks-Team/memex/blob/main/docs/qdrant-features.md">Qdrant features</a> ·
-      <a href="https://github.com/Two-Weeks-Team/memex/blob/main/deploy/web/README.md">Server variant</a>
+    <div style="margin-top:24px;background:var(--card);border:1px solid var(--line);border-radius:var(--r-md);padding:18px 20px">
+      <h3 style="margin:0 0 8px">Wire any agent over MCP — two transports, same 11 tools</h3>
+<pre><span class="c"># remote MCP over HTTP (recommended for the server)</span>
+<span class="p">$</span> claude mcp add --transport http memex-web http://localhost:8765/mcp
+
+<span class="c"># …or stdio, the same binary inside the running container</span>
+<span class="p">$</span> claude mcp add memex-web -- docker exec -i memex-allinone memex mcp</pre>
+      <p class="muted" style="margin:12px 0 0;font-size:14px">Full run guide → <a href="https://github.com/Two-Weeks-Team/memex/blob/main/deploy/web/README.md" target="_blank" rel="noopener">deploy/web/README.md</a> · agent wiring → <a href="https://github.com/Two-Weeks-Team/memex/blob/main/docs/agent-integration.md" target="_blank" rel="noopener">docs/agent-integration.md</a></p>
     </div>
-    <div class="credits">
-      © 2026 · Built for
-      <a href="https://qdrant.tech/blog/vector-space-day-sf-2026/" target="_blank" rel="noopener">Qdrant Vector Space Day 2026</a>
-      on
-      <a href="https://tauri.app">Tauri 2</a> ·
-      <a href="https://qdrant.tech">Qdrant 1.18</a> ·
-      <a href="https://github.com/Anush008/fastembed-rs">fastembed-rs</a>
+  </div>
+</section>
+
+<!-- ════════════════════ SAFETY / OPS ════════════════════ -->
+<section class="tight" aria-labelledby="safety-h">
+  <div class="wrap">
+    <p class="eyebrow-2">The fine print, up front</p>
+    <h2 id="safety-h">Local-only, redacted at the door, fail-open under load.</h2>
+    <div class="feature-grid">
+      <div class="fcard">
+        <h3>🛡 Secret redaction at index time</h3>
+        <p>Session JSONL frequently contains tokens, API keys, PEM blocks. Memex's <code>redact.rs</code> neutralizes Slack / GitHub / OpenAI / AWS keys and PEM payloads <em>before</em> embedding, so the vector store never sees them. The agent-integration package ships the same redactor for hook inputs.</p>
+      </div>
+      <div class="fcard">
+        <h3>🪶 Fail-open hooks</h3>
+        <p>If the Memex engine isn't running, the SessionStart / PostToolUse / SessionEnd hooks return empty and the agent's turn proceeds with no memory — rather than stalling. Your agent never blocks on Memex.</p>
+      </div>
+      <div class="fcard">
+        <h3>🔒 Loopback by default</h3>
+        <p>The all-in-one server binds <code>127.0.0.1:8765</code>. Exposing it on the LAN is an opt-in. The Docker image runs as a non-root user and includes a healthcheck.</p>
+      </div>
     </div>
-  </footer>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="row">
+      <div class="brand-block">
+        <h4>memex</h4>
+        <p>Turn every moment into living trails of meaning, connection, and intelligence. Built for <a href="https://qdrant.tech/blog/vector-space-day-sf-2026/" target="_blank" rel="noopener">Qdrant Vector Space Day 2026</a> — local-first, Qdrant-native, LLM-free at runtime.</p>
+        <p class="muted" style="font-size:13px;margin-top:8px">Inspired by Vannevar Bush's 1945 <a href="https://en.wikipedia.org/wiki/Memex" target="_blank" rel="noopener">Memex</a> — associative trails over your AI corpus.</p>
+      </div>
+      <div>
+        <h4>Code</h4>
+        <ul>
+          <li><a href="https://github.com/Two-Weeks-Team/memex" target="_blank" rel="noopener">GitHub repo</a></li>
+          <li><a href="https://github.com/Two-Weeks-Team/memex/blob/main/LICENSE" target="_blank" rel="noopener">License</a></li>
+          <li><a href="https://github.com/Two-Weeks-Team/memex/blob/main/src-tauri/src/mcp.rs" target="_blank" rel="noopener">Tool registry</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Docs</h4>
+        <ul>
+          <li><a href="https://github.com/Two-Weeks-Team/memex/blob/main/docs/architecture.md" target="_blank" rel="noopener">Architecture</a></li>
+          <li><a href="https://github.com/Two-Weeks-Team/memex/blob/main/docs/qdrant-features.md" target="_blank" rel="noopener">Qdrant features</a></li>
+          <li><a href="https://github.com/Two-Weeks-Team/memex/blob/main/docs/agent-integration.md" target="_blank" rel="noopener">Agent integration</a></li>
+          <li><a href="https://github.com/Two-Weeks-Team/memex/blob/main/deploy/web/README.md" target="_blank" rel="noopener">Server / Docker</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>More</h4>
+        <ul>
+          <li><a href="https://two-weeks-team.github.io/memex/forge/" target="_blank" rel="noopener">36-scene gallery</a></li>
+          <li><a href="https://two-weeks-team.github.io/memex/" target="_self">This page</a></li>
+          <li><a href="https://qdrant.tech" target="_blank" rel="noopener">Qdrant</a></li>
+          <li><a href="https://tauri.app" target="_blank" rel="noopener">Tauri</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="fine">
+      <span>© 2026 Two-Weeks-Team. Open source.</span>
+      <span>memex — Sense It, Spark Memory.</span>
+    </div>
+  </div>
+</footer>
+
+<script>
+/* ─── constellation hero ──────────────────────────────────────────────────
+   A field of drifting nodes ("moments"). After ~600ms a single seed star
+   ignites; from there the constellation resolves outward — nearest-neighbor
+   edges drawing themselves into living trails. After it resolves, the
+   nodes breathe gently. No hover/click drives the reveal: the scene
+   ARRIVES on its own. prefers-reduced-motion renders the resolved scene
+   static (no churn, no flash). */
+(function () {
+  var c = document.getElementById('constellation');
+  if (!c || !c.getContext) return;
+  var ctx = c.getContext('2d');
+  var DPR = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+  var prefersReduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  var W = 0, H = 0;
+  var NODES = [];
+  var EDGES = [];
+  var COUNT = 110;             /* total moments */
+  var SEED_INDEX = 0;          /* the first star that "sparks" memory */
+  var T0 = null;               /* anim epoch, set on first draw */
+  var REVEAL_MS = 2600;        /* time the constellation takes to resolve */
+  var EDGE_DIST = 130;         /* px between connectable neighbors */
+  var EDGE_MAX_PER_NODE = 3;
+
+  var TRAILS = [
+    { name: 'meaning',      color: [181, 228, 140] }, /* sage */
+    { name: 'connection',   color: [108, 214, 255] }, /* sky */
+    { name: 'intelligence', color: [255, 214,  10] }  /* gold */
+  ];
+
+  function resize() {
+    var rect = c.getBoundingClientRect();
+    W = Math.max(320, Math.floor(rect.width));
+    H = Math.max(420, Math.floor(rect.height));
+    c.width  = W * DPR;
+    c.height = H * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  }
+
+  function rand(a, b) { return a + Math.random() * (b - a); }
+
+  function build() {
+    NODES = [];
+    for (var i = 0; i < COUNT; i++) {
+      NODES.push({
+        x:  rand(20, W - 20),
+        y:  rand(60, H - 80),
+        vx: rand(-0.05, 0.05),
+        vy: rand(-0.05, 0.05),
+        r:  rand(0.9, 2.1),
+        trail: TRAILS[i % TRAILS.length],
+        lit: 0,                  /* 0..1 — light-up factor */
+        order: 0                 /* arrival order; set during BFS */
+      });
+    }
+    /* pick a seed star near the lower-center, where the eye lands */
+    var sx = W * 0.32, sy = H * 0.72, best = 0, bestD = Infinity;
+    for (var j = 0; j < COUNT; j++) {
+      var dx = NODES[j].x - sx, dy = NODES[j].y - sy, d = dx*dx + dy*dy;
+      if (d < bestD) { bestD = d; best = j; }
+    }
+    SEED_INDEX = best;
+
+    /* compute edges: each node connects to up to EDGE_MAX_PER_NODE neighbors
+       within EDGE_DIST. Then BFS from SEED to assign arrival order. */
+    EDGES = [];
+    var adj = NODES.map(function () { return []; });
+    for (var a = 0; a < COUNT; a++) {
+      var cands = [];
+      for (var b = a + 1; b < COUNT; b++) {
+        var ddx = NODES[a].x - NODES[b].x, ddy = NODES[a].y - NODES[b].y;
+        var dd = Math.sqrt(ddx*ddx + ddy*ddy);
+        if (dd < EDGE_DIST) cands.push([dd, b]);
+      }
+      cands.sort(function (p, q) { return p[0] - q[0]; });
+      for (var k = 0; k < Math.min(EDGE_MAX_PER_NODE, cands.length); k++) {
+        var nb = cands[k][1];
+        if (adj[nb].length >= EDGE_MAX_PER_NODE) continue;
+        EDGES.push({ a: a, b: nb });
+        adj[a].push(nb); adj[nb].push(a);
+      }
+    }
+    /* BFS from seed → arrival order */
+    var q = [SEED_INDEX];
+    var seen = new Array(COUNT); seen[SEED_INDEX] = true;
+    var order = 0;
+    NODES[SEED_INDEX].order = 0;
+    while (q.length) {
+      var cur = q.shift();
+      NODES[cur].order = order++;
+      var nbrs = adj[cur].slice().sort(function (p, qq) {
+        var dx1 = NODES[p].x - NODES[cur].x, dy1 = NODES[p].y - NODES[cur].y;
+        var dx2 = NODES[qq].x - NODES[cur].x, dy2 = NODES[qq].y - NODES[cur].y;
+        return (dx1*dx1+dy1*dy1) - (dx2*dx2+dy2*dy2);
+      });
+      for (var n = 0; n < nbrs.length; n++) {
+        if (!seen[nbrs[n]]) { seen[nbrs[n]] = true; q.push(nbrs[n]); }
+      }
+    }
+    /* any unreached nodes — give them late order */
+    for (var u = 0; u < COUNT; u++) if (!seen[u]) NODES[u].order = order++;
+  }
+
+  function easeOut(t) { return 1 - Math.pow(1 - t, 3); }
+
+  function drawFrame(now) {
+    if (T0 === null) T0 = now;
+    var elapsed = now - T0;
+    var globalProgress = Math.min(1, elapsed / REVEAL_MS);
+
+    /* clear */
+    ctx.clearRect(0, 0, W, H);
+
+    /* very subtle background vignette done in CSS; here we just paint dust */
+
+    /* update light-up for each node based on arrival order */
+    for (var i = 0; i < COUNT; i++) {
+      var n = NODES[i];
+      var arrival = n.order / COUNT;            /* 0..1 — when it should appear */
+      var local = (globalProgress - arrival) / 0.25;
+      n.lit = prefersReduce ? 1 : Math.max(0, Math.min(1, local));
+      /* drift */
+      n.x += n.vx; n.y += n.vy;
+      if (n.x < 10) n.vx =  Math.abs(n.vx);
+      if (n.x > W - 10) n.vx = -Math.abs(n.vx);
+      if (n.y < 30) n.vy =  Math.abs(n.vy);
+      if (n.y > H - 30) n.vy = -Math.abs(n.vy);
+    }
+
+    /* edges — drawn only when BOTH endpoints are lit; opacity follows the
+       lesser of the two endpoints */
+    ctx.lineWidth = 1;
+    for (var e = 0; e < EDGES.length; e++) {
+      var na = NODES[EDGES[e].a], nb = NODES[EDGES[e].b];
+      var lit = Math.min(na.lit, nb.lit);
+      if (lit <= 0.02) continue;
+      var col = na.trail.color;
+      ctx.strokeStyle = 'rgba(' + col[0] + ',' + col[1] + ',' + col[2] + ',' + (0.18 * lit) + ')';
+      ctx.beginPath();
+      ctx.moveTo(na.x, na.y);
+      ctx.lineTo(nb.x, nb.y);
+      ctx.stroke();
+    }
+
+    /* nodes */
+    for (var j = 0; j < COUNT; j++) {
+      var nd = NODES[j];
+      if (nd.lit <= 0.02) continue;
+      var c0 = nd.trail.color;
+      var a = 0.22 + 0.78 * easeOut(nd.lit);
+      /* glow */
+      var gr = ctx.createRadialGradient(nd.x, nd.y, 0, nd.x, nd.y, nd.r * 8);
+      gr.addColorStop(0, 'rgba(' + c0[0] + ',' + c0[1] + ',' + c0[2] + ',' + (0.32 * a) + ')');
+      gr.addColorStop(1, 'rgba(' + c0[0] + ',' + c0[1] + ',' + c0[2] + ',0)');
+      ctx.fillStyle = gr;
+      ctx.beginPath();
+      ctx.arc(nd.x, nd.y, nd.r * 8, 0, Math.PI * 2);
+      ctx.fill();
+      /* core */
+      ctx.fillStyle = 'rgba(' + c0[0] + ',' + c0[1] + ',' + c0[2] + ',' + a + ')';
+      ctx.beginPath();
+      ctx.arc(nd.x, nd.y, nd.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    /* seed-star spark — a brief brighter ring at t≈0 */
+    if (!prefersReduce && elapsed < 1400) {
+      var sp = Math.max(0, 1 - elapsed / 1400);
+      var seed = NODES[SEED_INDEX];
+      ctx.strokeStyle = 'rgba(255, 214, 10,' + (0.55 * sp) + ')';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(seed.x, seed.y, 14 + (1 - sp) * 28, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    if (!prefersReduce) requestAnimationFrame(drawFrame);
+  }
+
+  function start() {
+    resize();
+    build();
+    if (prefersReduce) {
+      /* render the resolved scene exactly once, statically */
+      T0 = -REVEAL_MS;
+      drawFrame(0);
+      return;
+    }
+    requestAnimationFrame(drawFrame);
+  }
+
+  var resizeT = null;
+  window.addEventListener('resize', function () {
+    clearTimeout(resizeT);
+    resizeT = setTimeout(function () { resize(); build(); }, 150);
+  });
+
+  if (document.readyState === 'complete' || document.readyState === 'interactive') {
+    start();
+  } else {
+    document.addEventListener('DOMContentLoaded', start);
+  }
+})();
+
+/* ─── recall terminal: stagger reveal of lines on enter ─────────────────── */
+(function () {
+  var prefersReduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var term = document.getElementById('recall-term');
+  if (!term) return;
+  var lines = term.querySelectorAll('.line');
+  if (prefersReduce) {
+    for (var i = 0; i < lines.length; i++) lines[i].style.opacity = '1';
+    return;
+  }
+  function reveal() {
+    for (var i = 0; i < lines.length; i++) {
+      lines[i].style.animationDelay = (i * 0.45) + 's';
+      lines[i].style.opacity = '0';
+      lines[i].style.animation = 'rise .5s ease forwards';
+      lines[i].style.animationDelay = (i * 0.45) + 's';
+    }
+  }
+  if ('IntersectionObserver' in window) {
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (en) {
+        if (en.isIntersecting) { reveal(); io.disconnect(); }
+      });
+    }, { threshold: 0.25 });
+    io.observe(term);
+  } else {
+    reveal();
+  }
+})();
+</script>
 </body>
 </html>
