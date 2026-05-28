@@ -39,8 +39,13 @@ use crate::{crud, indexer, lens, mcp, parser, retrieval, schema, sec};
 struct WebMetrics {
     queries_total:          AtomicU64,   // memex_queries_total (search + lens combined)
     recall_polls_total:     AtomicU64,   // memex_recall_polls_total
-    embedder_lock_waits_ms: AtomicU64,   // memex_embedder_lock_waits_seconds_sum (in ms internally; emitted as seconds)
-    embedder_lock_count:    AtomicU64,   // memex_embedder_lock_waits_seconds_count
+    // PR #12 REV-1 (Gemini HIGH) — rename: the previous "embedder_lock_waits"
+    // was misleading; nothing actually locked a mutex. What we measure now is
+    // the wall-clock duration of the embedder-bearing indexer call in each
+    // handler — a proxy for embedder throughput plus its Qdrant round-trip.
+    // Stored in ms internally; emitted as seconds in the Prom exposition.
+    embedder_call_ms_sum:   AtomicU64,   // memex_embedder_call_seconds_sum
+    embedder_call_count:    AtomicU64,   // memex_embedder_call_seconds_count
     snapshot_bytes:         AtomicU64,   // memex_snapshot_bytes (last successful export size)
     points_indexed_total:   AtomicU64,   // memex_points_indexed_total
     errors_recalled_total:  AtomicU64,   // memex_errors_recalled_total (hits surfaced by recall lane)
@@ -51,9 +56,25 @@ struct WebMetrics {
 impl WebMetrics {
     fn mark_query(&self)        { self.queries_total.fetch_add(1, Ordering::Relaxed); }
     fn mark_recall_poll(&self)  { self.recall_polls_total.fetch_add(1, Ordering::Relaxed); }
-    fn mark_recall_hit(&self)   { self.errors_recalled_total.fetch_add(1, Ordering::Relaxed); }
+    /// PR #12 REV-2 (Gemini medium) — bulk add instead of looping `fetch_add(1)`
+    /// per hit. One atomic op per call, regardless of how many hits the recall
+    /// lane surfaced.
+    fn mark_recall_hits(&self, n: u64) {
+        if n > 0 {
+            self.errors_recalled_total.fetch_add(n, Ordering::Relaxed);
+        }
+    }
     fn mark_mcp_call(&self)     { self.mcp_calls_total.fetch_add(1, Ordering::Relaxed); }
     fn mark_indexed(&self, n: u64) { self.points_indexed_total.fetch_add(n, Ordering::Relaxed); }
+    /// PR #12 REV-1 (Gemini HIGH) — actually instrument the family that
+    /// /metrics exposes. Call this around any embedder-bearing handler so the
+    /// summary buckets accumulate real samples (not the zero-forever values
+    /// gemini-code-assist flagged on the first review pass).
+    fn record_embedder_call(&self, elapsed: std::time::Duration) {
+        let ms = elapsed.as_millis().min(u64::MAX as u128) as u64;
+        self.embedder_call_ms_sum.fetch_add(ms, Ordering::Relaxed);
+        self.embedder_call_count.fetch_add(1, Ordering::Relaxed);
+    }
     fn started_at(&self) -> Instant {
         *self.process_start.get_or_init(Instant::now)
     }
@@ -220,8 +241,15 @@ async fn health(State(s): State<WebState>) -> Json<Value> {
 // parse it without a custom format handler.
 //
 // All values come from the atomic counters in `WebMetrics`. The embedder
-// lock-wait family is a Summary-style pair (sum_seconds + count); the
+// call family is a Summary-style pair (sum_seconds + count) populated by
+// each search/lens/recall handler via record_embedder_call(); the
 // process_uptime family is computed from `Instant::now() - started_at`.
+//
+// PR #12 REV-1 (Gemini HIGH) — the previous "lock_waits" family advertised
+// a measurement that wasn't actually taken. The family is now renamed
+// `embedder_call_seconds` (sum + count) and is properly instrumented in
+// each embedder-bearing handler — the summary buckets accumulate real
+// samples.
 
 async fn metrics_handler(State(s): State<WebState>) -> Response {
     let m = &*s.metrics;
@@ -230,8 +258,8 @@ async fn metrics_handler(State(s): State<WebState>) -> Response {
 
     let queries          = m.queries_total.load(Ordering::Relaxed);
     let recall_polls     = m.recall_polls_total.load(Ordering::Relaxed);
-    let lock_waits_ms    = m.embedder_lock_waits_ms.load(Ordering::Relaxed);
-    let lock_waits_count = m.embedder_lock_count.load(Ordering::Relaxed);
+    let call_ms_sum      = m.embedder_call_ms_sum.load(Ordering::Relaxed);
+    let call_count       = m.embedder_call_count.load(Ordering::Relaxed);
     let snapshot_bytes   = m.snapshot_bytes.load(Ordering::Relaxed);
     let points_indexed   = m.points_indexed_total.load(Ordering::Relaxed);
     let errors_recalled  = m.errors_recalled_total.load(Ordering::Relaxed);
@@ -262,10 +290,10 @@ memex_points_indexed_total {points_indexed}
 # TYPE memex_snapshot_bytes gauge
 memex_snapshot_bytes {snapshot_bytes}
 
-# HELP memex_embedder_lock_waits_seconds Wall-clock time spent waiting on the embedder mutex (summary).
-# TYPE memex_embedder_lock_waits_seconds summary
-memex_embedder_lock_waits_seconds_sum {lock_waits_sec}
-memex_embedder_lock_waits_seconds_count {lock_waits_count}
+# HELP memex_embedder_call_seconds Wall-clock duration of each embedder-bearing search/lens/recall call (summary).
+# TYPE memex_embedder_call_seconds summary
+memex_embedder_call_seconds_sum {call_seconds_sum}
+memex_embedder_call_seconds_count {call_count}
 
 # HELP memex_mcp_calls_total Total MCP JSON-RPC calls received on /mcp.
 # TYPE memex_mcp_calls_total counter
@@ -280,8 +308,8 @@ memex_process_uptime_seconds {uptime_secs}
         errors_recalled   = errors_recalled,
         points_indexed    = points_indexed,
         snapshot_bytes    = snapshot_bytes,
-        lock_waits_sec    = (lock_waits_ms as f64) / 1000.0,
-        lock_waits_count  = lock_waits_count,
+        call_seconds_sum  = (call_ms_sum as f64) / 1000.0,
+        call_count        = call_count,
         mcp_calls         = mcp_calls,
         uptime_secs       = uptime_secs,
     );
@@ -307,9 +335,11 @@ fn default_limit() -> u64 {
 async fn search(State(s): State<WebState>, Query(q): Query<SearchQ>) -> ApiResult {
     s.metrics.mark_query();
     let limit = clamp_limit(q.limit);
+    let t = Instant::now();
     let hits = indexer::search_content(s.qdrant.as_ref(), s.embedder.as_ref(), &q.q, limit)
         .await
         .map_err(err500)?;
+    s.metrics.record_embedder_call(t.elapsed());
     Ok(Json(json!({ "query": q.q, "hits": hits })))
 }
 
@@ -331,6 +361,7 @@ async fn lens(State(s): State<WebState>, Json(body): Json<LensReq>) -> ApiResult
         code: 1.0,
         content_late: 0.25, // matches T3.3 — LensWeights::default() in lens.rs
     });
+    let t = Instant::now();
     let hits = indexer::lens_search(
         s.qdrant.as_ref(),
         s.embedder.as_ref(),
@@ -341,21 +372,22 @@ async fn lens(State(s): State<WebState>, Json(body): Json<LensReq>) -> ApiResult
     )
     .await
     .map_err(err500)?;
+    s.metrics.record_embedder_call(t.elapsed());
     Ok(Json(json!({ "query": body.query, "hits": hits })))
 }
 
 async fn recall(State(s): State<WebState>, Query(q): Query<SearchQ>) -> ApiResult {
     s.metrics.mark_recall_poll();
+    let t = Instant::now();
     let hits = indexer::recall(s.qdrant.as_ref(), s.embedder.as_ref(), &q.q, clamp_limit(q.limit))
         .await
         .map_err(err500)?;
-    // Each returned hit counts as one recall surface to the caller.
-    // `hits` is `Vec<SearchHit>` from indexer::recall — count via `.len()`
-    // (the previous `.as_array()` was ambiguous with the array-slice intrinsic
-    // under the current toolchain).
-    for _ in 0..hits.len() {
-        s.metrics.mark_recall_hit();
-    }
+    s.metrics.record_embedder_call(t.elapsed());
+    // PR #12 REV-2 (Gemini medium) — one atomic add for the whole batch.
+    // The previous `for _ in 0..hits.len() { mark_recall_hit() }` issued N
+    // independent `fetch_add(1)` ops, each fighting cache coherence on the
+    // counter; mark_recall_hits(n) does a single `fetch_add(n, Relaxed)`.
+    s.metrics.mark_recall_hits(hits.len() as u64);
     Ok(Json(json!({ "error_text": q.q, "hits": hits })))
 }
 

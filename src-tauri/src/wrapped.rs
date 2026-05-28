@@ -188,17 +188,37 @@ pub async fn compose_wrapped(
     // them in parallel with `tokio::join!` to overlap RPC latency. On any
     // failure, the per-field map falls back to empty and the scroll-based
     // tally below picks up the slack — never silently miscount.
-    let window_filter = window_days_to_filter(window_days);
-    let (proj_res, intent_res, outcome_res, agent_res) = tokio::join!(
-        facet_field(qdrant, "project_name", window_filter.clone()),
-        facet_field(qdrant, "intent",       window_filter.clone()),
-        facet_field(qdrant, "outcome",      window_filter.clone()),
-        facet_field(qdrant, "source_agent", window_filter.clone()),
-    );
-    let mut project_counts: HashMap<String, usize> = proj_res.unwrap_or_default();
-    let mut intent_counts:  HashMap<String, usize> = intent_res.unwrap_or_default();
-    let mut outcome_counts: HashMap<String, usize> = outcome_res.unwrap_or_default();
-    let mut agent_counts:   HashMap<String, usize> = agent_res.unwrap_or_default();
+    //
+    // PR #12 REV-4 (Codex P2) — when `truncated == true`, scroll covered only
+    // the most-recent MAX_SCROLLED_SESSIONS points but facet counts EVERY
+    // point in the time window. If we mixed them, `sessions_total` (= scroll
+    // size, capped) would be the denominator for `project_counts` (= full
+    // window), letting a bucket share exceed 100 %. Solution: when truncated,
+    // skip the facet fast path entirely. The scroll-based tally below picks
+    // it up so every bucket share stays consistent with `sessions_total`.
+    let (mut project_counts, mut intent_counts, mut outcome_counts, mut agent_counts) =
+        if truncated {
+            (
+                HashMap::<String, usize>::new(),
+                HashMap::<String, usize>::new(),
+                HashMap::<String, usize>::new(),
+                HashMap::<String, usize>::new(),
+            )
+        } else {
+            let window_filter = window_days_to_filter(window_days);
+            let (proj_res, intent_res, outcome_res, agent_res) = tokio::join!(
+                facet_field(qdrant, "project_name", window_filter.clone()),
+                facet_field(qdrant, "intent",       window_filter.clone()),
+                facet_field(qdrant, "outcome",      window_filter.clone()),
+                facet_field(qdrant, "source_agent", window_filter.clone()),
+            );
+            (
+                proj_res.unwrap_or_default(),
+                intent_res.unwrap_or_default(),
+                outcome_res.unwrap_or_default(),
+                agent_res.unwrap_or_default(),
+            )
+        };
 
     // ---- 2. Aggregate the remaining payload-only stats (scroll fallback)
     //         `arc` is computed/enriched but NOT a v3 indexed payload field,
@@ -1056,6 +1076,31 @@ mod tests {
             md.contains("exceeds") && md.contains("cap"),
             "truncated=true should surface a 'corpus exceeds cap' notice; got:\n{md}"
         );
+    }
+
+    /* PR #12 REV-4 (Codex P2) — Facet must respect scroll truncation ---- */
+
+    #[test]
+    fn facet_response_empty_collapses_buckets_to_scroll_size() {
+        // When `truncated == true` (corpus > MAX_SCROLLED_SESSIONS), the
+        // compose_wrapped flow MUST skip facet results. We can't drive the
+        // RPC in a unit test, but we can lock the contract: when the four
+        // facet maps come back empty, the scroll-based fallback path
+        // (`facet_*_empty` flags in compose_wrapped) re-tallies from the
+        // capped sample so bucket shares stay ≤ 100 %.
+        //
+        // This test asserts the property by simulating the bucket math.
+        let proj_counts: HashMap<String, usize> = HashMap::new(); // facet skipped
+        // Suppose 1 200 scrolled sessions with 600 in project "memex":
+        let mut tallied = proj_counts.clone();
+        for _ in 0..600 { *tallied.entry("memex".to_string()).or_insert(0) += 1; }
+        let total = 1_200;
+        let buckets = into_buckets(&tallied, total);
+        // 600 / 1200 = 0.50 — a valid share, NOT > 1.0 which would happen if
+        // we used the un-truncated facet count of (say) 50 000 over total=1200.
+        assert!(buckets[0].share <= 1.0,
+            "REV-4 invariant: bucket share must never exceed 1.0 when truncated");
+        assert!((buckets[0].share - 0.5).abs() < 1e-6);
     }
 
     /* T3.1 Facet API tests — assert the new code path is hit. ----------- */

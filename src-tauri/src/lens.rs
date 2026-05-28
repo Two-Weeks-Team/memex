@@ -109,7 +109,10 @@ pub struct LensWeights {
     pub error: f32,
     #[serde(default = "default_weight")]
     pub code: f32,
-    #[serde(default = "default_zero")]
+    // REV-3 (PR #12 gemini medium) — serde default must match Default impl,
+    // otherwise a JSON request that omits `content_late` deserializes to 0.0
+    // (silently disabling the lane) instead of the post-T3.3 default of 0.25.
+    #[serde(default = "default_content_late")]
     pub content_late: f32,
     /// KA-02. `None` ⇒ no MMR. `Some(d)` with d ∈ [0,1] ⇒ wrap the **content**
     /// prefetch with NearestWithMmr(diversity=d). Per spec, default is 0.4
@@ -125,8 +128,12 @@ pub struct LensWeights {
 fn default_weight() -> f32 {
     1.0
 }
-fn default_zero() -> f32 {
-    0.0
+/// T3.3 + PR #12 REV-3 — serde default for `content_late` must agree with
+/// `LensWeights::default().content_late` (0.25), otherwise wire requests that
+/// omit the field silently disable the multivector rerank lane.
+/// (The old `default_zero` helper became unreachable after this rename.)
+fn default_content_late() -> f32 {
+    0.25
 }
 
 impl Default for LensWeights {
@@ -1315,6 +1322,25 @@ mod tests {
         );
         assert_eq!(payload_bool(&p, "has_errors"), Some(true));
         assert_eq!(payload_bool(&p, "missing"), None);
+    }
+
+    /* PR #12 REV-3 (Gemini medium) — serde default for content_late must
+     * match LensWeights::default() so a JSON request that omits the field
+     * deserializes to 0.25, not 0.0 (the old silently-disable-the-lane bug). */
+
+    #[test]
+    fn serde_default_content_late_matches_struct_default() {
+        // Request with content_late OMITTED — should deserialize to 0.25
+        // (LensWeights::default().content_late), NOT 0.0 (old default_zero).
+        let json = r#"{"content":1.0,"tool":1.0,"path":1.0,"error":1.0,"code":1.0}"#;
+        let w: LensWeights = serde_json::from_str(json)
+            .expect("omitted content_late must deserialize via the new default_content_late()");
+        assert_eq!(w.content_late, 0.25,
+            "REV-3 invariant: serde default for content_late must match LensWeights::default()");
+        // Sanity: explicit value still wins over the default.
+        let json_explicit = r#"{"content":1.0,"tool":1.0,"path":1.0,"error":1.0,"code":1.0,"content_late":0.0}"#;
+        let w_explicit: LensWeights = serde_json::from_str(json_explicit).unwrap();
+        assert_eq!(w_explicit.content_late, 0.0);
     }
 
     #[test]
