@@ -241,7 +241,7 @@ The server exposes **11 tools** mapping directly to the same Qdrant primitives t
 
 | Tool | What it does |
 |---|---|
-| `find_similar_sessions(query, limit?, weights?)` | Five-vector Lens search over your past sessions. Per-vector contribution scores in the response. `weights` is the canonical 8-field `LensWeights` shape (PR #17 collapsed the two structs): `content`, `tool`, `path`, `error`, `code`, `content_late` (default 0.25 — multivector rerank lane), `diversity` (`null` or 0.0–1.0 for MMR), `fusion` (`"Formula"` or `"Rrf"`). Partial JSON honoured — omitted fields fall to defaults. |
+| `find_similar_sessions(query, limit?, weights?)` | Five-vector Lens search over your past sessions. Per-vector contribution scores in the response. `weights` is the canonical 8-field `LensWeights` shape (PR #17 collapsed the two structs): `content`, `tool`, `path`, `error`, `code`, `content_late` (default 0.25 — multivector rerank lane), `diversity` (`null` or 0.0–1.0 for MMR), `fusion` (`"formula"` or `"rrf"` — snake_case per `serde(rename_all)` on `FusionMode`). Partial JSON honoured — omitted fields fall to defaults. |
 | `find_similar_error(error_text, limit?)` | Targeted neighbor search on the `error` named vector, filtered to `has_errors=true`. Returns sessions that *also* hit a similar error — typically the ones that resolved it. |
 | `predict_next_action(session_id, last_n_turns?, horizon?, neighbors?)` | "What would past-you do next?" — neighbor walk + tool-call aggregation, returns ranked `(tool, example_input, source_session, turn_index)` with `frequency × similarity`. |
 | `mix_similar_sessions(positive[], negative[], limit?)` | Qdrant Discovery API — sessions near the positives, away from the negatives. |
@@ -707,8 +707,12 @@ memex serve   --port 8765 --ui-dir src          # headless UI + JSON API + HTTP 
 memex warm-embedder                              # pre-bake BGE-small for the Docker image
 
 # Quantization sweep (PR #18 — closes #13)
-MEMEX_QUANT_MODE=f32|tq-bits1|tq-bits2 cargo bench --bench quant_sweep
-#                                       # dry-run by default; MEMEX_BENCH_LIVE=1 enables the live runner
+# Cargo.toml lives under src-tauri/; --manifest-path lets you run from repo root.
+# Replace the env value (f32 | tq-bits1 | tq-bits2) per row of the sweep.
+MEMEX_QUANT_MODE=tq-bits2 cargo bench --bench quant_sweep --manifest-path src-tauri/Cargo.toml
+# Bench is currently a SCAFFOLD: the dry-run no-op + the MEMEX_BENCH_LIVE=1 path's
+# query-runner + nDCG closures are documented stubs (`benches/quant_sweep.rs`).
+# Use to verify the runtime knob + fixture format; full live wiring is a follow-up.
 ```
 
 Run `memex --help` for the full surface; each subcommand has `--help` too.
@@ -832,9 +836,9 @@ This is a **hackathon MVP** built for [Qdrant Vector Space Day 2026](https://qdr
 - ✅ 🪟 **Cross-platform paths** (WIN-01) — `dirs::home_dir` / `dirs::cache_dir` / `std::env::split_paths` replace bare `$HOME` reads + `:`-split, so Windows drive letters (`C:\corpus`) work end-to-end
 - ✅ 🐳 **Server variant** (PR #6) — single Docker image bundling Qdrant + axum web (UI + JSON API + HTTP MCP at `/mcp`) in one container, BGE-small pre-baked at build; see [`deploy/web/`](deploy/web/)
 - ✅ 📊 **Prometheus `/metrics`** (PR #12 T3.2) — 8 metric families on the headless `web` build: `memex_queries_total`, `memex_recall_polls_total`, `memex_errors_recalled_total`, `memex_points_indexed_total`, `memex_snapshot_bytes`, `memex_embedder_call_seconds`, `memex_mcp_calls_total`, `memex_process_uptime_seconds`. Scrape directly from the Docker container alongside `/api/health`.
-- ✅ 🎯 **Multivector rerank on by default** (PR #12 T3.3) — `LensWeights::default().content_late = 0.25` activates the ColBERT-style late-interaction lane as a rerank-only nudge without dominating dense lenses. **PR #17 collapsed `indexer::LensWeights` into `lens::LensWeights` via `pub use`** — single canonical 8-field struct, no more cross-struct drift (REV-3/8/15 closed). Public JSON API now exposes `diversity` (MMR knob, 0.0–1.0) and `fusion` (`"Formula"` | `"Rrf"`) directly — previously silently dropped by the internal adapter.
+- ✅ 🎯 **Multivector rerank on by default** (PR #12 T3.3) — `LensWeights::default().content_late = 0.25` activates the ColBERT-style late-interaction lane as a rerank-only nudge without dominating dense lenses. **PR #17 collapsed `indexer::LensWeights` into `lens::LensWeights` via `pub use`** — single canonical 8-field struct, no more cross-struct drift (REV-3/8/15 closed). Public JSON API now exposes `diversity` (MMR knob, 0.0–1.0) and `fusion` (`"formula"` | `"rrf"`, snake_case per `serde(rename_all)`) directly — previously silently dropped by the internal adapter.
 - ✅ 🔍 **Identifier-aware title search** (PR #17 closes #14) — new `ai_title_tokens` sibling payload index (v3 payload indexes 10 → 11). Client-side `schema::identifier_tokens()` splits camelCase / snake_case / kebab-case at index time: `getUserData → [getUserData, get, User, Data]`. A search for `"user"` now matches a session titled `"getUserData refactor"`. Qdrant 1.18's 4 builtin tokenizers don't do this; we tokenise client-side, same pattern as Elasticsearch's `word_delimiter_graph`.
-- ✅ 🎛 **Runtime quantization knob** (PR #18 closes #13) — `MEMEX_QUANT_MODE=f32|tq-bits1|tq-bits2` env var swaps Qdrant collection quantization config without source edits or rebuilds. Default unchanged (`TqBits2`, matches PR #12's hardcoded production value). Companion `cargo bench --bench quant_sweep` Criterion harness with `MEMEX_BENCH_LIVE=1` toggle for live runs against a labeled-queries fixture (recipe in [`docs/benchmarks.md`](docs/benchmarks.md)).
+- ✅ 🎛 **Runtime quantization knob** (PR #18 closes #13) — `MEMEX_QUANT_MODE` env var (`f32` / `tq-bits1` / `tq-bits2`) swaps Qdrant collection quantization config without source edits or rebuilds. Default unchanged (`TqBits2`, matches PR #12's hardcoded production value). Companion `cargo bench --bench quant_sweep` Criterion harness is a **scaffold**: the dry-run no-op + the `MEMEX_BENCH_LIVE=1` path's query-runner + nDCG closures are documented stubs in `benches/quant_sweep.rs` — useful today for verifying the runtime knob + fixture JSONL format, full live wiring (per-query runner + actual `mean_ndcg_at_10`) lands in a follow-up. Recipe in [`docs/benchmarks.md`](docs/benchmarks.md).
 - ✅ 📦 Snapshot export/import via Qdrant HTTP API — `POST /api/snapshot/export` on the web variant (PR #12 REV-14 — `memex_snapshot_bytes` metric now live-tracked)
 - ✅ 🌐 Public landing page at [two-weeks-team.github.io/memex](https://two-weeks-team.github.io/memex/) (single-file `index.html`, no JS)
 - ✅ Lazy AppState init — self-heals if Qdrant is started after Memex
