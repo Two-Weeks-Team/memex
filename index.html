@@ -212,10 +212,15 @@ section.tight{ padding:64px 0; }
 @media (max-width:880px){ .cwl{ grid-template-columns:1fr; } }
 
 /* ─── architecture diagram ──────────────────────────────────────────────── */
-.arch-wrap{ margin-top:34px; background:linear-gradient(180deg, #0a0a14, #07070d); border:1px solid var(--line); border-radius:var(--r-lg); padding:28px; }
+.arch-wrap{ margin-top:34px; background:linear-gradient(180deg, #0a0a14, #07070d); border:1px solid var(--line); border-radius:var(--r-lg); padding:22px 18px 18px; overflow:hidden; }
 .arch-wrap svg{ width:100%; height:auto; display:block; }
-.arch-legend{ display:flex; flex-wrap:wrap; gap:20px; margin-top:18px; font-size:13px; color:var(--fg-mute); }
-.arch-legend span b{ color:var(--fg); font-weight:600; }
+.arch-legend{ display:grid; grid-template-columns:repeat(4, 1fr); gap:14px 24px; margin-top:22px; padding:0 6px; font-size:13px; color:var(--fg-mute); }
+.arch-legend > div{ display:flex; gap:10px; align-items:flex-start; }
+.arch-legend .sw{ display:inline-block; width:10px; height:10px; border-radius:3px; margin-top:5px; flex-shrink:0; }
+.arch-legend b{ color:var(--fg); font-weight:600; display:block; font-size:12.5px; }
+.arch-legend i{ font-style:normal; color:var(--fg-low); font-size:12.5px; }
+@media (max-width:880px){ .arch-legend{ grid-template-columns:1fr 1fr; } }
+@media (max-width:520px){ .arch-legend{ grid-template-columns:1fr; } }
 
 /* ─── mcp tools grid ────────────────────────────────────────────────────── */
 .tools{ display:grid; grid-template-columns:repeat(2, 1fr); gap:12px; margin-top:30px; }
@@ -388,157 +393,677 @@ footer .fine{ margin-top:42px; padding-top:22px; border-top:1px solid var(--line
     <p class="lead">From append-only JSONL on disk to a typed MCP tool an agent can call — the whole path is one Rust binary, one Qdrant collection, and one embedder. The same core ships as a desktop app (Tauri) <em>and</em> as a single Docker image.</p>
 
     <div class="arch-wrap" role="img" aria-labelledby="arch-h" aria-describedby="arch-cap">
-      <svg viewBox="0 0 1100 540" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <svg viewBox="0 0 1400 1480" xmlns="http://www.w3.org/2000/svg">
         <defs>
-          <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-            <path d="M 0 0 L 10 5 L 0 10 z" fill="#7a7a86"/>
+          <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5.5" markerHeight="5.5" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="#6a6a78"/>
           </marker>
-          <linearGradient id="lensgrad" x1="0" x2="1" y1="0" y2="0">
+          <marker id="ahS" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="4.5" markerHeight="4.5" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="#4a4a56"/>
+          </marker>
+          <marker id="ahA" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="#ffd60a"/>
+          </marker>
+          <linearGradient id="vbar" x1="0" y1="0" x2="1" y2="0">
             <stop offset="0%"   stop-color="#6cd6ff"/>
             <stop offset="25%"  stop-color="#ffb454"/>
             <stop offset="50%"  stop-color="#b5e48c"/>
             <stop offset="75%"  stop-color="#ff6b7a"/>
             <stop offset="100%" stop-color="#c792ea"/>
           </linearGradient>
+          <linearGradient id="featBg" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%"  stop-color="#16140a"/>
+            <stop offset="60%" stop-color="#0e0d09"/>
+            <stop offset="100%" stop-color="#0a0a08"/>
+          </linearGradient>
+          <radialGradient id="featGlow" cx="50%" cy="0%" r="60%">
+            <stop offset="0%" stop-color="#ffd60a" stop-opacity=".10"/>
+            <stop offset="100%" stop-color="#ffd60a" stop-opacity="0"/>
+          </radialGradient>
+          <linearGradient id="cContent" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#6cd6ff" stop-opacity=".0"/><stop offset="100%" stop-color="#6cd6ff" stop-opacity=".95"/></linearGradient>
+          <linearGradient id="cTool"    x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#ffb454" stop-opacity=".0"/><stop offset="100%" stop-color="#ffb454" stop-opacity=".95"/></linearGradient>
+          <linearGradient id="cPath"    x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#b5e48c" stop-opacity=".0"/><stop offset="100%" stop-color="#b5e48c" stop-opacity=".95"/></linearGradient>
+          <linearGradient id="cError"   x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#ff6b7a" stop-opacity=".0"/><stop offset="100%" stop-color="#ff6b7a" stop-opacity=".95"/></linearGradient>
+          <linearGradient id="cCode"    x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#c792ea" stop-opacity=".0"/><stop offset="100%" stop-color="#c792ea" stop-opacity=".95"/></linearGradient>
           <style>
-            .lbl { font: 600 13px ui-sans-serif, -apple-system, system-ui, sans-serif; fill:#ededf2; }
-            .sub { font: 400 11.5px ui-monospace, "SF Mono", Menlo, monospace; fill:#9a9aa6; }
-            .lns { font: 600 11.5px ui-monospace, "SF Mono", Menlo, monospace; }
-            .box { fill:#0d0d14; stroke:#23232c; stroke-width:1.2; rx:10; ry:10; }
-            .boxhi { fill:#10101a; stroke:#33334a; stroke-width:1.4; rx:10; ry:10; }
-            .arrow { stroke:#7a7a86; stroke-width:1.2; fill:none; }
+            .lyr-n  { font: 800 36px ui-monospace, "SF Mono", Menlo, monospace; fill:#1d1d27; letter-spacing:-.03em; }
+            .lyr-l  { font: 800 11px ui-sans-serif, -apple-system, system-ui, sans-serif; letter-spacing:.22em; fill:#5a5a64; }
+            .lyr-l-a{ font: 800 11px ui-sans-serif, system-ui, sans-serif; letter-spacing:.22em; fill:#a08a30; }
+            .lyr-l-q{ font: 800 11px ui-sans-serif, system-ui, sans-serif; letter-spacing:.22em; fill:#7a5aa0; }
+            .lyr-l-x{ font: 800 11px ui-sans-serif, system-ui, sans-serif; letter-spacing:.22em; fill:#a07a40; }
+            .lyr-l-s{ font: 800 11px ui-sans-serif, system-ui, sans-serif; letter-spacing:.22em; fill:#7a6aa0; }
+            .lyr-d  { font: 400 11.5px ui-sans-serif, system-ui, sans-serif; fill:#7a7a86; }
+            .ttl    { font: 700 15px ui-sans-serif, -apple-system, system-ui, sans-serif; fill:#ededf2; }
+            .ttl-mid{ font: 700 13.5px ui-sans-serif, system-ui, sans-serif; fill:#ededf2; }
+            .ttl-lg { font: 800 24px ui-sans-serif, -apple-system, system-ui, sans-serif; fill:#ffd60a; letter-spacing:-.012em; }
+            .sub    { font: 400 12.5px ui-monospace, "SF Mono", Menlo, monospace; fill:#9a9aa6; }
+            .mut    { font: 400 11px ui-monospace, "SF Mono", Menlo, monospace; fill:#65656f; }
+            .micro  { font: 400 10px ui-monospace, "SF Mono", Menlo, monospace; fill:#55555f; }
+            .chip   { font: 800 13px ui-monospace, "SF Mono", Menlo, monospace; }
+            .chip-s { font: 400 10.5px ui-monospace, "SF Mono", Menlo, monospace; }
+            .api    { font: 600 11.5px ui-monospace, "SF Mono", Menlo, monospace; fill:#cfe7ff; }
+            .pill-r { font: 700 10px ui-sans-serif, system-ui, sans-serif; letter-spacing:.16em; fill:#a08a30; }
+            .pill-w { font: 700 10px ui-sans-serif, system-ui, sans-serif; letter-spacing:.14em; fill:#a0a0ad; }
+            .kw-k   { font: 600 11.5px ui-monospace, "SF Mono", Menlo, monospace; fill:#7a7a86; }
+            .kw-v   { font: 600 11.5px ui-monospace, "SF Mono", Menlo, monospace; fill:#cfe7ff; }
+            .kw-c   { font: 400 11px ui-monospace, "SF Mono", Menlo, monospace; fill:#55555f; font-style:italic; }
+            .band   { fill:rgba(255,255,255,.014); stroke:rgba(255,255,255,.025); stroke-width:1; }
+            .band-q { fill:rgba(191,90,242,.022); stroke:rgba(191,90,242,.05); stroke-width:1; }
+            .band-s { fill:rgba(199,146,234,.020); stroke:rgba(199,146,234,.05); stroke-width:1; }
+            .band-x { fill:rgba(255,180,84,.020); stroke:rgba(255,180,84,.06); stroke-width:1; }
+            .band-i { fill:rgba(108,214,255,.018); stroke:rgba(108,214,255,.05); stroke-width:1; }
+            .band-e { fill:rgba(181,228,140,.018); stroke:rgba(181,228,140,.04); stroke-width:1; }
+            .card   { fill:#0c0c12; stroke:#23232c; stroke-width:1; }
+            .card-h { fill:#11111a; stroke:#34344a; stroke-width:1.2; }
+            .feat   { fill:url(#featBg); stroke:#5a4d10; stroke-width:1.6; }
+            .panel  { fill:#0a0a10; stroke:#23232c; stroke-width:1; }
+            .panel-a{ fill:#0c0a06; stroke:#3a3014; stroke-width:1; }
+            .trunk  { stroke:#7a7a86; stroke-width:2.4; fill:none; stroke-linecap:round; }
+            .branch { stroke:#4a4a56; stroke-width:1.3; fill:none; stroke-linecap:round; }
+            .rail   { stroke:#3a3a44; stroke-width:1.1; fill:none; }
+            .icn    { stroke:#9a9aa6; fill:none; stroke-width:1.4; stroke-linecap:round; stroke-linejoin:round; }
+            .icn-a  { stroke:#ffd60a; fill:none; stroke-width:1.4; stroke-linecap:round; stroke-linejoin:round; }
+            .icn-d  { stroke:#9a9aa6; fill:#9a9aa6; }
           </style>
         </defs>
 
-        <!-- Layer 1 : sources -->
-        <rect class="box" x="30" y="30"  width="220" height="78"/>
-        <text class="lbl" x="50"  y="58">Claude Code sessions</text>
-        <text class="sub" x="50"  y="78">~/.claude/projects/&lt;cwd&gt;/&lt;uuid&gt;.jsonl</text>
-        <text class="sub" x="50"  y="94">append-only · source of truth</text>
-
-        <rect class="box" x="30" y="124" width="220" height="78"/>
-        <text class="lbl" x="50"  y="152">Codex CLI sessions</text>
-        <text class="sub" x="50"  y="172">~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl</text>
-        <text class="sub" x="50"  y="188">parsed via session_meta envelope</text>
-
-        <!-- arrows source → parser -->
-        <path class="arrow" d="M 250 69  L 310 69"  marker-end="url(#ar)"/>
-        <path class="arrow" d="M 250 163 L 310 163" marker-end="url(#ar)"/>
-
-        <!-- Layer 2 : parser -->
-        <rect class="boxhi" x="310" y="46"  width="200" height="140"/>
-        <text class="lbl" x="330" y="74">parser.rs</text>
-        <text class="sub" x="330" y="94">scan_dir() · parse_session()</text>
-        <text class="sub" x="330" y="112">→ Session / Turn / ToolCall</text>
-        <text class="sub" x="330" y="138">5 string extracts per session:</text>
-        <text class="sub" x="330" y="154" fill="#cfe7ff">content · tool · path</text>
-        <text class="sub" x="330" y="170" fill="#cfe7ff">error   · code</text>
-
-        <!-- arrow parser → indexer -->
-        <path class="arrow" d="M 510 116 L 580 116" marker-end="url(#ar)"/>
-
-        <!-- Layer 3 : indexer + embedder -->
-        <rect class="boxhi" x="580" y="46"  width="220" height="140"/>
-        <text class="lbl" x="600" y="74">indexer.rs · Embedder</text>
-        <text class="sub" x="600" y="94">fastembed BGE-small-en-v1.5</text>
-        <text class="sub" x="600" y="110">384-d cosine · Mutex-wrapped</text>
-        <text class="sub" x="600" y="138">lens_search · mix_match · topology</text>
-        <text class="sub" x="600" y="154">recall · snapshot_export / import</text>
-        <text class="sub" x="600" y="170">predict_next_action</text>
-
-        <!-- arrow indexer → qdrant -->
-        <path class="arrow" d="M 800 116 L 870 116" marker-end="url(#ar)"/>
-
-        <!-- Layer 4 : qdrant -->
-        <rect class="boxhi" x="870" y="30"  width="200" height="172"/>
-        <text class="lbl" x="890" y="58">Qdrant 1.18.1</text>
-        <text class="sub" x="890" y="78">collection: memex_sessions</text>
-        <text class="sub" x="890" y="96">point_id = uuid_v5(session_id)</text>
-        <text class="sub" x="890" y="116">5 named vectors per point:</text>
-        <rect x="890" y="124" width="160" height="8" fill="url(#lensgrad)" rx="4"/>
-        <text class="lns" x="890" y="148" fill="#6cd6ff">content</text>
-        <text class="lns" x="940" y="148" fill="#ffb454">tool</text>
-        <text class="lns" x="975" y="148" fill="#b5e48c">path</text>
-        <text class="lns" x="890" y="166" fill="#ff6b7a">error</text>
-        <text class="lns" x="930" y="166" fill="#c792ea">code</text>
-        <text class="sub" x="890" y="186">+ payload (project, branch, …)</text>
-
-        <!-- Layer 5 : five capability lanes -->
-        <g>
-          <rect class="box" x="50"  y="244" width="180" height="64"/>
-          <text class="lbl" x="64" y="270">Lens slider</text>
-          <text class="sub" x="64" y="288">multi-vector Universal Query</text>
-
-          <rect class="box" x="250" y="244" width="180" height="64"/>
-          <text class="lbl" x="264" y="270">Topology · MST</text>
-          <text class="sub" x="264" y="288">nearest content-vector edges</text>
-
-          <rect class="box" x="450" y="244" width="180" height="64"/>
-          <text class="lbl" x="464" y="270">Mix &amp; match</text>
-          <text class="sub" x="464" y="288">vector arithmetic on points</text>
-
-          <rect class="box" x="650" y="244" width="180" height="64"/>
-          <text class="lbl" x="664" y="270">Proactive recall</text>
-          <text class="sub" x="664" y="288">error lens + has_errors filter</text>
-
-          <rect class="box" x="850" y="244" width="200" height="64"/>
-          <text class="lbl" x="864" y="270">Predict next-action</text>
-          <text class="sub" x="864" y="288">k-NN over neighbor outcomes</text>
+        <!-- Top guide strip -->
+        <g transform="translate(0,0)">
+          <text class="lyr-l" x="40" y="36">FROM JSONL ON DISK · TO A TYPED MCP TOOL · IN SIX LAYERS</text>
+          <line class="rail" x1="40" y1="46" x2="1360" y2="46"/>
         </g>
 
-        <!-- arrows qdrant → capabilities -->
-        <path class="arrow" d="M 970 202 L 970 222 L 140 222 L 140 244" marker-end="url(#ar)"/>
-        <path class="arrow" d="M 340 222 L 340 244" marker-end="url(#ar)"/>
-        <path class="arrow" d="M 540 222 L 540 244" marker-end="url(#ar)"/>
-        <path class="arrow" d="M 740 222 L 740 244" marker-end="url(#ar)"/>
-        <path class="arrow" d="M 950 222 L 950 244" marker-end="url(#ar)"/>
+        <!-- ═══════════ BAND 01 · SOURCES (y=60..240) ═══════════ -->
+        <rect class="band-i" x="20" y="60" width="1360" height="180" rx="14"/>
+        <text class="lyr-n" x="40"  y="108">01</text>
+        <text class="lyr-l" x="40"  y="126">SOURCES</text>
+        <text class="lyr-d" x="40"  y="146">your history,</text>
+        <text class="lyr-d" x="40"  y="162">append-only</text>
+        <text class="lyr-d" x="40"  y="178">on local disk</text>
+        <text class="micro" x="40"  y="206">0 cloud</text>
+        <text class="micro" x="40"  y="220">round-trips</text>
 
-        <!-- Layer 6 : MCP server -->
-        <rect class="boxhi" x="280" y="350" width="540" height="74"/>
-        <text class="lbl" x="300" y="378">MCP server · 11 typed tools</text>
-        <text class="sub" x="300" y="398">stdio transport · in-process for the desktop app</text>
-        <text class="sub" x="300" y="414">HTTP transport · :8765/mcp · for the all-in-one container</text>
+        <g><!-- Claude Code source -->
+          <rect class="card" x="140" y="80" width="580" height="140" rx="11"/>
+          <g transform="translate(160, 98)">
+            <path class="icn" d="M0 0 L14 0 L18 4 L18 22 L0 22 Z"/>
+            <path class="icn" d="M14 0 L14 4 L18 4"/>
+            <line class="icn" x1="3" y1="10" x2="14" y2="10"/>
+            <line class="icn" x1="3" y1="14" x2="14" y2="14"/>
+            <line class="icn" x1="3" y1="18" x2="10" y2="18"/>
+          </g>
+          <text class="ttl" x="194" y="106">Claude Code sessions</text>
+          <text class="sub" x="194" y="126">~/.claude/projects/&lt;cwd&gt;/&lt;uuid&gt;.jsonl</text>
+          <text class="pill-w" x="700" y="106" text-anchor="end" fill="#6cd6ff">APPEND-ONLY · SOURCE OF TRUTH</text>
+          <!-- JSONL preview lines -->
+          <g transform="translate(160, 148)">
+            <rect x="0" y="0" width="540" height="58" rx="6" fill="#06060c" stroke="#1a1a24" stroke-width="1"/>
+            <text class="micro" x="12" y="16" fill="#7a7a86">{<tspan fill="#9cd2ff">"type"</tspan>:<tspan fill="#a3e07f">"user"</tspan>,<tspan fill="#9cd2ff">"content"</tspan>:<tspan fill="#a3e07f">"…"</tspan>}</text>
+            <text class="micro" x="12" y="32" fill="#7a7a86">{<tspan fill="#9cd2ff">"type"</tspan>:<tspan fill="#a3e07f">"assistant"</tspan>,<tspan fill="#9cd2ff">"tool_use"</tspan>:<tspan fill="#a3e07f">"Bash"</tspan>,…}</text>
+            <text class="micro" x="12" y="48" fill="#7a7a86">{<tspan fill="#9cd2ff">"type"</tspan>:<tspan fill="#a3e07f">"tool_result"</tspan>,<tspan fill="#9cd2ff">"is_error"</tspan>:<tspan fill="#ff8a96">true</tspan>}</text>
+          </g>
+        </g>
 
-        <!-- arrows capabilities → MCP -->
-        <path class="arrow" d="M 140 308 L 140 340 L 290 340 L 290 350" marker-end="url(#ar)"/>
-        <path class="arrow" d="M 340 308 L 340 350" marker-end="url(#ar)"/>
-        <path class="arrow" d="M 540 308 L 540 350" marker-end="url(#ar)"/>
-        <path class="arrow" d="M 740 308 L 740 350" marker-end="url(#ar)"/>
-        <path class="arrow" d="M 950 308 L 950 340 L 810 340 L 810 350" marker-end="url(#ar)"/>
+        <g><!-- Codex CLI source -->
+          <rect class="card" x="740" y="80" width="580" height="140" rx="11"/>
+          <g transform="translate(760, 98)">
+            <path class="icn" d="M0 0 L14 0 L18 4 L18 22 L0 22 Z"/>
+            <path class="icn" d="M14 0 L14 4 L18 4"/>
+            <line class="icn" x1="3" y1="10" x2="14" y2="10"/>
+            <line class="icn" x1="3" y1="14" x2="14" y2="14"/>
+            <line class="icn" x1="3" y1="18" x2="10" y2="18"/>
+          </g>
+          <text class="ttl" x="794" y="106">Codex CLI sessions</text>
+          <text class="sub" x="794" y="126">~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl</text>
+          <text class="pill-w" x="1300" y="106" text-anchor="end" fill="#6cd6ff">SESSION_META ENVELOPE</text>
+          <!-- preview -->
+          <g transform="translate(760, 148)">
+            <rect x="0" y="0" width="540" height="58" rx="6" fill="#06060c" stroke="#1a1a24" stroke-width="1"/>
+            <text class="micro" x="12" y="16" fill="#7a7a86">{<tspan fill="#9cd2ff">"timestamp"</tspan>:"…",<tspan fill="#9cd2ff">"type"</tspan>:<tspan fill="#a3e07f">"session_meta"</tspan>,…}</text>
+            <text class="micro" x="12" y="32" fill="#7a7a86">{<tspan fill="#9cd2ff">"type"</tspan>:<tspan fill="#a3e07f">"event_msg"</tspan>,<tspan fill="#9cd2ff">"payload"</tspan>:{…}}</text>
+            <text class="micro" x="12" y="48" fill="#7a7a86">{<tspan fill="#9cd2ff">"type"</tspan>:<tspan fill="#a3e07f">"response_item"</tspan>,…}</text>
+          </g>
+        </g>
 
-        <!-- Layer 7 : surfaces -->
-        <rect class="box" x="40"  y="456" width="220" height="62"/>
-        <text class="lbl" x="60" y="482">Desktop · Tauri</text>
-        <text class="sub" x="60" y="500">native window · OS notifications</text>
+        <!-- merge two sources into trunk -->
+        <path class="branch" d="M430 220 L430 244 L1030 244 L1030 220"/>
+        <path class="trunk"  d="M730 244 L730 268" marker-end="url(#ah)"/>
 
-        <rect class="box" x="280" y="456" width="240" height="62"/>
-        <text class="lbl" x="300" y="482">Server · single Docker image</text>
-        <text class="sub" x="300" y="500">browser UI · JSON API · MCP :8765</text>
+        <!-- ═══════════ BAND 02 · INGEST (y=260..480) ═══════════ -->
+        <rect class="band-e" x="20" y="260" width="1360" height="220" rx="14"/>
+        <text class="lyr-n" x="40"  y="308">02</text>
+        <text class="lyr-l" x="40"  y="326">INGEST</text>
+        <text class="lyr-d" x="40"  y="346">parse + embed</text>
+        <text class="lyr-d" x="40"  y="362">once, locally</text>
+        <text class="micro" x="40"  y="390">Mutex'd</text>
+        <text class="micro" x="40"  y="404">embedder</text>
+        <text class="micro" x="40"  y="418">model</text>
+        <text class="micro" x="40"  y="436">~33 MB on</text>
+        <text class="micro" x="40"  y="450">disk · int8</text>
 
-        <rect class="box" x="540" y="456" width="240" height="62"/>
-        <text class="lbl" x="560" y="482">Agent hooks (Claude · Codex)</text>
-        <text class="sub" x="560" y="500">SessionStart · PostToolUse · SessionEnd</text>
+        <g><!-- parser.rs card -->
+          <rect class="card-h" x="140" y="280" width="580" height="180" rx="11"/>
+          <g transform="translate(160, 298)"><!-- gear icon -->
+            <circle class="icn" cx="9" cy="9" r="3"/>
+            <line class="icn" x1="9" y1="0" x2="9" y2="3"/>
+            <line class="icn" x1="9" y1="15" x2="9" y2="18"/>
+            <line class="icn" x1="0" y1="9" x2="3" y2="9"/>
+            <line class="icn" x1="15" y1="9" x2="18" y2="9"/>
+            <line class="icn" x1="3" y1="3" x2="5.5" y2="5.5"/>
+            <line class="icn" x1="13" y1="13" x2="15.5" y2="15.5"/>
+            <line class="icn" x1="3" y1="15.5" x2="5.5" y2="13"/>
+            <line class="icn" x1="13" y1="5.5" x2="15.5" y2="3"/>
+          </g>
+          <text class="ttl" x="194" y="306">parser.rs</text>
+          <text class="sub" x="194" y="326">scan_dir() · parse_session() → Session / Turn / ToolCall</text>
 
-        <rect class="box" x="800" y="456" width="260" height="62"/>
-        <text class="lbl" x="820" y="482">Any MCP host (Cursor, others)</text>
-        <text class="sub" x="820" y="500">pull-only via /.mcp.json</text>
+          <!-- 5 extract chips, one per future named vector -->
+          <text class="lyr-l" x="160" y="358">5 STRING EXTRACTS PER SESSION</text>
+          <g transform="translate(160, 366)">
+            <rect x="0"   y="0" width="104" height="42" rx="7" fill="#091820" stroke="#6cd6ff" stroke-width="1"/>
+            <text class="chip"   x="12" y="18" fill="#6cd6ff">content</text>
+            <text class="chip-s" x="12" y="34" fill="#7caec4">user / assistant prose</text>
 
-        <!-- arrows MCP → surfaces -->
-        <path class="arrow" d="M 550 424 L 550 440 L 150 440 L 150 456" marker-end="url(#ar)"/>
-        <path class="arrow" d="M 550 424 L 550 456" marker-end="url(#ar)"/>
-        <path class="arrow" d="M 550 424 L 550 440 L 660 440 L 660 456" marker-end="url(#ar)"/>
-        <path class="arrow" d="M 550 424 L 550 440 L 930 440 L 930 456" marker-end="url(#ar)"/>
+            <rect x="108" y="0" width="104" height="42" rx="7" fill="#1f150a" stroke="#ffb454" stroke-width="1"/>
+            <text class="chip"   x="120" y="18" fill="#ffb454">tool</text>
+            <text class="chip-s" x="120" y="34" fill="#a98750">tool_use names</text>
+
+            <rect x="216" y="0" width="104" height="42" rx="7" fill="#152007" stroke="#b5e48c" stroke-width="1"/>
+            <text class="chip"   x="228" y="18" fill="#b5e48c">path</text>
+            <text class="chip-s" x="228" y="34" fill="#7da45d">file paths</text>
+
+            <rect x="324" y="0" width="104" height="42" rx="7" fill="#220a10" stroke="#ff6b7a" stroke-width="1"/>
+            <text class="chip"   x="336" y="18" fill="#ff6b7a">error</text>
+            <text class="chip-s" x="336" y="34" fill="#a87780">is_error spans</text>
+
+            <rect x="432" y="0" width="104" height="42" rx="7" fill="#1b1226" stroke="#c792ea" stroke-width="1"/>
+            <text class="chip"   x="444" y="18" fill="#c792ea">code</text>
+            <text class="chip-s" x="444" y="34" fill="#9272b0">identifiers</text>
+          </g>
+          <text class="mut" x="160" y="442">→ five orthogonal lenses, one per axis of the conversation</text>
+        </g>
+
+        <!-- arrow parser → embedder (mid-band) -->
+        <path class="branch" d="M720 370 L740 370" marker-end="url(#ahS)"/>
+
+        <g><!-- indexer.rs / Embedder card -->
+          <rect class="card-h" x="740" y="280" width="580" height="180" rx="11"/>
+          <g transform="translate(760, 298)"><!-- vector cloud icon -->
+            <circle class="icn" cx="9" cy="9" r="7"/>
+            <circle cx="3" cy="9" r="1.6" fill="#9a9aa6"/>
+            <circle cx="9" cy="3" r="1.6" fill="#9a9aa6"/>
+            <circle cx="15" cy="9" r="1.6" fill="#9a9aa6"/>
+            <circle cx="9" cy="15" r="1.6" fill="#9a9aa6"/>
+          </g>
+          <text class="ttl" x="794" y="306">indexer.rs · Embedder</text>
+          <text class="sub" x="794" y="326">fastembed BGE-small-en-v1.5 · 384-d cosine · Mutex&lt;TextEmbedding&gt;</text>
+
+          <!-- visual: each extract string → 384-d vector → upsert -->
+          <text class="lyr-l" x="760" y="358">"…" → [v₀ v₁ v₂ … v₃₈₃]</text>
+          <g transform="translate(760, 366)">
+            <rect x="0" y="0" width="200" height="42" rx="6" fill="#06060c" stroke="#1a1a24" stroke-width="1"/>
+            <text class="kw-c" x="10" y="16">extract text</text>
+            <text class="mut" x="10" y="34">"npm run build &amp;&amp; npm test"</text>
+
+            <path class="branch" d="M210 21 L240 21" marker-end="url(#ahS)"/>
+
+            <rect x="248" y="0" width="312" height="42" rx="6" fill="#06060c" stroke="#1a1a24" stroke-width="1"/>
+            <text class="kw-c" x="258" y="16">384-d float vector (cosine-normalised)</text>
+            <text class="mut" x="258" y="34">[ 0.041 ·  -0.207 ·  0.184 ·  …  ·  0.066 ]</text>
+          </g>
+          <text class="mut" x="760" y="442">→ one Qdrant upsert per session (idempotent via uuid_v5)</text>
+        </g>
+
+        <path class="trunk" d="M730 460 L730 502" marker-end="url(#ah)"/>
+
+        <!-- ═══════════ BAND 03 · STORE (y=500..830) — FEATURED ═══════════ -->
+        <rect x="20" y="500" width="1360" height="330" rx="14" fill="url(#featGlow)"/>
+        <rect class="band-x" x="20" y="500" width="1360" height="330" rx="14" fill="rgba(255,214,10,.018)" stroke="rgba(255,214,10,.12)"/>
+        <text class="lyr-n" x="40"  y="554" fill="#3a300d">03</text>
+        <text class="lyr-l-a" x="40"  y="572">STORE</text>
+        <text class="lyr-d" x="40"  y="592">the keystone —</text>
+        <text class="lyr-d" x="40"  y="608">one point per</text>
+        <text class="lyr-d" x="40"  y="624">session,</text>
+        <text class="lyr-d" x="40"  y="640">five lenses,</text>
+        <text class="lyr-d" x="40"  y="656">one snapshot</text>
+        <text class="micro" x="40"  y="688">uuid_v5 ⇒</text>
+        <text class="micro" x="40"  y="702">idempotent</text>
+        <text class="micro" x="40"  y="716">upserts</text>
+
+        <g><!-- Qdrant featured card -->
+          <rect class="feat" x="140" y="520" width="1180" height="290" rx="14"/>
+          <line x1="148" y1="521" x2="1312" y2="521" stroke="#ffd60a" stroke-width="1" opacity=".30"/>
+
+          <g transform="translate(160, 540)"><!-- hex icon (larger) -->
+            <path class="icn-a" d="M12 0 L24 7 L24 21 L12 28 L0 21 L0 7 Z"/>
+            <path class="icn-a" d="M12 7 L18 11 L18 18 L12 22 L6 18 L6 11 Z" opacity=".55"/>
+            <circle cx="12" cy="14" r="1.6" fill="#ffd60a"/>
+          </g>
+          <text class="ttl-lg" x="200" y="560">Qdrant 1.18.1</text>
+          <text class="sub" x="200" y="582" fill="#cfa838">collection memex_sessions · point_id = uuid_v5(session_id)</text>
+
+          <text class="pill-r" x="1300" y="558" text-anchor="end">5 × 384-D · COSINE · BINARY-QUANTIZED HNSW PER VECTOR</text>
+          <text class="pill-r" x="1300" y="574" text-anchor="end" fill="#7a6a30">CLIENT · gRPC 1.18 · SNAPSHOTS OVER HTTP</text>
+
+          <!-- 3 internal panels -->
+          <!-- panel A: point schema -->
+          <g><!-- schema panel -->
+            <rect class="panel-a" x="160" y="600" width="500" height="194" rx="9"/>
+            <text class="lyr-l-a" x="178" y="622">POINT SCHEMA</text>
+            <text class="micro" x="640" y="622" text-anchor="end" fill="#7a6a30">~1 KB / point</text>
+
+            <g transform="translate(178, 638)" font-family="ui-monospace,Menlo,monospace">
+              <text class="kw-k" x="0" y="0">id</text>
+              <text class="kw-c" x="32" y="0">:</text>
+              <text class="kw-v" x="44" y="0">uuid_v5(session_id)</text>
+
+              <text class="kw-k" x="0" y="18">vectors</text>
+              <text class="kw-c" x="56" y="18">: {</text>
+              <text class="kw-k" x="20" y="34">content</text>
+              <text class="kw-c" x="86" y="34">[</text>
+              <rect x="100" y="25" width="190" height="10" rx="2" fill="url(#cContent)" stroke="#6cd6ff" stroke-width=".6"/>
+              <text class="kw-c" x="296" y="34">·384-d]</text>
+              <text class="kw-k" x="20" y="48">tool</text>
+              <text class="kw-c" x="86" y="48">[</text>
+              <rect x="100" y="39" width="190" height="10" rx="2" fill="url(#cTool)" stroke="#ffb454" stroke-width=".6"/>
+              <text class="kw-c" x="296" y="48">·384-d]</text>
+              <text class="kw-k" x="20" y="62">path</text>
+              <text class="kw-c" x="86" y="62">[</text>
+              <rect x="100" y="53" width="190" height="10" rx="2" fill="url(#cPath)" stroke="#b5e48c" stroke-width=".6"/>
+              <text class="kw-c" x="296" y="62">·384-d]</text>
+              <text class="kw-k" x="20" y="76">error</text>
+              <text class="kw-c" x="86" y="76">[</text>
+              <rect x="100" y="67" width="190" height="10" rx="2" fill="url(#cError)" stroke="#ff6b7a" stroke-width=".6"/>
+              <text class="kw-c" x="296" y="76">·384-d]</text>
+              <text class="kw-k" x="20" y="90">code</text>
+              <text class="kw-c" x="86" y="90">[</text>
+              <rect x="100" y="81" width="190" height="10" rx="2" fill="url(#cCode)" stroke="#c792ea" stroke-width=".6"/>
+              <text class="kw-c" x="296" y="90">·384-d]</text>
+              <text class="kw-c" x="0"  y="106">}</text>
+
+              <text class="kw-k" x="0"  y="124">payload</text>
+              <text class="kw-c" x="56" y="124">: { project, branch, has_errors,</text>
+              <text class="kw-c" x="20" y="140">        source_path, started_at, … }</text>
+            </g>
+          </g>
+
+          <!-- panel B: named vectors detail -->
+          <g>
+            <rect class="panel-a" x="680" y="600" width="320" height="194" rx="9"/>
+            <text class="lyr-l-a" x="698" y="622">FIVE NAMED-VECTOR LENSES</text>
+            <g transform="translate(698, 632)">
+              <rect x="0"  y="6"  width="284" height="28" rx="6" fill="#091820" stroke="#6cd6ff" stroke-width="1"/>
+              <text class="chip"   x="12" y="22" fill="#6cd6ff">content</text>
+              <text class="chip-s" x="86" y="22" fill="#7caec4">user · assistant prose</text>
+              <text class="micro"  x="272" y="22" text-anchor="end" fill="#7caec4">384-d</text>
+
+              <rect x="0"  y="38" width="284" height="28" rx="6" fill="#1f150a" stroke="#ffb454" stroke-width="1"/>
+              <text class="chip"   x="12" y="54" fill="#ffb454">tool</text>
+              <text class="chip-s" x="86" y="54" fill="#a98750">tool_use names</text>
+              <text class="micro"  x="272" y="54" text-anchor="end" fill="#a98750">384-d</text>
+
+              <rect x="0"  y="70" width="284" height="28" rx="6" fill="#152007" stroke="#b5e48c" stroke-width="1"/>
+              <text class="chip"   x="12" y="86" fill="#b5e48c">path</text>
+              <text class="chip-s" x="86" y="86" fill="#7da45d">file paths</text>
+              <text class="micro"  x="272" y="86" text-anchor="end" fill="#7da45d">384-d</text>
+
+              <rect x="0"  y="102" width="284" height="28" rx="6" fill="#220a10" stroke="#ff6b7a" stroke-width="1"/>
+              <text class="chip"   x="12" y="118" fill="#ff6b7a">error</text>
+              <text class="chip-s" x="86" y="118" fill="#a87780">is_error spans</text>
+              <text class="micro"  x="272" y="118" text-anchor="end" fill="#a87780">384-d</text>
+
+              <rect x="0"  y="134" width="284" height="28" rx="6" fill="#1b1226" stroke="#c792ea" stroke-width="1"/>
+              <text class="chip"   x="12" y="150" fill="#c792ea">code</text>
+              <text class="chip-s" x="86" y="150" fill="#9272b0">identifiers</text>
+              <text class="micro"  x="272" y="150" text-anchor="end" fill="#9272b0">384-d</text>
+            </g>
+          </g>
+
+          <!-- panel C: filters + snapshots -->
+          <g>
+            <rect class="panel-a" x="1020" y="600" width="280" height="194" rx="9"/>
+            <text class="lyr-l-a" x="1038" y="622">INDEXED PAYLOAD KEYS</text>
+            <g transform="translate(1038, 632)">
+              <text class="kw-k" x="0"  y="14">has_errors</text>
+              <text class="kw-c" x="86" y="14" fill="#7a7a86">bool · pre-HNSW</text>
+              <text class="kw-k" x="0"  y="32">project</text>
+              <text class="kw-c" x="86" y="32" fill="#7a7a86">keyword</text>
+              <text class="kw-k" x="0"  y="50">branch</text>
+              <text class="kw-c" x="86" y="50" fill="#7a7a86">keyword</text>
+              <text class="kw-k" x="0"  y="68">source_path</text>
+              <text class="kw-c" x="86" y="68" fill="#7a7a86">keyword</text>
+            </g>
+            <line x1="1038" y1="710" x2="1282" y2="710" stroke="#23232c" stroke-width="1"/>
+            <text class="lyr-l-a" x="1038" y="726">SNAPSHOT · HTTP</text>
+            <g transform="translate(1038, 736)">
+              <text class="kw-c" x="0" y="14"><tspan fill="#a3e07f">POST</tspan> /collections/{c}/snapshots</text>
+              <text class="kw-c" x="0" y="30"><tspan fill="#9cd2ff">GET</tspan>  /…/snapshots/{name}</text>
+              <text class="kw-c" x="0" y="46"><tspan fill="#a3e07f">POST</tspan> /…/snapshots/upload</text>
+            </g>
+          </g>
+        </g>
+
+        <!-- STORE → 5 capabilities: reverse-manifold fan-out -->
+        <path class="trunk"  d="M730 830 L730 854"/>
+        <path class="branch" d="M256 854 L1204 854"/>
+        <path class="branch" d="M256 854 L256 884" marker-end="url(#ah)"/>
+        <path class="branch" d="M494 854 L494 884" marker-end="url(#ah)"/>
+        <path class="branch" d="M730 854 L730 884" marker-end="url(#ah)"/>
+        <path class="branch" d="M966 854 L966 884" marker-end="url(#ah)"/>
+        <path class="branch" d="M1204 854 L1204 884" marker-end="url(#ah)"/>
+
+        <!-- ═══════════ BAND 04 · QUERY (y=860..1140) ═══════════ -->
+        <rect class="band-q" x="20" y="860" width="1360" height="280" rx="14"/>
+        <text class="lyr-n"   x="40"  y="908" fill="#251a35">04</text>
+        <text class="lyr-l-q" x="40"  y="926">QUERY</text>
+        <text class="lyr-d"   x="40"  y="946">five lanes</text>
+        <text class="lyr-d"   x="40"  y="962">on the same</text>
+        <text class="lyr-d"   x="40"  y="978">five vectors</text>
+        <text class="micro"   x="40"  y="1006">no extra</text>
+        <text class="micro"   x="40"  y="1020">indices</text>
+        <text class="micro"   x="40"  y="1034">no RRF</text>
+        <text class="micro"   x="40"  y="1052">continuous</text>
+        <text class="micro"   x="40"  y="1066">weights</text>
+
+        <g><!-- 5 capability tiles, each with a mini-viz -->
+          <!-- Tile 1: Lens slider -->
+          <rect class="card" x="140" y="886" width="232" height="240" rx="10"/>
+          <rect x="140" y="886" width="232" height="3" fill="url(#vbar)"/>
+          <!-- mini-viz: 5 weighted lens bars -->
+          <g transform="translate(160, 906)">
+            <text class="lyr-l" x="0" y="0">WEIGHTED MULTI-VECTOR BLEND</text>
+            <rect x="0"  y="10" width="40" height="8" rx="2" fill="#1a1a24"/><rect x="0"  y="10" width="22" height="8" rx="2" fill="#6cd6ff"/><text class="micro" x="48" y="17" fill="#6cd6ff">content   ·0.50</text>
+            <rect x="0"  y="22" width="40" height="8" rx="2" fill="#1a1a24"/><rect x="0"  y="22" width="30" height="8" rx="2" fill="#ffb454"/><text class="micro" x="48" y="29" fill="#ffb454">tool      ·0.70</text>
+            <rect x="0"  y="34" width="40" height="8" rx="2" fill="#1a1a24"/><rect x="0"  y="34" width="34" height="8" rx="2" fill="#b5e48c"/><text class="micro" x="48" y="41" fill="#b5e48c">path      ·1.20</text>
+            <rect x="0"  y="46" width="40" height="8" rx="2" fill="#1a1a24"/><rect x="0"  y="46" width="38" height="8" rx="2" fill="#ff6b7a"/><text class="micro" x="48" y="53" fill="#ff6b7a">error     ·1.80</text>
+            <rect x="0"  y="58" width="40" height="8" rx="2" fill="#1a1a24"/><rect x="0"  y="58" width="14" height="8" rx="2" fill="#c792ea"/><text class="micro" x="48" y="65" fill="#c792ea">code      ·0.40</text>
+          </g>
+          <text class="ttl-mid" x="160" y="1000">Lens slider</text>
+          <text class="api"     x="160" y="1018">QueryPointsBuilder</text>
+          <text class="api"     x="160" y="1034">  .using(&quot;&lt;name&gt;&quot;)</text>
+          <text class="mut"     x="160" y="1055">Σ(scoreᵢ · wᵢ) / Σwᵢ —</text>
+          <text class="mut"     x="160" y="1069">not RRF.</text>
+          <text class="micro"   x="160" y="1095" fill="#6cd6ff">▸ uses ALL 5 lenses</text>
+          <text class="micro"   x="160" y="1112" fill="#65656f">indexer.rs::lens_search</text>
+
+          <!-- Tile 2: Topology MST -->
+          <rect class="card" x="378" y="886" width="232" height="240" rx="10"/>
+          <rect x="378" y="886" width="232" height="3" fill="#b5e48c"/>
+          <!-- mini-viz: MST -->
+          <g transform="translate(398, 906)">
+            <text class="lyr-l" x="0" y="0">SAMPLED K-NN → MST</text>
+            <!-- nodes -->
+            <line stroke="rgba(255,255,255,.18)" stroke-width="1" x1="20" y1="40" x2="60" y2="22"/>
+            <line stroke="rgba(255,255,255,.18)" stroke-width="1" x1="60" y1="22" x2="110" y2="40"/>
+            <line stroke="rgba(255,255,255,.18)" stroke-width="1" x1="60" y1="22" x2="100" y2="62"/>
+            <line stroke="rgba(255,255,255,.18)" stroke-width="1" x1="60" y1="22" x2="30" y2="68"/>
+            <line stroke="rgba(255,255,255,.18)" stroke-width="1" x1="100" y1="62" x2="160" y2="50"/>
+            <line stroke="rgba(255,255,255,.18)" stroke-width="1" x1="160" y1="50" x2="180" y2="80"/>
+            <circle cx="20"  cy="40" r="3.5" fill="#6cd6ff"/>
+            <circle cx="60"  cy="22" r="5"   fill="#ffd60a"/>
+            <circle cx="110" cy="40" r="3.5" fill="#bf5af2"/>
+            <circle cx="100" cy="62" r="4"   fill="#ffd60a"/>
+            <circle cx="30"  cy="68" r="3.5" fill="#b5e48c"/>
+            <circle cx="160" cy="50" r="3.5" fill="#ff6b7a"/>
+            <circle cx="180" cy="80" r="3.5" fill="#ff6b7a"/>
+          </g>
+          <text class="ttl-mid" x="398" y="1000">Topology · MST</text>
+          <text class="api"     x="398" y="1018">search_matrix_pairs</text>
+          <text class="api"     x="398" y="1034">  .using(&quot;content&quot;)</text>
+          <text class="mut"     x="398" y="1055">sampled K-NN graph in</text>
+          <text class="mut"     x="398" y="1069">one round-trip → petgraph</text>
+          <text class="micro"   x="398" y="1095" fill="#b5e48c">▸ uses content lens</text>
+          <text class="micro"   x="398" y="1112" fill="#65656f">indexer.rs::topology</text>
+
+          <!-- Tile 3: Mix & match -->
+          <rect class="card" x="616" y="886" width="232" height="240" rx="10"/>
+          <rect x="616" y="886" width="232" height="3" fill="#c792ea"/>
+          <!-- mini-viz: A + B → C with positive/negative -->
+          <g transform="translate(636, 906)">
+            <text class="lyr-l" x="0" y="0">DISCOVERY · CONTEXT PAIRS</text>
+            <!-- A -->
+            <circle cx="22" cy="40" r="14" fill="#0a1a22" stroke="#6cd6ff" stroke-width="1.4"/>
+            <text class="chip" x="22" y="44" text-anchor="middle" fill="#6cd6ff">A</text>
+            <text class="micro" x="22" y="68" text-anchor="middle" fill="#6cd6ff">+ positive</text>
+            <!-- B -->
+            <circle cx="64" cy="40" r="14" fill="#0a1a22" stroke="#6cd6ff" stroke-width="1.4"/>
+            <text class="chip" x="64" y="44" text-anchor="middle" fill="#6cd6ff">B</text>
+            <text class="micro" x="64" y="68" text-anchor="middle" fill="#6cd6ff">+ positive</text>
+            <!-- C neg -->
+            <circle cx="106" cy="40" r="14" fill="#220a10" stroke="#ff6b7a" stroke-width="1.4"/>
+            <text class="chip" x="106" y="44" text-anchor="middle" fill="#ff6b7a">C</text>
+            <text class="micro" x="106" y="68" text-anchor="middle" fill="#ff6b7a">− negative</text>
+            <!-- arrow -->
+            <path class="branch" d="M126 40 L154 40" marker-end="url(#ahS)"/>
+            <!-- result -->
+            <circle cx="178" cy="40" r="16" fill="#1b1226" stroke="#c792ea" stroke-width="1.8"/>
+            <text class="chip" x="178" y="44" text-anchor="middle" fill="#c792ea">?</text>
+            <text class="micro" x="178" y="68" text-anchor="middle" fill="#c792ea">discovered</text>
+          </g>
+          <text class="ttl-mid" x="636" y="1000">Mix &amp; match</text>
+          <text class="api"     x="636" y="1018">DiscoverInput {</text>
+          <text class="api"     x="636" y="1034">  target, context }</text>
+          <text class="mut"     x="636" y="1055">A·B-like, but not C-like —</text>
+          <text class="mut"     x="636" y="1069">server-side, one round-trip.</text>
+          <text class="micro"   x="636" y="1095" fill="#c792ea">▸ context pairs</text>
+          <text class="micro"   x="636" y="1112" fill="#65656f">indexer.rs::mix_match</text>
+
+          <!-- Tile 4: Proactive recall -->
+          <rect class="card" x="854" y="886" width="232" height="240" rx="10"/>
+          <rect x="854" y="886" width="232" height="3" fill="#ff6b7a"/>
+          <!-- mini-viz: red error → fix candidate -->
+          <g transform="translate(874, 906)">
+            <text class="lyr-l" x="0" y="0">ERROR LENS · HAS_ERRORS FILTER</text>
+            <!-- error pulse -->
+            <circle cx="22" cy="40" r="20" fill="#220a10" stroke="#ff6b7a" stroke-width="1" opacity=".35"/>
+            <circle cx="22" cy="40" r="12" fill="#220a10" stroke="#ff6b7a" stroke-width="1.6"/>
+            <text class="chip" x="22" y="44" text-anchor="middle" fill="#ff6b7a">!</text>
+            <text class="micro" x="22" y="74" text-anchor="middle" fill="#ff6b7a">fresh error</text>
+            <!-- arrow -->
+            <path class="branch" d="M44 40 L94 40" marker-end="url(#ahS)"/>
+            <text class="micro" x="69" y="32" text-anchor="middle" fill="#7a7a86">.using("error")</text>
+            <text class="micro" x="69" y="52" text-anchor="middle" fill="#7a7a86">+ filter</text>
+            <!-- past fix -->
+            <circle cx="120" cy="40" r="12" fill="#152007" stroke="#b5e48c" stroke-width="1.6"/>
+            <text class="chip" x="120" y="44" text-anchor="middle" fill="#b5e48c">✓</text>
+            <text class="micro" x="120" y="74" text-anchor="middle" fill="#b5e48c">past fix</text>
+            <!-- arrow to notify -->
+            <path class="branch" d="M138 40 L162 40" marker-end="url(#ahS)"/>
+            <!-- notify -->
+            <rect x="166" y="30" width="32" height="20" rx="4" fill="#1f150a" stroke="#ffb454" stroke-width="1"/>
+            <text class="chip-s" x="182" y="44" text-anchor="middle" fill="#ffb454">os↗</text>
+            <text class="micro"  x="182" y="74" text-anchor="middle" fill="#ffb454">notify</text>
+          </g>
+          <text class="ttl-mid" x="874" y="1000">Proactive recall</text>
+          <text class="api"     x="874" y="1018">.using(&quot;error&quot;)</text>
+          <text class="api"     x="874" y="1034">.filter(has_errors)</text>
+          <text class="mut"     x="874" y="1055">poll ~12s · "have I seen</text>
+          <text class="mut"     x="874" y="1069">this failure before?"</text>
+          <text class="micro"   x="874" y="1095" fill="#ff6b7a">▸ uses error lens</text>
+          <text class="micro"   x="874" y="1112" fill="#65656f">indexer.rs::recall</text>
+
+          <!-- Tile 5: Predict -->
+          <rect class="card" x="1092" y="886" width="232" height="240" rx="10"/>
+          <rect x="1092" y="886" width="232" height="3" fill="#ffd60a"/>
+          <!-- mini-viz: now + neighbors → next -->
+          <g transform="translate(1112, 906)">
+            <text class="lyr-l" x="0" y="0">k-NN OVER NEIGHBOR OUTCOMES</text>
+            <!-- now -->
+            <circle cx="22" cy="40" r="11" fill="#0a1a22" stroke="#6cd6ff" stroke-width="1.4"/>
+            <text class="chip" x="22" y="44" text-anchor="middle" fill="#6cd6ff" font-size="10">now</text>
+            <!-- 3 neighbors -->
+            <line stroke="rgba(255,255,255,.16)" stroke-width="1" x1="33" y1="40" x2="80" y2="22"/>
+            <line stroke="rgba(255,255,255,.16)" stroke-width="1" x1="33" y1="40" x2="80" y2="40"/>
+            <line stroke="rgba(255,255,255,.16)" stroke-width="1" x1="33" y1="40" x2="80" y2="58"/>
+            <circle cx="80" cy="22" r="6" fill="#ffd60a"/>
+            <circle cx="80" cy="40" r="6" fill="#ffd60a"/>
+            <circle cx="80" cy="58" r="6" fill="#ffd60a"/>
+            <text class="micro" x="80" y="76" text-anchor="middle" fill="#ffd60a">neighbors</text>
+            <!-- arrow → next -->
+            <path class="branch" d="M92 40 L132 40" marker-end="url(#ahA)"/>
+            <text class="micro" x="112" y="32" text-anchor="middle" fill="#7a7a86">most-likely</text>
+            <text class="micro" x="112" y="54" text-anchor="middle" fill="#7a7a86">next action</text>
+            <circle cx="158" cy="40" r="14" fill="#1f150a" stroke="#ffd60a" stroke-width="1.6"/>
+            <text class="chip" x="158" y="44" text-anchor="middle" fill="#ffd60a">→</text>
+          </g>
+          <text class="ttl-mid" x="1112" y="1000">Predict next-action</text>
+          <text class="api"     x="1112" y="1018">QueryPointsBuilder</text>
+          <text class="api"     x="1112" y="1034">  .using(&quot;content&quot;)</text>
+          <text class="mut"     x="1112" y="1055">k-NN over what past-you</text>
+          <text class="mut"     x="1112" y="1069">did at the same juncture.</text>
+          <text class="micro"   x="1112" y="1095" fill="#ffd60a">▸ uses content lens</text>
+          <text class="micro"   x="1112" y="1112" fill="#65656f">indexer.rs::predict_*</text>
+        </g>
+
+        <!-- QUERY → MCP manifold collect -->
+        <path class="branch" d="M256 1126 L256 1158"/>
+        <path class="branch" d="M494 1126 L494 1158"/>
+        <path class="branch" d="M730 1126 L730 1158"/>
+        <path class="branch" d="M966 1126 L966 1158"/>
+        <path class="branch" d="M1204 1126 L1204 1158"/>
+        <path class="branch" d="M256 1158 L1204 1158"/>
+        <path class="trunk"  d="M730 1158 L730 1180" marker-end="url(#ah)"/>
+
+        <!-- ═══════════ BAND 05 · EXPOSE (y=1160..1290) ═══════════ -->
+        <rect class="band-x" x="20" y="1160" width="1360" height="130" rx="14"/>
+        <text class="lyr-n"   x="40"  y="1208" fill="#2a2014">05</text>
+        <text class="lyr-l-x" x="40"  y="1226">EXPOSE</text>
+        <text class="lyr-d"   x="40"  y="1246">11 typed tools</text>
+        <text class="lyr-d"   x="40"  y="1262">two transports</text>
+
+        <g><!-- MCP server wide card -->
+          <rect class="card-h" x="140" y="1182" width="1180" height="100" rx="11"/>
+          <g transform="translate(160, 1200)">
+            <rect class="icn" x="3" y="2" width="14" height="10" rx="1.5"/>
+            <line class="icn" x1="6" y1="0" x2="6" y2="2"/>
+            <line class="icn" x1="14" y1="0" x2="14" y2="2"/>
+            <line class="icn" x1="10" y1="12" x2="10" y2="18"/>
+            <line class="icn" x1="6" y1="18" x2="14" y2="18"/>
+          </g>
+          <text class="ttl" x="194" y="1210">MCP server · 11 typed tools</text>
+          <text class="sub" x="194" y="1232">src-tauri/src/mcp.rs · tool registry</text>
+
+          <!-- tool category chips -->
+          <g transform="translate(194, 1244)">
+            <rect x="0"   y="0" width="98"  height="22" rx="11" fill="#0a141a" stroke="#23323c" stroke-width="1"/>
+            <text class="chip-s" x="49" y="14" text-anchor="middle" fill="#9cd2ff">DISCOVER · 4</text>
+            <rect x="104" y="0" width="86"  height="22" rx="11" fill="#1a1208" stroke="#3c2a14" stroke-width="1"/>
+            <text class="chip-s" x="147" y="14" text-anchor="middle" fill="#ffb454">RECALL · 1</text>
+            <rect x="196" y="0" width="90"  height="22" rx="11" fill="#1a0a14" stroke="#3c1428" stroke-width="1"/>
+            <text class="chip-s" x="241" y="14" text-anchor="middle" fill="#ff6b7a">PREDICT · 1</text>
+            <rect x="292" y="0" width="86"  height="22" rx="11" fill="#0e1a08" stroke="#1f3c12" stroke-width="1"/>
+            <text class="chip-s" x="335" y="14" text-anchor="middle" fill="#b5e48c">INSPECT · 3</text>
+            <rect x="384" y="0" width="100" height="22" rx="11" fill="#14081a" stroke="#28143c" stroke-width="1"/>
+            <text class="chip-s" x="434" y="14" text-anchor="middle" fill="#c792ea">SNAPSHOT · 1</text>
+            <rect x="490" y="0" width="92"  height="22" rx="11" fill="#1a1408" stroke="#3c321a" stroke-width="1"/>
+            <text class="chip-s" x="536" y="14" text-anchor="middle" fill="#ffd60a">WRAPPED · 1</text>
+          </g>
+
+          <!-- transports on right -->
+          <g transform="translate(900, 1196)">
+            <rect x="0" y="0" width="190" height="32" rx="9" fill="#091820" stroke="#6cd6ff" stroke-width="1"/>
+            <text class="chip"   x="14" y="14" fill="#6cd6ff" font-size="11">stdio</text>
+            <text class="chip-s" x="14" y="26" fill="#7caec4">in-process · desktop</text>
+
+            <rect x="0" y="40" width="190" height="32" rx="9" fill="#1f150a" stroke="#ffb454" stroke-width="1"/>
+            <text class="chip"   x="14" y="54" fill="#ffb454" font-size="11">HTTP  :8765/mcp</text>
+            <text class="chip-s" x="14" y="66" fill="#a98750">all-in-one container</text>
+          </g>
+          <text class="pill-w" x="1300" y="1196" text-anchor="end" fill="#a0a0ad">SAME 11 TOOLS · BOTH TRANSPORTS</text>
+        </g>
+
+        <!-- MCP → 4 surfaces fan-out -->
+        <path class="trunk"  d="M730 1290 L730 1308"/>
+        <path class="branch" d="M280 1308 L1170 1308"/>
+        <path class="branch" d="M280 1308 L280 1338" marker-end="url(#ah)"/>
+        <path class="branch" d="M580 1308 L580 1338" marker-end="url(#ah)"/>
+        <path class="branch" d="M876 1308 L876 1338" marker-end="url(#ah)"/>
+        <path class="branch" d="M1170 1308 L1170 1338" marker-end="url(#ah)"/>
+
+        <!-- ═══════════ BAND 06 · SURFACES (y=1320..1480) ═══════════ -->
+        <rect class="band-s" x="20" y="1320" width="1360" height="140" rx="14"/>
+        <text class="lyr-n"   x="40"  y="1368" fill="#221a30">06</text>
+        <text class="lyr-l-s" x="40"  y="1386">SURFACES</text>
+        <text class="lyr-d"   x="40"  y="1406">where it lands</text>
+
+        <g><!-- 4 host tiles, each with a mini-viz -->
+          <!-- Desktop · Tauri -->
+          <rect class="card" x="140" y="1340" width="290" height="118" rx="10"/>
+          <g transform="translate(160, 1358)"><!-- window mockup -->
+            <rect x="0" y="0" width="48" height="32" rx="3" fill="#0a0a14" stroke="#6cd6ff" stroke-width="1"/>
+            <line x1="0" y1="7" x2="48" y2="7" stroke="#6cd6ff" stroke-width="1"/>
+            <circle cx="4" cy="3.5" r="1.2" fill="#ff6b7a"/>
+            <circle cx="9" cy="3.5" r="1.2" fill="#ffd60a"/>
+            <circle cx="14" cy="3.5" r="1.2" fill="#b5e48c"/>
+            <line x1="4" y1="13" x2="36" y2="13" stroke="#23232c" stroke-width="1"/>
+            <line x1="4" y1="18" x2="42" y2="18" stroke="#23232c" stroke-width="1"/>
+            <line x1="4" y1="23" x2="32" y2="23" stroke="#23232c" stroke-width="1"/>
+          </g>
+          <text class="ttl"  x="220" y="1364">Desktop · Tauri</text>
+          <text class="sub"  x="220" y="1384">native window · OS notifications</text>
+          <text class="mut"  x="160" y="1416">live recall · menubar · macOS</text>
+          <text class="micro" x="160" y="1436" fill="#6cd6ff">npm run tauri build</text>
+
+          <!-- Server · Docker -->
+          <rect class="card" x="440" y="1340" width="290" height="118" rx="10"/>
+          <g transform="translate(460, 1358)"><!-- container -->
+            <rect x="0" y="0" width="40" height="30" rx="2" fill="#0a0a14" stroke="#ffb454" stroke-width="1"/>
+            <line x1="0" y1="9" x2="40" y2="9" stroke="#ffb454" stroke-width="1"/>
+            <circle cx="4" cy="4.5" r="1.2" fill="#ffb454"/>
+            <circle cx="9" cy="4.5" r="1.2" fill="#ffb454"/>
+            <circle cx="14" cy="4.5" r="1.2" fill="#ffb454"/>
+            <text class="micro" x="3" y="22" font-size="6" fill="#ffb454">qdrant + web + mcp</text>
+            <text class="micro" x="3" y="29" font-size="6" fill="#ffb454">→ :8765</text>
+          </g>
+          <text class="ttl"  x="512" y="1364">Server · Docker image</text>
+          <text class="sub"  x="512" y="1384">browser UI · JSON API · MCP</text>
+          <text class="mut"  x="460" y="1416">offline · non-root · loopback</text>
+          <text class="micro" x="460" y="1436" fill="#ffb454">docker run -p 8765:8765 memex-allinone</text>
+
+          <!-- Agent hooks -->
+          <rect class="card" x="740" y="1340" width="290" height="118" rx="10"/>
+          <g transform="translate(760, 1358)"><!-- hook timeline -->
+            <line x1="0" y1="14" x2="56" y2="14" stroke="#23232c" stroke-width="1"/>
+            <circle cx="4"  cy="14" r="2.5" fill="#b5e48c"/>
+            <circle cx="20" cy="14" r="2.5" fill="#6cd6ff"/>
+            <circle cx="36" cy="14" r="2.5" fill="#ff6b7a"/>
+            <circle cx="52" cy="14" r="2.5" fill="#c792ea"/>
+            <text class="micro" font-size="6.5" x="0" y="26" fill="#7a7a86">start  prompt  bash  end</text>
+          </g>
+          <text class="ttl"  x="820" y="1364">Agent hooks · Claude · Codex</text>
+          <text class="sub"  x="820" y="1384">SessionStart · PostToolUse · End</text>
+          <text class="mut"  x="760" y="1416">Companion primer · Loop Breaker</text>
+          <text class="micro" x="760" y="1436" fill="#c792ea">.claude/settings.local.json · fail-open</text>
+
+          <!-- Any MCP host -->
+          <rect class="card" x="1040" y="1340" width="290" height="118" rx="10"/>
+          <g transform="translate(1060, 1358)"><!-- mcp.json glyph -->
+            <rect x="0" y="0" width="48" height="32" rx="3" fill="#0a0a14" stroke="#c792ea" stroke-width="1"/>
+            <text class="micro" x="3" y="9"  font-size="6" fill="#c792ea">{ "mcpServers":</text>
+            <text class="micro" x="3" y="17" font-size="6" fill="#c792ea">  "memex": {</text>
+            <text class="micro" x="3" y="25" font-size="6" fill="#c792ea">    "command": …</text>
+          </g>
+          <text class="ttl"  x="1120" y="1364">Any MCP host · Cursor, …</text>
+          <text class="sub"  x="1120" y="1384">pull-only · committed config</text>
+          <text class="mut"  x="1060" y="1416">no plugin · drops in /.mcp.json</text>
+          <text class="micro" x="1060" y="1436" fill="#c792ea">claude mcp add memex ‹stdio › or HTTP</text>
+        </g>
       </svg>
-      <p id="arch-cap" class="muted" style="margin-top:14px;font-size:13.5px;text-align:center">
-        From append-only JSONL on disk to a typed MCP tool an agent can call — one Rust binary, one Qdrant collection, one embedder.
+      <p id="arch-cap" class="muted" style="margin-top:20px;font-size:13.5px;text-align:center;line-height:1.6">
+        Six layers, read top to bottom: <b>sources → ingest → store → query → expose → hosts</b>.<br/>
+        The whole path is one Rust binary, one Qdrant collection (one point per session, five named-vector lenses), and one embedder.
       </p>
     </div>
 
     <div class="arch-legend" aria-label="Architecture facts">
-      <span><b>Embedder</b> · fastembed BGE-small-en-v1.5 (384-d, cosine)</span>
-      <span><b>Vector store</b> · Qdrant 1.18.1, collection <code>memex_sessions</code></span>
-      <span><b>Point id</b> · uuid_v5(session_id) — stable across rebuilds</span>
-      <span><b>Hosts</b> · Tauri (desktop), single-image container (server), MCP clients (agents)</span>
+      <div><span class="sw" style="background:#6cd6ff"></span><div><b>Sources</b><i>Claude Code + Codex CLI · append-only JSONL</i></div></div>
+      <div><span class="sw" style="background:#b5e48c"></span><div><b>Embedder</b><i>fastembed BGE-small-en-v1.5 · 384-d · cosine</i></div></div>
+      <div><span class="sw" style="background:#ffd60a"></span><div><b>Vector store</b><i>Qdrant 1.18.1 · <code>memex_sessions</code> · 5 named vectors</i></div></div>
+      <div><span class="sw" style="background:#bf5af2"></span><div><b>Query lanes</b><i>lens · topology · mix · recall · predict</i></div></div>
+      <div><span class="sw" style="background:#ffb454"></span><div><b>Exposure</b><i>MCP · 11 typed tools · stdio + HTTP :8765/mcp</i></div></div>
+      <div><span class="sw" style="background:#c792ea"></span><div><b>Hosts</b><i>Tauri · single-image container · agent hooks · MCP clients</i></div></div>
+      <div><span class="sw" style="background:#ededf2"></span><div><b>Identity</b><i>point_id = uuid_v5(session_id) — idempotent upserts</i></div></div>
+      <div><span class="sw" style="background:#34c759"></span><div><b>Runtime</b><i>100% local · no LLM in the loop · fail-open</i></div></div>
     </div>
   </div>
 </section>
