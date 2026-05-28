@@ -26,7 +26,10 @@ export default defineConfig({
     headless: true,
     viewport: { width: 1440, height: 900 },
     screenshot: 'only-on-failure',
-    trace: 'on-first-retry',
+    // PR #12 REV-6 (CodeRabbit #8) — `on-first-retry` never fires because
+    // `retries: 0`. Switched to `retain-on-failure` so a failing test always
+    // leaves a trace; passing tests have no trace overhead.
+    trace: 'retain-on-failure',
     video: 'retain-on-failure',
   },
   projects: [

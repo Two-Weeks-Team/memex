@@ -161,6 +161,15 @@ If the user clicks 👍 / 👎 on a result card, the next query in the same
 session uses `Query::RelevanceFeedback` with the positive/negative session-id
 sets to bias the ranking — see `retrieval.rs::relevance_feedback`.
 
+> **Footnote on the weight defaults shown above** — the diagram reflects the
+> **post-T3.3** runtime state: `content_late: 0.25` is the active default
+> in both `lens::LensWeights::default()` and `indexer::LensWeights::default()`
+> (PR #12 ships this flip). The historical pre-T3.3 baseline of `0.0` is
+> archived in [`claudedocs/qdrant-audit-findings.md`](../claudedocs/qdrant-audit-findings.md) §2
+> for reproducibility; the rollback path (flip both Default impls back to `0.0`)
+> is documented in [`docs/wired-but-dormant.md`](./wired-but-dormant.md) §B.1
+> in case `eval_ndcg` regresses.
+
 ### (c) Snapshot lifecycle — POST → file → GET → restore
 
 ```mermaid

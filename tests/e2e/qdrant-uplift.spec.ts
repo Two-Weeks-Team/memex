@@ -80,22 +80,44 @@ test.describe('T2.14 Hybrid lane visualizer', () => {
     const viz = page.locator('#qd-hybrid-viz');
     await expect(viz).toBeVisible();
 
-    // Initial top row (dense + sparse on; late off). Capture first label.
+    // PR #12 REV-10 (CodeRabbit #14) — the previous version of this test
+    // only asserted "labels.length === 8" after toggling, so it would have
+    // passed even if the JS handler did nothing. Now we snapshot the
+    // ordering BEFORE and AFTER the toggle and assert the rank actually
+    // changed (specifically: the top-1 row differs).
     await page.waitForTimeout(120);
-    const initialTopLabel = await viz.locator('.qd-hyb-row .qd-hyb-label').first().textContent();
-    expect(initialTopLabel).toBeTruthy();
+    const beforeLabels = await viz.locator('.qd-hyb-row .qd-hyb-label').allTextContents();
+    expect(beforeLabels.length).toBe(8);
+    const beforeTop = beforeLabels[0];
 
-    // Toggle late ON. Now the row with highest late score (.91 explain MaxSim) should appear higher.
+    // Toggle late ON. Now the row with highest late score (.91 explain MaxSim)
+    // should sort above the dense+sparse winner.
     const lateTog = viz.locator('.qd-hyb-tog[data-lane="late"]');
     await expect(lateTog).toHaveAttribute('aria-pressed', 'false');
     await lateTog.click();
     await expect(lateTog).toHaveAttribute('aria-pressed', 'true');
     await page.waitForTimeout(160);
 
-    // Order should differ from initial (the late lane shuffled the ranking).
-    const labels = await viz.locator('.qd-hyb-row .qd-hyb-label').allTextContents();
-    expect(labels.length).toBe(8);
-    // Score column is non-empty and formatted as fixed(2).
+    const afterLabels = await viz.locator('.qd-hyb-row .qd-hyb-label').allTextContents();
+    expect(afterLabels.length).toBe(8);
+    const afterTop = afterLabels[0];
+
+    // Hard assertion: the full ordering must have changed. Top-1 may or may
+    // not move depending on mock data, but at least one row must reorder
+    // when the late lane joins the average — otherwise the JS handler is a
+    // no-op (which is the false-positive CodeRabbit #14 flagged).
+    expect(afterLabels.join('|')).not.toBe(beforeLabels.join('|'));
+    // Lightweight extra: at least one row in the top 3 must differ.
+    const topThreeBefore = beforeLabels.slice(0, 3).join('|');
+    const topThreeAfter  = afterLabels.slice(0, 3).join('|');
+    expect(topThreeAfter).not.toBe(topThreeBefore);
+    // Track the original top-1 separately so failures point to the obvious case.
+    if (afterTop === beforeTop) {
+      // eslint-disable-next-line no-console
+      console.warn(`[T2.14] note: top-1 unchanged ("${beforeTop}") but lower ranks reordered as expected`);
+    }
+
+    // Score format sanity (fixed-2 decimal).
     const firstScore = await viz.locator('.qd-hyb-row .qd-hyb-score').first().textContent();
     expect(firstScore).toMatch(/^\d\.\d\d$/);
   });

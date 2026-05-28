@@ -1106,7 +1106,7 @@ footer .fine{ margin-top:42px; padding-top:22px; border-top:1px solid var(--line
               <text class="kw-k" x="20" y="118" opacity=".82">tool_sparse</text>
               <text class="kw-c" x="100" y="118" fill="#7a6a30">{idx,val}·IDF mod</text>
               <text class="kw-k" x="20" y="132" opacity=".68">content_late</text>
-              <text class="kw-c" x="100" y="132" fill="#5a4a2a">▦·MaxSim rerank (off by default)</text>
+              <text class="kw-c" x="100" y="132" fill="#5a4a2a">▦·MaxSim rerank (on · w=0.25)</text>
               <text class="kw-c" x="0"  y="148">}</text>
 
               <text class="kw-k" x="0"  y="166">payload</text>
@@ -1170,12 +1170,12 @@ footer .fine{ margin-top:42px; padding-top:22px; border-top:1px solid var(--line
               <text class="micro"  x="272" y="198" text-anchor="end" fill="#a98750" font-size="8">SPARSE</text>
 </g>
 
-              <!-- 1 multivector chip (rerank-only, off by default) -->
+              <!-- 1 multivector chip — ACTIVE post-T3.3 (w=0.25 rerank nudge) -->
               <g class="hov" data-tip="store-content-late" tabindex="0" role="button" focusable="true">
 <rect x="0"  y="208" width="284" height="20" rx="6" fill="#0a0f17" stroke="#6cd6ff" stroke-width=".7" stroke-dasharray="1 2" opacity=".70"/>
               <text class="chip"   x="12" y="222" fill="#6cd6ff" font-size="9.5" opacity=".88">content_late</text>
               <text class="chip-s" x="100" y="222" fill="#7caec4" font-size="8.5">ColBERT MaxSim · rerank</text>
-              <text class="micro"  x="272" y="222" text-anchor="end" fill="#7caec4" font-size="8">OFF (T3.3)</text>
+              <text class="micro"  x="272" y="222" text-anchor="end" fill="#7caec4" font-size="8">ON · w=0.25</text>
 </g>
             </g>
           </g>
@@ -2078,7 +2078,7 @@ POST /collections/{c}/snapshots/upload?priority=snapshot</pre>
             <text x="6" y="68" font-family="ui-monospace,monospace" font-size="8" fill="#b5e48c" font-weight="700">2 SPARSE</text>
             <text x="6" y="83" font-family="ui-monospace,monospace" font-size="7" fill="#7da45d">path_sparse · tool_sparse · IDF</text>
             <text x="6" y="96" font-family="ui-monospace,monospace" font-size="8" fill="#c792ea" font-weight="700">1 MULTI</text>
-            <text x="6" y="111" font-family="ui-monospace,monospace" font-size="7" fill="#9272b0">content_late · MaxSim rerank (off)</text>
+            <text x="6" y="111" font-family="ui-monospace,monospace" font-size="7" fill="#9272b0">content_late · MaxSim rerank (on · w=0.25)</text>
             <!-- ranked list on the right -->
             <g transform="translate(224, 32)">
               <rect class="q8node" x="0"  y="0"  width="84" height="14" rx="3" fill="#0d1419" stroke="#ffd60a" stroke-width=".8"/>
@@ -2099,7 +2099,7 @@ POST /collections/{c}/snapshots/upload?priority=snapshot</pre>
           <span class="qd-no">Q8</span>
           <h3>Hybrid retrieval — dense + sparse + ColBERT late-interaction</h3>
         </header>
-        <p class="qd-what"><b>What it is.</b> Eight vector slots in the v3 schema: <code>5 dense</code> (content, tool, path, error, code) + <code>2 sparse</code> (<code>path_sparse</code>, <code>tool_sparse</code> with <code>Modifier::Idf</code>) + <code>1 multivector</code> (<code>content_late</code> ColBERT MaxSim, rerank-only). Dense + sparse are <b>ACTIVE by default</b> (gated on <code>w.path &gt; 0</code> / <code>w.tool &gt; 0</code> in <code>lens.rs::active_sparse_specs</code>); <code>content_late</code> is wired but OFF (<code>LensWeights::default().content_late = 0.0</code>) — opt-in rerank lane, flippable to ~0.25 (T3.3).</p>
+        <p class="qd-what"><b>What it is.</b> Eight vector slots in the v3 schema: <code>5 dense</code> (content, tool, path, error, code) + <code>2 sparse</code> (<code>path_sparse</code>, <code>tool_sparse</code> with <code>Modifier::Idf</code>) + <code>1 multivector</code> (<code>content_late</code> ColBERT MaxSim rerank lane). All 8 lanes are <b>ACTIVE by default</b> in <code>LensWeights::default()</code> — content_late at <code>0.25</code> (rerank-only nudge), the rest at <code>1.0</code>. Sparse gates ride on the dense weights (<code>w.path &gt; 0</code> / <code>w.tool &gt; 0</code> in <code>lens.rs::active_sparse_specs</code>). T3.3 flipped content_late from 0.0 → 0.25; rollback path remains <code>0.0</code>.</p>
         <p class="qd-why"><b>Why it matters.</b> Three orthogonal scoring signals in one prefetch chain, fused server-side. Dense handles paraphrase, sparse handles exact-identifier matching, late-interaction handles fine-grained position-aware matching. Each compensates for the others' blind spots.</p>
         <div id="qd-hybrid-viz" role="group" aria-label="Hybrid lane visualizer — toggle dense / sparse / late to see the result list re-order">
           <p class="qd-hyb-head">Toggle lanes → result list re-orders</p>
@@ -2861,10 +2861,10 @@ VectorsConfig { multivectors: { <span class="s">"content_late"</span>: MultiVect
       code: 'SparseSpec { name: "tool_sparse", weight: w.tool, source_field: "tool" }\n→ Query::new_nearest(VectorInput::new_sparse(indices, values))',
       link: { text: 'schema.rs::SPARSE_VECTORS', href: REPO + '/src-tauri/src/schema.rs' }
     },
-    /* MULTIVECTOR (ColBERT-style MaxSim — wired but off by default until T3.3) */
+    /* MULTIVECTOR (ColBERT-style MaxSim — ACTIVE post-T3.3 at w=0.25) */
     'store-content-late': {
       title: 'content_late · ColBERT MaxSim rerank', color: '#6cd6ff',
-      body: 'A multivector slot — a list of token-level dense vectors per session, scored via MaxSim. Indexed via the same `content` text but at finer granularity. Currently OFF by default (LensWeights::default().content_late = 0.0) — opt-in rerank path. Activating it (T3.3) flips a single Rust default to 0.25 and adds a precision boost on the top-K dense results without dominating the query plan.',
+      body: 'A multivector slot — a list of token-level dense vectors per session, scored via MaxSim. Indexed via the same `content` text but at finer granularity. ACTIVE by default post-T3.3 (LensWeights::default().content_late = 0.25) — rerank-only nudge that adds token-level precision on the top-K dense results without dominating the query plan. Rollback to 0.0 if eval_ndcg regresses.',
       code: 'PointStruct { vectors: NamedVectors { …, content_late: MultiDenseVector([…]) } }\n→ Query::new_nearest(VectorInput::new_multi(vec![qvec.to_vec()]))',
       link: { text: 'lens.rs::content_late default', href: REPO + '/src-tauri/src/lens.rs' }
     },
@@ -3206,7 +3206,11 @@ VectorsConfig { multivectors: { <span class="s">"content_late"</span>: MultiVect
   var listEl = pg.querySelector('.qd-hyb-results');
   if (!toggles.length || !rows.length || !listEl) return;
 
-  /* default: dense ON, sparse ON, late OFF (matches v3 default + content_late=0.0) */
+  /* Widget initial state intentionally starts with late=OFF so the user can
+   * toggle it ON and see the rerank effect on the result list. The actual
+   * engine default post-T3.3 is content_late=0.25 (ACTIVE) — see the chip
+   * label "ON · w=0.25" and Q8 qd-what for the runtime default. The widget
+   * is a CONTRAST tool, not a state mirror. */
   var lanes = { dense: true, sparse: true, late: false };
 
   function score(row) {

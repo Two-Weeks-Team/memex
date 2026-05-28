@@ -227,6 +227,12 @@ pub async fn compose_wrapped(
     //         from scroll. So are per-session stats (turn counts, errors).
     let mut arc_counts: HashMap<String, usize> = HashMap::new();
     let mut agent_intents: HashMap<String, HashMap<String, usize>> = HashMap::new();
+    // PR #12 REV-9 (CodeRabbit #13 / Codex P2 #16) — track source_agent
+    // counts from scroll INDEPENDENTLY of whether facet succeeded, so we
+    // can reconcile against legacy points whose `source_agent` payload was
+    // missing at index time (scroll_window normalizes those to "claude_code"
+    // but they don't appear in the facet result).
+    let mut scroll_agent_counts: HashMap<String, usize> = HashMap::new();
     let mut total_turns: u64 = 0;
     let mut turn_samples: Vec<u32> = Vec::new();
     let mut had_errors_count: usize = 0;
@@ -267,6 +273,9 @@ pub async fn compose_wrapped(
         if facet_outcome_empty && !summary.outcome.is_empty() {
             *outcome_counts.entry(summary.outcome.clone()).or_insert(0) += 1;
         }
+        // REV-9 — always tally agent from scroll (independent of facet),
+        // so we can reconcile legacy-missing source_agent below.
+        *scroll_agent_counts.entry(summary.source_agent.clone()).or_insert(0) += 1;
         if facet_agent_empty {
             *agent_counts.entry(summary.source_agent.clone()).or_insert(0) += 1;
         }
@@ -287,6 +296,32 @@ pub async fn compose_wrapped(
         total_tool_calls += u64::from(tc);
         if summary.arc == "debug" || summary.arc == "debug-fix" {
             debug_tool_counts.push(tc);
+        }
+    }
+
+    // PR #12 REV-9 (CodeRabbit #13 / Codex P2 #16) — reconcile legacy points.
+    // The facet API counts only points that actually have a `source_agent`
+    // value in their payload index. Older points (pre-KH-01 multi-agent
+    // schema, or partially-backfilled corpora) may be missing the field,
+    // and `scroll_window` normalises those to `"claude_code"`. Without
+    // reconciliation, the facet path would drop those sessions from
+    // `agent_counts` while `sessions_total` still includes them, so
+    // `agent_split.share` would not sum to 1.0 and "dominant intent"
+    // distribution would be skewed.
+    //
+    // Reconciliation rule: for each agent value seen by scroll, if scroll
+    // counted MORE than facet did, the delta is the count of legacy points
+    // that the facet index missed — add the delta into facet's bucket.
+    // When the facet path was skipped (truncated, or facet RPC failed and
+    // `facet_agent_empty` already triggered the scroll-tally branch above),
+    // agent_counts already equals scroll counts and the delta is zero.
+    if !facet_agent_empty {
+        for (agent, scroll_n) in &scroll_agent_counts {
+            let facet_n = agent_counts.get(agent).copied().unwrap_or(0);
+            if *scroll_n > facet_n {
+                let delta = *scroll_n - facet_n;
+                *agent_counts.entry(agent.clone()).or_insert(0) += delta;
+            }
         }
     }
 

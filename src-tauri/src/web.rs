@@ -27,7 +27,7 @@ use crate::{crud, indexer, lens, mcp, parser, retrieval, schema, sec};
 /// T3.2 (qdrant-improvement-goal.md) — operational observability for the
 /// Docker server variant. The all-in-one container ran with no `/metrics`
 /// endpoint before this; SREs had no way to alert on rate/latency without
-/// log scraping. These six families let Prometheus scrape /metrics on :8765
+/// log scraping. These eight families let Prometheus scrape /metrics on :8765
 /// alongside the existing /api/health.
 ///
 /// Atomic counters are cheap enough that we don't gate them behind a feature
@@ -234,7 +234,7 @@ async fn health(State(s): State<WebState>) -> Json<Value> {
 
 // ---- /metrics (Prometheus exposition format 0.0.4) -----------------------
 //
-// T3.2 (qdrant-improvement-goal.md) — six metric families let Prometheus
+// T3.2 (qdrant-improvement-goal.md) — eight metric families let Prometheus
 // scrape the all-in-one container alongside `/api/health`. Output uses the
 // canonical `text/plain; version=0.0.4; charset=utf-8` content type so
 // `prometheus-client_python` and the official Go `prometheus_client` both

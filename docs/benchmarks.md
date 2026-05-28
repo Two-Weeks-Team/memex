@@ -45,32 +45,72 @@ rescore `2 × limit` (= 40 vectors for the default 20-result page).
 
 ## How to reproduce
 
+PR #12 REV-13 (CodeRabbit #6) — accurate recipe.
+
+`src-tauri/src/eval_ndcg.rs` is a **library module**, not a binary. It exposes:
+- `pub fn ndcg_at_10(actual: &[String], labels: &[String]) -> f64`
+- `pub fn mean_ndcg_at_10<F>(labeled: &[LabeledQuery], mut run_query: F) -> f64`
+
+There is no `cargo run --bin memex -- eval ndcg` subcommand. To produce the
+numbers in the table above, drive these functions from a small test or
+benchmark harness — either a unit test (`#[test]` in `src-tauri/tests/`)
+or `cargo bench` with a `criterion` benchmark.
+
+The quantization knobs are set in **`src-tauri/src/schema.rs::quant_search()`**
+(NOT in `eval_ndcg.rs`). They are not CLI-toggleable today — flipping them
+requires a source edit + rebuild + index rebuild on the affected collection.
+
 Prerequisites:
 - Qdrant `v1.18.1` running (`docker compose up -d qdrant` from repo root)
 - Memex desktop or web variant compiled (`cargo build --release`)
 - ≥ 100 sessions in `~/.claude/projects` or `~/.codex/sessions`
 
+### Baseline run (the v3 production setting — `bits-2 + rescore + 2× oversampling`)
+
 ```bash
 # 1. Index the corpus into a fresh v3 collection.
 memex index ~/.claude/projects --force-rebuild
 
-# 2. Run the eval fixture (built-in NDCG harness).
-#    `eval_ndcg.rs` ships ~30 hand-curated query → expected-session pairs;
-#    the harness runs each, measures recall@10 against the gold set,
-#    and logs per-query latency to stdout.
-cargo run --release --bin memex -- eval ndcg --collection memex_sessions_v3
+# 2. Run a NDCG / latency harness that calls `mean_ndcg_at_10` over a
+#    labeled fixture you provide. Example shape:
+#
+#    #[tokio::test]
+#    async fn measure_baseline() {
+#        let labeled = load_labeled_fixture("queries.json");
+#        let n = mean_ndcg_at_10(&labeled, |q| {
+#            let t = Instant::now();
+#            let hits = indexer::search_content(&qdrant, &emb, q, 10).await?;
+#            ELAPSED.record(t.elapsed());
+#            hits.into_iter().map(|h| h.session_id).collect()
+#        });
+#        eprintln!("ndcg@10 = {n}");
+#    }
 
-# 3. Compare against a no-rescore variant (toggle search-time params).
-#    schema.rs::quant_search holds `rescore: true, oversampling: 2.0`.
-#    Flip both to false / 1.0 in a feature branch and re-run step 2 to
-#    measure the recall delta.
-
-# 4. Index-size comparison:
+# 3. Index size on disk:
 docker exec memex-qdrant du -sh /qdrant/storage/collections/memex_sessions_v3
 ```
 
-The harness emits a markdown summary; paste it into the table above with
-your machine + corpus details when you update this file.
+### Variant runs (manual code edits required)
+
+To produce the other two table rows, edit `src-tauri/src/schema.rs::quant_search()`
+on a feature branch and rebuild:
+
+| Variant | Edit in `schema.rs::quant_search()` |
+|---|---|
+| `bits-2`, **no rescore** (row 2) | set `rescore: false`, `oversampling: 1.0` |
+| `f32` baseline (row 1) | remove the `quantization_config` block entirely from `build_v3_create_collection()` (so the collection stores f32) |
+| `bits-2 + rescore + 2×` (row 3) | the as-shipped default |
+
+Each variant requires:
+1. Edit `schema.rs`
+2. `cargo build --release`
+3. `memex index … --force-rebuild` (the collection schema changed, so the existing index is stale)
+4. Run the NDCG harness from step 2 above
+5. Record numbers
+
+A future-work item (not in this PR) is exposing the quant params as a
+CLI flag on a debug subcommand so the variant sweep doesn't need source
+edits. Until then this is the honest recipe.
 
 ---
 

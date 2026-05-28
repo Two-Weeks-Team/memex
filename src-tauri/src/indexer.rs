@@ -942,9 +942,14 @@ pub struct LensWeights {
     pub error: f32,
     #[serde(default = "default_weight")]
     pub code: f32,
-    /// KB-01 — late-interaction MaxSim weight. Defaults to 0.0 (off) so
-    /// existing callers that don't set it keep the dense-only behavior.
-    #[serde(default = "default_zero_weight")]
+    /// KB-01 — late-interaction MaxSim weight. T3.3 (qdrant-improvement-goal.md)
+    /// flipped this from 0.0 to 0.25 — a deliberate rerank-only nudge that
+    /// activates the multivector lane without dominating the dense lenses.
+    /// PR #12 REV-8 (Codex P2 #17): the serde default must agree with
+    /// `Default::default()`, otherwise a partial weights JSON like
+    /// `{"content": 1.5}` would deserialize this field to 0.0 and silently
+    /// disable the very lane T3.3 turned on.
+    #[serde(default = "default_content_late_weight")]
     pub content_late: f32,
 }
 
@@ -952,19 +957,27 @@ fn default_weight() -> f32 {
     1.0
 }
 
-fn default_zero_weight() -> f32 {
-    0.0
+/// PR #12 REV-8 (Codex P2 #17) — serde default for `content_late` aligned
+/// with both `indexer::LensWeights::default()` and `lens::LensWeights::default()`
+/// (both 0.25 post-T3.3). The old `default_zero_weight` helper became
+/// unreachable after this rename and was removed.
+fn default_content_late_weight() -> f32 {
+    0.25
 }
 
 impl Default for LensWeights {
     fn default() -> Self {
+        // PR #12 REV-8 (Codex P2 #17) — content_late default flipped from
+        // 0.0 to 0.25 to match T3.3 in lens::LensWeights. Keeps the public
+        // API and the internal lens module in lockstep so partial weights
+        // JSON does not silently disable the rerank lane.
         Self {
             content: 1.0,
             tool: 1.0,
             path: 1.0,
             error: 1.0,
             code: 1.0,
-            content_late: 0.0,
+            content_late: 0.25,
         }
     }
 }
