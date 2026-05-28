@@ -930,57 +930,15 @@ pub struct SearchHit {
     pub vector_scores: std::collections::HashMap<String, f32>,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct LensWeights {
-    #[serde(default = "default_weight")]
-    pub content: f32,
-    #[serde(default = "default_weight")]
-    pub tool: f32,
-    #[serde(default = "default_weight")]
-    pub path: f32,
-    #[serde(default = "default_weight")]
-    pub error: f32,
-    #[serde(default = "default_weight")]
-    pub code: f32,
-    /// KB-01 — late-interaction MaxSim weight. T3.3 (qdrant-improvement-goal.md)
-    /// flipped this from 0.0 to 0.25 — a deliberate rerank-only nudge that
-    /// activates the multivector lane without dominating the dense lenses.
-    /// PR #12 REV-8 (Codex P2 #17): the serde default must agree with
-    /// `Default::default()`, otherwise a partial weights JSON like
-    /// `{"content": 1.5}` would deserialize this field to 0.0 and silently
-    /// disable the very lane T3.3 turned on.
-    #[serde(default = "default_content_late_weight")]
-    pub content_late: f32,
-}
-
-fn default_weight() -> f32 {
-    1.0
-}
-
-/// PR #12 REV-8 (Codex P2 #17) — serde default for `content_late` aligned
-/// with both `indexer::LensWeights::default()` and `lens::LensWeights::default()`
-/// (both 0.25 post-T3.3). The old `default_zero_weight` helper became
-/// unreachable after this rename and was removed.
-fn default_content_late_weight() -> f32 {
-    0.25
-}
-
-impl Default for LensWeights {
-    fn default() -> Self {
-        // PR #12 REV-8 (Codex P2 #17) — content_late default flipped from
-        // 0.0 to 0.25 to match T3.3 in lens::LensWeights. Keeps the public
-        // API and the internal lens module in lockstep so partial weights
-        // JSON does not silently disable the rerank lane.
-        Self {
-            content: 1.0,
-            tool: 1.0,
-            path: 1.0,
-            error: 1.0,
-            code: 1.0,
-            content_late: 0.25,
-        }
-    }
-}
+// Issue #15 — `indexer::LensWeights` was a parallel copy of the canonical
+// `crate::lens::LensWeights` (the internal 8-field struct with `diversity`
+// and `fusion`). Keeping two structs in sync required discipline that
+// REV-3 / REV-8 / REV-15 each demonstrated was unreliable. The fix is
+// structural: re-export the canonical type so there is only one struct.
+// Callers using the path `crate::indexer::LensWeights` keep working
+// unchanged thanks to `pub use`; web/Tauri/MCP requests gain the
+// `diversity` and `fusion` fields the frontend was already sending.
+pub use crate::lens::{FusionMode, LensWeights};
 
 pub async fn search_content(
     client: &Qdrant,
@@ -995,6 +953,8 @@ pub async fn search_content(
         error: 0.0,
         code: 0.0,
         content_late: 0.0,
+        diversity: None,
+        fusion: FusionMode::Formula,
     };
     lens_search(client, embedder, query, &weights, limit, 50).await
 }
@@ -1016,13 +976,14 @@ pub async fn lens_search(
     limit: u64,
     _per_vector_limit: u64,
 ) -> Result<Vec<SearchHit>> {
-    // Convert the legacy LensWeights → lens::LensWeights (the legacy struct
-    // has no `diversity`/`fusion` knobs; defaults are Formula + no MMR which
-    // matches the previous behavior in terms of result rank stability).
-    let lens_weights: crate::lens::LensWeights = weights.clone().into();
+    // Issue #15 — `indexer::LensWeights` is now a re-export of
+    // `crate::lens::LensWeights`; no conversion needed. The frontend's
+    // `diversity` / `fusion` fields (already sent by `src/main.js`) flow
+    // straight through to `lens_search_v2`.
+    //
     // Empty query / all-zero-weights — legacy code returned `Ok(empty)`. The
     // new API returns Err; map back to empty for backward compat.
-    let res = match crate::lens::lens_search_v2(client, embedder, query, &lens_weights, limit)
+    let res = match crate::lens::lens_search_v2(client, embedder, query, weights, limit)
         .await
     {
         Ok(v) => v,

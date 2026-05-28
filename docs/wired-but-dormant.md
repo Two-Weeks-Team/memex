@@ -42,37 +42,20 @@ These need no further work; they're already part of the production query plan.
 | **`OrderBy` recency** | recents panel · server-sorted | `OrderBy { start_ts_dt, DESC }`. |
 | **Snapshot HTTP endpoints** | `indexer.rs::snapshot_*` | `reqwest`-wrapped POST/GET/POST-upload. |
 | **Strict-mode caps** | `schema.rs::StrictModeConfig` | 85% RAM cap + 100-point query cap. |
+| **`FusionMode::Rrf`** — RRF as alternative to Formula (Issue #15 promotion) | `lens.rs::FusionMode` enum + `LensWeights::fusion` field | Activated by web/Tauri/MCP callers via JSON `"fusion": "Rrf"`. Issue #15 collapsed `indexer::LensWeights` into `lens::LensWeights` so this knob is now exposed on every external surface. |
+| **`Mmr` diversity** — opt-in diversification on `content` prefetch (Issue #15 promotion) | `LensWeights::diversity: Option<f32>` + `build_prefetches` wraps the content prefetch with `Query::new_nearest_with_mmr(d)` when `Some(d)` | Activated by callers via JSON `"diversity": 0.4`. `src/main.js` was already sending this field; Issue #15 makes the backend deserialise it. |
 
 ---
 
 ## B · `wired:off` — built into the schema, gated off by default
 
-These features exist in the v3 collection schema (or the retrieval code path)
-but are intentionally not contributing to default queries. Each has an explicit
-flip target.
+_Currently empty._ The former §B.1 (`FusionMode::Rrf`) and §B.2 (`Mmr` diversity)
+were promoted to §A by **Issue #15**: collapsing `indexer::LensWeights` into the
+canonical `lens::LensWeights` means the public API now exposes both knobs via
+serde JSON, and `src/main.js` was already sending those fields. The activation
+gates that were "wired:off" are now closed.
 
-### B.1 · `FusionMode::Rrf` — Reciprocal Rank Fusion alternative
-
-- **Status flag**: `wired:off`
-- **Where**: `lens.rs::FusionMode` enum has an `Rrf` variant; the default is
-  `Formula`. The retrieval path can swap fusion mode via the enum.
-- **Activation**: UI toggle exposing fusion mode (not yet wired to a control).
-- **Rationale**: Formula with `exp_decay` recency was the right default for
-  the demo (recency matters more than rank position in a session-history
-  corpus). RRF is kept as an alternative for diverse-source fusion.
-- **Tracked by**: future work (not in current goal).
-
-### B.2 · `Mmr` diversity — opt-in
-
-- **Status flag**: `wired:off`
-- **Where**: `lens.rs::LensWeights::diversity: Option<f32>`; default `None`.
-  `build_prefetches` emits `Query::new_nearest_with_mmr(...)` for the
-  `content` lens *if* `diversity = Some(λ)`.
-- **Activation**: UI control or `LensWeights::default().diversity = Some(0.4)`.
-- **Rationale**: MMR is great for "diverse results" UX but hurts the "near
-  duplicates first" intuition for recall — we want both intuitions available,
-  not one as a permanent default.
-- **Tracked by**: future work.
+Future `wired:off` items would land here.
 
 ---
 

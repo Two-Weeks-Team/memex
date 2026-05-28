@@ -862,24 +862,9 @@ pub fn lens_result_to_searchhit(r: LensResult) -> SearchHit {
     }
 }
 
-/// Adapter `LensWeights` (this module) → `crate::indexer::LensWeights`
-/// (legacy struct) so callers in `indexer::lens_search` can keep the same
-/// signature. Lossless for the 6 dense weights; the new `diversity` /
-/// `fusion` fields default to `None` / `Formula`.
-impl From<crate::indexer::LensWeights> for LensWeights {
-    fn from(v: crate::indexer::LensWeights) -> Self {
-        Self {
-            content: v.content,
-            tool: v.tool,
-            path: v.path,
-            error: v.error,
-            code: v.code,
-            content_late: v.content_late,
-            diversity: None,
-            fusion: FusionMode::Formula,
-        }
-    }
-}
+// Issue #15 — the `From<crate::indexer::LensWeights> for LensWeights` adapter
+// was removed because the two types are now the same type (indexer re-exports
+// this one via `pub use`). Identity conversion is implicit; no adapter needed.
 
 // ---------------------------------------------------------------------------
 // Tests — TDD G2 gate (11 FormulaQuery + 3 MMR + 3 RRF + 4 BM25 = 21).
@@ -1366,5 +1351,37 @@ mod tests {
         assert_eq!(h.session_id, "s1");
         assert_eq!(h.score, 1.42);
         assert_eq!(h.vector_scores, per);
+    }
+
+    // ----- Issue #15 closure assertions -----
+
+    #[test]
+    fn issue_15_partial_weights_json_picks_up_diversity_and_fusion() {
+        // Frontend (src/main.js) sends weights with `diversity` and `fusion`;
+        // before the collapse these were silently dropped at the
+        // `indexer::LensWeights` boundary. Verify they now flow through —
+        // and that the serde defaults for the omitted fields still fire
+        // (content_late = 0.25, tool/path/error/code = 1.0).
+        let json = r#"{"content":1.5,"diversity":0.4,"fusion":"rrf"}"#;
+        let w: LensWeights = serde_json::from_str(json)
+            .expect("partial weights JSON with diversity+fusion must deserialize");
+        assert!((w.content - 1.5).abs() < f32::EPSILON);
+        assert_eq!(w.diversity, Some(0.4));
+        assert!(matches!(w.fusion, FusionMode::Rrf));
+        assert!((w.tool - 1.0).abs() < f32::EPSILON);
+        assert!((w.content_late - 0.25).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn issue_15_indexer_re_export_is_identity_with_lens() {
+        // `indexer::LensWeights` is a `pub use` re-export of `lens::LensWeights`.
+        // Cross-module assignment must compile without conversion — if anyone
+        // re-introduces a parallel struct, this fails at compile time.
+        let from_lens: crate::lens::LensWeights = Default::default();
+        let _: crate::indexer::LensWeights = from_lens.clone();
+        let from_indexer: crate::indexer::LensWeights = Default::default();
+        let _: crate::lens::LensWeights = from_indexer;
+        // Same FusionMode enum as well
+        let _: crate::indexer::FusionMode = crate::lens::FusionMode::Formula;
     }
 }

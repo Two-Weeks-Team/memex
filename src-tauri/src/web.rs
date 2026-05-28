@@ -358,14 +358,10 @@ struct LensReq {
 
 async fn lens(State(s): State<WebState>, Json(body): Json<LensReq>) -> ApiResult {
     s.metrics.mark_query();
-    let weights = body.weights.unwrap_or(indexer::LensWeights {
-        content: 1.0,
-        tool: 1.0,
-        path: 1.0,
-        error: 1.0,
-        code: 1.0,
-        content_late: 0.25, // matches T3.3 — LensWeights::default() in lens.rs
-    });
+    // Issue #15 — LensWeights now lives in `crate::lens` (re-exported via
+    // `indexer::LensWeights`). `Default::default()` returns the canonical
+    // values: 5×1.0 + content_late 0.25 + diversity None + fusion Formula.
+    let weights = body.weights.unwrap_or_default();
     let t = Instant::now();
     let hits = indexer::lens_search(
         s.qdrant.as_ref(),

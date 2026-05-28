@@ -703,6 +703,8 @@ mod tests {
     /// ⇒ skip slot.
     #[test]
     fn t_lens_prefetch_includes_content_late() {
+        // Issue #15 — `indexer::LensWeights` is a re-export of
+        // `lens::LensWeights`; the 8-field shape includes `diversity` + `fusion`.
         let w = crate::indexer::LensWeights {
             content: 0.0,
             tool: 0.0,
@@ -710,6 +712,8 @@ mod tests {
             error: 0.0,
             code: 0.0,
             content_late: 1.0,
+            diversity: None,
+            fusion: crate::lens::FusionMode::Formula,
         };
         assert!(w.content_late > 0.0, "non-zero weight must activate slot");
     }
