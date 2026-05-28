@@ -1,0 +1,754 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>PR #12 Out-of-Scope Follow-ups — Deep Dive &amp; Action Plan</title>
+<meta name="generator" content="memex / claudedocs" />
+<style>
+  :root {
+    --bg: #0a0d12;
+    --bg-2: #0f1419;
+    --bg-3: #161b22;
+    --fg: #e6edf3;
+    --fg-mute: #8d96a0;
+    --fg-dim: #6e7681;
+    --line: #21262d;
+    --line-2: #30363d;
+    --accent: #79c0ff;
+    --accent-2: #d2a8ff;
+    --green: #56d364;
+    --yellow: #f0b859;
+    --red: #f47067;
+    --gradient: linear-gradient(135deg, #79c0ff 0%, #d2a8ff 100%);
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box }
+  html, body { margin: 0; padding: 0 }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.6;
+    color: var(--fg);
+    background: var(--bg);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 56px 32px 80px }
+  header.page {
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 32px;
+    margin-bottom: 40px;
+  }
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--fg-dim);
+    margin: 0 0 8px;
+  }
+  h1 {
+    font-size: 32px;
+    line-height: 1.2;
+    margin: 0 0 12px;
+    background: var(--gradient);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .lede { font-size: 16px; color: var(--fg-mute); margin: 0; max-width: 78ch }
+  .meta {
+    margin-top: 20px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 24px;
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--fg-dim);
+  }
+  .meta b { color: var(--fg); font-weight: 600 }
+  h2 {
+    font-size: 22px;
+    margin: 48px 0 16px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--line);
+  }
+  h3 {
+    font-size: 17px;
+    margin: 28px 0 12px;
+    color: var(--accent);
+  }
+  h4 {
+    font-size: 14px;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    color: var(--fg-mute);
+    margin: 20px 0 8px;
+    font-weight: 600;
+  }
+  p, li { font-size: 14px }
+  code, kbd {
+    font-family: var(--mono);
+    font-size: 0.9em;
+    background: var(--bg-3);
+    padding: 1px 6px;
+    border-radius: 4px;
+    border: 1px solid var(--line);
+  }
+  pre {
+    background: var(--bg-2);
+    border: 1px solid var(--line);
+    padding: 14px 16px;
+    border-radius: 6px;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    line-height: 1.5;
+    overflow-x: auto;
+  }
+  pre code { background: transparent; padding: 0; border: 0 }
+  a { color: var(--accent); text-decoration: none; border-bottom: 1px dotted currentColor }
+  a:hover { border-bottom-style: solid }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+    margin: 16px 0;
+  }
+  th, td {
+    border: 1px solid var(--line);
+    padding: 10px 12px;
+    text-align: left;
+    vertical-align: top;
+  }
+  th {
+    background: var(--bg-3);
+    font-weight: 600;
+    color: var(--fg);
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+  }
+  td code { font-size: 11.5px }
+  .summary-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+    margin: 24px 0 8px;
+  }
+  @media (max-width: 900px) { .summary-grid { grid-template-columns: 1fr 1fr } }
+  .card {
+    background: var(--bg-2);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 18px;
+  }
+  .card .ix {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--fg-dim);
+    letter-spacing: 0.5px;
+  }
+  .card .ti { font-size: 15px; font-weight: 600; margin: 4px 0 10px }
+  .card .ix b { color: var(--accent); font-weight: 600 }
+  .badge {
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    padding: 2px 8px;
+    border-radius: 99px;
+    border: 1px solid var(--line-2);
+    margin-right: 6px;
+    margin-bottom: 4px;
+  }
+  .badge.pri-yellow { color: var(--yellow); border-color: rgba(240, 184, 89, 0.4) }
+  .badge.pri-green  { color: var(--green);  border-color: rgba(86, 211, 100, 0.4) }
+  .badge.kind-block { color: var(--red);    border-color: rgba(244, 112, 103, 0.4) }
+  .badge.kind-int   { color: var(--accent); border-color: rgba(121, 192, 255, 0.4) }
+  .badge.kind-ext   { color: var(--accent-2); border-color: rgba(210, 168, 255, 0.4) }
+  .badge.kind-cond  { color: var(--fg-mute); }
+  .card .blurb { font-size: 12.5px; color: var(--fg-mute); margin: 8px 0 0 }
+  .item {
+    background: var(--bg-2);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 28px 32px;
+    margin: 32px 0;
+  }
+  .item-hdr {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 16px;
+    margin-bottom: 20px;
+    padding-bottom: 18px;
+    border-bottom: 1px solid var(--line);
+  }
+  .item-hdr h2 {
+    margin: 0;
+    border: 0;
+    padding: 0;
+    font-size: 20px;
+  }
+  .item-hdr .num {
+    font-family: var(--mono);
+    color: var(--fg-dim);
+    font-size: 14px;
+    margin-right: 8px;
+  }
+  .item-hdr .iss {
+    font-family: var(--mono);
+    font-size: 12px;
+    background: var(--bg-3);
+    border: 1px solid var(--line-2);
+    padding: 6px 12px;
+    border-radius: 6px;
+    white-space: nowrap;
+  }
+  .quote {
+    border-left: 3px solid var(--accent);
+    padding: 8px 0 8px 14px;
+    margin: 14px 0;
+    font-style: italic;
+    color: var(--fg-mute);
+    font-size: 13px;
+  }
+  .quote .src { display: block; font-style: normal; font-size: 11px; color: var(--fg-dim); margin-top: 6px; font-family: var(--mono) }
+  .fact-grid {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 6px 18px;
+    margin: 14px 0;
+    font-size: 13px;
+  }
+  .fact-grid dt { font-weight: 600; color: var(--fg-mute) }
+  .fact-grid dd { margin: 0 }
+  .timeline {
+    border-left: 2px solid var(--line-2);
+    padding-left: 24px;
+    margin: 20px 0;
+  }
+  .timeline-row { position: relative; margin-bottom: 18px }
+  .timeline-row::before {
+    content: '';
+    position: absolute;
+    left: -30px;
+    top: 6px;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--bg);
+    border: 2px solid var(--accent);
+  }
+  .timeline-row.cond::before { border-color: var(--fg-dim) }
+  .timeline-row.now::before  { border-color: var(--green); background: var(--green) }
+  .timeline-row .when {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--fg-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 4px;
+  }
+  .timeline-row .what { font-size: 13.5px }
+  footer.page {
+    border-top: 1px solid var(--line);
+    padding-top: 24px;
+    margin-top: 60px;
+    color: var(--fg-dim);
+    font-size: 12px;
+    font-family: var(--mono);
+  }
+  ul.tight { margin: 8px 0 8px 18px; padding: 0 }
+  ul.tight li { margin: 4px 0 }
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 18px }
+  @media (max-width: 700px) { .grid-2 { grid-template-columns: 1fr } }
+  .panel-mini {
+    background: var(--bg-3);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 12px 14px;
+  }
+  .panel-mini h4 { margin-top: 0 }
+  .ratio {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--fg-mute);
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="page">
+  <p class="eyebrow">claudedocs · Memex × Qdrant uplift · follow-up deep-dive</p>
+  <h1>PR #12 Out-of-Scope Follow-ups — Deep Dive &amp; Action Plan</h1>
+  <p class="lede">
+    The four items deferred from <a href="https://github.com/Two-Weeks-Team/memex/pull/12">PR #12</a>'s
+    &ldquo;Out-of-scope follow-ups&rdquo; section, each analysed against the actual codebase + Qdrant 1.18 official documentation,
+    with a concrete handling plan for each and the issues filed today (#13–#16).
+  </p>
+  <div class="meta">
+    <span><b>Generated</b>: 2026-05-28</span>
+    <span><b>Branch</b>: feat/web-service-stack</span>
+    <span><b>Source PR</b>: <a href="https://github.com/Two-Weeks-Team/memex/pull/12">#12</a> (state: OPEN, MergeState: CLEAN)</span>
+    <span><b>Issues filed</b>: <a href="https://github.com/Two-Weeks-Team/memex/issues/13">#13</a>, <a href="https://github.com/Two-Weeks-Team/memex/issues/14">#14</a>, <a href="https://github.com/Two-Weeks-Team/memex/issues/15">#15</a>, <a href="https://github.com/Two-Weeks-Team/memex/issues/16">#16</a></span>
+  </div>
+</header>
+
+<h2>1 · At-a-glance summary</h2>
+<p>
+  Each of the four out-of-scope items has been split into its own GitHub issue with concrete
+  acceptance criteria, the actual blocker (or non-blocker) called out, and a recommended action.
+  The categories below distinguish <b>internal work</b> (we control the timeline), <b>external blocker</b>
+  (we wait on Qdrant upstream), and <b>conditional</b> (no action until a triggering event).
+</p>
+
+<div class="summary-grid">
+  <div class="card">
+    <div class="ix">FOLLOW-UP <b>#1</b> · issue <a href="https://github.com/Two-Weeks-Team/memex/issues/13">#13</a></div>
+    <div class="ti">Real TurboQuant benchmark numbers</div>
+    <span class="badge pri-yellow">🟡 Important</span>
+    <span class="badge kind-int">internal</span>
+    <p class="blurb">Today's table is illustrative. Needs a new <code>bench</code> binary + labeled-queries fixture + recipe rewrite.</p>
+    <p class="ratio">est: 3–4 days · schedule after #15 / #14 land</p>
+  </div>
+  <div class="card">
+    <div class="ix">FOLLOW-UP <b>#2</b> · issue <a href="https://github.com/Two-Weeks-Team/memex/issues/14">#14</a></div>
+    <div class="ti"><code>ai_title</code> identifier-aware tokenizer</div>
+    <span class="badge pri-green">🟢 Recommended</span>
+    <span class="badge kind-block">upstream blocker</span>
+    <p class="blurb">Qdrant 1.18 ships 4 builtin tokenizers; no custom API. Solved client-side via payload identifier expansion — self-contained, no upstream dependency.</p>
+    <p class="ratio">est: 2–3 days · single migration</p>
+  </div>
+  <div class="card">
+    <div class="ix">FOLLOW-UP <b>#3</b> · issue <a href="https://github.com/Two-Weeks-Team/memex/issues/15">#15</a></div>
+    <div class="ti">Widen <code>indexer::LensWeights</code></div>
+    <span class="badge pri-yellow">🟡 Important</span>
+    <span class="badge kind-ext">public API change</span>
+    <p class="blurb">Public struct misses 2 of 8 fields (<code>diversity</code>, <code>fusion</code>). Web/Tauri callers cannot request MMR or RRF today.</p>
+    <p class="ratio">est: 2–3 days · clean PR scope</p>
+  </div>
+  <div class="card">
+    <div class="ix">FOLLOW-UP <b>#4</b> · issue <a href="https://github.com/Two-Weeks-Team/memex/issues/16">#16</a></div>
+    <div class="ti">MCP <code>points_indexed_total</code> wire-up</div>
+    <span class="badge pri-green">🟢 Recommended</span>
+    <span class="badge kind-cond">conditional / tracking</span>
+    <p class="blurb">Counter correct as-is. MCP is read-only by design. Activates only when a write tool ships.</p>
+    <p class="ratio">stage 1: 15 min · stage 2: with future PR</p>
+  </div>
+</div>
+
+<h2>2 · Item-by-item analysis</h2>
+
+<!-- ITEM 1 -->
+<section class="item" id="item-1">
+  <div class="item-hdr">
+    <h2><span class="num">01</span>Real TurboQuant benchmark numbers in <code>docs/benchmarks.md</code></h2>
+    <div class="iss"><a href="https://github.com/Two-Weeks-Team/memex/issues/13">issue #13</a></div>
+  </div>
+
+  <h4>Current state</h4>
+  <p>
+    <code>docs/benchmarks.md</code> ships a table of recall@10 / p95 latency / disk size with the
+    <b>v3 production setting</b> at 0.98–0.99 recall, ~5 ms p95, 12 % size. The doc itself flags these as
+    <b>illustrative reference values</b> taken from Qdrant's own TurboQuant blog post on a comparable
+    BGE-small fixture. <em>They have never been measured on the memex corpus.</em>
+  </p>
+
+  <div class="quote">
+    The current numbers below are <b>placeholder reference values</b> taken from the Qdrant team's own
+    TurboQuant blog post on a comparable fixture (BGE-small, 1k-10k corpus). They are labeled
+    <b>illustrative</b> in landing copy and should not be quoted as production measurements until the
+    recipe in §3 has been executed against the actual Memex fixture and the table updated&hellip;
+    <span class="src">— docs/benchmarks.md (committed in PR #12, cf412)</span>
+  </div>
+
+  <h4>Why it wasn't done in PR #12</h4>
+  <p>
+    PR #12 REV-13 (CodeRabbit #6) discovered the original recipe was broken (<code>cargo run -- eval ndcg</code>
+    was a non-existent binary; <code>eval_ndcg</code> is a library module exposing <code>ndcg_at_10()</code> +
+    <code>mean_ndcg_at_10()</code>). The fix was an honest recipe rewrite, not real numbers — because:
+  </p>
+  <ul class="tight">
+    <li>Quant knobs live in <code>src-tauri/src/schema.rs::quant_search()</code>, hard-coded, no CLI flag.</li>
+    <li>A measurement requires source edits + <code>cargo build</code> + reindex (~10 min) <b>per row</b>.</li>
+    <li>No labeled-queries fixture exists in the repo; would have to be authored.</li>
+  </ul>
+  <p>
+    Doing all of that <em>inside</em> PR #12 would have ballooned scope by several days and is properly
+    a separate feature PR.
+  </p>
+
+  <h4>Proposed solution</h4>
+  <p>A new gated binary <code>src-tauri/src/bin/bench.rs</code> driven by:</p>
+<pre><code>memex bench quant-sweep \
+  --corpus ~/.claude/projects/ \
+  --queries fixtures/labeled-queries.jsonl \
+  --configs f32,scalar,binary,tq-bits2,tq-bits1 \
+  --output docs/benchmarks-measured.json</code></pre>
+  <p>
+    Each config is materialised by a new <code>schema::quant_config_for(QuantMode)</code> that returns the
+    matching <code>QuantizationConfig</code> instead of the hardcoded one. The binary drops + recreates the
+    collection per config, indexes, queries, captures p95 from <code>tokio::time::Instant</code> deltas.
+    An <code>xtask render-bench</code> post-step renders into the existing markdown table format.
+  </p>
+
+  <h4>Acceptance criteria (excerpt)</h4>
+  <ul class="tight">
+    <li><code>cargo build --features bench</code> produces <code>target/release/bench</code></li>
+    <li><code>fixtures/labeled-queries.jsonl</code> checked in (≥20 queries × relevance labels)</li>
+    <li><code>docs/benchmarks.md</code> table shows 5 measured rows with reproducible recipe</li>
+    <li>Regression test in <code>src-tauri/tests/bench_e2e.rs</code> sanity-checks ndcg &gt; 0.5</li>
+    <li><code>wired-but-dormant.md</code> §C: remove "benchmarks pending"</li>
+  </ul>
+
+  <h4>Why issue, not blocker</h4>
+  <p>
+    PR #12's claims survive on the "illustrative" caveat — acceptable while the table is explicitly
+    labeled illustrative. The work is mechanical and well-defined; no architecture decisions
+    outstanding. Gating criterion is "the table shows measured numbers", not any external date.
+  </p>
+</section>
+
+<!-- ITEM 2 -->
+<section class="item" id="item-2">
+  <div class="item-hdr">
+    <h2><span class="num">02</span>Custom tokenizer for <code>ai_title</code> (camelCase / snake_case)</h2>
+    <div class="iss"><a href="https://github.com/Two-Weeks-Team/memex/issues/14">issue #14</a></div>
+  </div>
+
+  <h4>Current state</h4>
+  <p>
+    <code>ai_title</code> is indexed with a <code>Text</code> payload index using the default
+    <code>word</code> tokenizer (declared in <code>src-tauri/src/schema.rs</code>). For natural-language
+    titles like <i>"Debugging the auth flow"</i> this is correct. For identifier-rich titles like
+    <code>"getUserData refactor"</code> or <code>"fix_dns_resolver bug"</code>, it silently fails:
+    <code>getUserData</code> remains <em>one token</em>, so a search for <code>user</code> does not
+    match it.
+  </p>
+
+  <h4>Confirmed against Qdrant 1.18 official documentation</h4>
+  <p>
+    Per the <a href="https://qdrant.tech/documentation/manage-data/indexing/#tokenizers">Qdrant 1.18 Indexing → Tokenizers page</a>
+    (re-verified 2026-05-28), Qdrant ships <b>exactly 4 built-in tokenizers</b>:
+  </p>
+  <table>
+    <thead><tr><th>Tokenizer</th><th>Behavior</th><th>Splits <code>getUserData</code>?</th></tr></thead>
+    <tbody>
+      <tr><td><code>word</code> (default)</td><td>space + punctuation + special chars</td><td>No (1 token)</td></tr>
+      <tr><td><code>whitespace</code></td><td>space only</td><td>No (1 token)</td></tr>
+      <tr><td><code>prefix</code></td><td><code>word</code> + prefix index of each token</td><td>No (still 1 token + its prefixes)</td></tr>
+      <tr><td><code>multilingual</code></td><td>charabia + vaporetto for non-Latin scripts</td><td>No (designed for natural language, not identifiers)</td></tr>
+    </tbody>
+  </table>
+  <p>
+    The Rust SDK 1.18's <code>TextIndexParamsBuilder</code> only accepts the
+    <code>TokenizerType</code> enum (<code>Word | Whitespace | Prefix | Multilingual</code>). Custom
+    tokenizer registration is not exposed in any public API — neither REST nor gRPC. Qdrant's
+    <a href="https://github.com/qdrant/qdrant/issues">public issue tracker</a> as of today has no accepted
+    proposal for a custom-tokenizer feature either.
+  </p>
+
+  <h4>Solution — client-side identifier expansion (single answer, not a workaround)</h4>
+  <p>
+    Solving this in Qdrant itself (upstream feature request or fork) was <b>rejected</b>: we control
+    every surface that touches <code>ai_title</code> — the tokenizer layer being inside or outside
+    Qdrant gives the same retrieval result, but client-side keeps us self-contained, ships today,
+    and avoids a future re-migration when/if upstream catches up.
+  </p>
+  <div class="panel-mini">
+    <h4>Client-side payload expansion</h4>
+    <p>
+      Expand identifiers <em>at index time</em> into a second indexed field <code>ai_title_tokens</code>
+      (same <code>word</code> tokenizer applies — once split client-side, <code>word</code> is correct).
+      Original <code>ai_title</code> preserved for display.
+    </p>
+<pre><code>// src-tauri/src/indexer.rs
+fn expand_identifiers(s: &amp;str) -&gt; String {
+    // "getUserData fix_dns_bug" →
+    // "getUserData get User Data fix_dns_bug fix dns bug"
+    ...
+}
+
+// at point build:
+payload.insert("ai_title",        title.clone());
+payload.insert("ai_title_tokens", expand_identifiers(&amp;title));</code></pre>
+    <ul class="tight">
+      <li>✓ ~50 LOC + tests · zero Qdrant change · zero external dependency</li>
+      <li>✓ Industry precedent: Elasticsearch <code>word_delimiter_graph</code> filter, GitHub Code Search</li>
+      <li>~ +30 % payload bytes on the <em>title field only</em> (negligible against <code>content</code> bulk)</li>
+      <li>~ Search-time field selection heuristic in <code>web.rs</code>/<code>mcp.rs</code>: route identifier-shaped queries to <code>ai_title_tokens</code></li>
+    </ul>
+  </div>
+
+  <p>
+    Why not fork Qdrant or wait for 1.19+: we'd inherit security-update responsibility (fork) or carry the
+    client-side helper anyway during a 6–12-month wait (upstream), then face a <em>second</em> migration to
+    drop it. Single migration beats two.
+  </p>
+</section>
+
+<!-- ITEM 3 -->
+<section class="item" id="item-3">
+  <div class="item-hdr">
+    <h2><span class="num">03</span>Widen <code>indexer::LensWeights</code> to mirror <code>lens::LensWeights</code></h2>
+    <div class="iss"><a href="https://github.com/Two-Weeks-Team/memex/issues/15">issue #15</a></div>
+  </div>
+
+  <h4>The actual gap (verified by reading both source files)</h4>
+  <div class="grid-2">
+    <div class="panel-mini">
+      <h4><code>lens::LensWeights</code> (internal, 8 fields)</h4>
+<pre><code>pub struct LensWeights {
+    pub content:      f32,
+    pub tool:         f32, // reused for tool_sparse
+    pub path:         f32, // reused for path_sparse
+    pub error:        f32,
+    pub code:         f32,
+    pub content_late: f32,
+    pub diversity:    Option&lt;f32&gt;,
+    pub fusion:       FusionMode,
+}</code></pre>
+    </div>
+    <div class="panel-mini">
+      <h4><code>indexer::LensWeights</code> (public API, 6 fields)</h4>
+<pre><code>pub struct LensWeights {
+    pub content:      f32,
+    pub tool:         f32,
+    pub path:         f32,
+    pub error:        f32,
+    pub code:         f32,
+    pub content_late: f32,
+    // ⚠️ NO diversity
+    // ⚠️ NO fusion
+}</code></pre>
+    </div>
+  </div>
+
+  <p>
+    The <code>From&lt;indexer::LensWeights&gt; for lens::LensWeights</code> impl at
+    <code>src-tauri/src/lens.rs:869</code> hardcodes the two missing fields:
+  </p>
+<pre><code>impl From&lt;crate::indexer::LensWeights&gt; for LensWeights {
+    fn from(v: crate::indexer::LensWeights) -&gt; Self {
+        Self {
+            content:      v.content,
+            tool:         v.tool,
+            path:         v.path,
+            error:        v.error,
+            code:         v.code,
+            content_late: v.content_late,
+            diversity:    None,              // ← silently dropped
+            fusion:       FusionMode::Formula, // ← silently fixed
+        }
+    }
+}</code></pre>
+
+  <h4>Real-world impact</h4>
+  <p>
+    Callers reaching memex through <b>any external surface</b> — Tauri commands, the
+    <code>/api/lens_search</code> JSON endpoint, MCP — go through <code>indexer::LensWeights</code>.
+    Today they <b>cannot request</b>:
+  </p>
+  <ul class="tight">
+    <li><b>MMR diversification</b> (<code>diversity: Some(d)</code>): the &ldquo;diverse results&rdquo; UX
+      knob is internal-only.</li>
+    <li><b>RRF fusion</b> (<code>fusion: FusionMode::Rrf</code>): the alternative to formula-based
+      fusion is internal-only.</li>
+  </ul>
+  <p>
+    Both are explicitly documented in <code>docs/wired-but-dormant.md</code> as <code>wired:off</code>
+    (§B.1 RRF, §B.2 MMR) — i.e. the code path exists and works, only the public knob is missing.
+  </p>
+
+  <h4>Why this wasn't fixed in PR #12</h4>
+  <p>
+    PR #12 REV-8 (Codex P2 #17, CRITICAL) caught a related issue: the <code>content_late</code> serde
+    default in <code>indexer::LensWeights::default()</code> was still <code>0.0</code> while the
+    internal struct had been bumped to <code>0.25</code> by T3.3. That 6-field overlap was fixed.
+    REV-15 (self-review) then noticed the additional <em>field-set</em> gap but flagged it as
+    out-of-scope, since widening the public API surface requires regenerating TypeScript SDK bindings,
+    adding two frontend controls, and writing a one-time migration note for JSON callers.
+  </p>
+
+  <h4>Proposed solution</h4>
+  <p>Mirror the 2 missing fields with serde defaults that preserve current behavior:</p>
+<pre><code>pub struct LensWeights {
+    // ... existing 6 fields ...
+    #[serde(default)]
+    pub diversity: Option&lt;f32&gt;,
+    #[serde(default)]
+    pub fusion: FusionMode,
+}</code></pre>
+  <p>And make the <code>From</code> impl lossless (round-trip property test).</p>
+
+  <h4>Knock-on changes</h4>
+  <table>
+    <thead><tr><th>File</th><th>Change</th></tr></thead>
+    <tbody>
+      <tr><td><code>src-tauri/src/types.rs</code> <em>(new)</em></td><td>Move <code>FusionMode</code> here; re-export from both <code>indexer</code> and <code>lens</code></td></tr>
+      <tr><td><code>src-tauri/src/indexer.rs</code></td><td>+2 fields, update <code>Default</code>, +2 tests</td></tr>
+      <tr><td><code>src-tauri/src/lens.rs</code></td><td>Make <code>From</code> impl lossless; remove "lossy" comment</td></tr>
+      <tr><td><code>bindings/*.ts</code></td><td>Regenerate via <code>cargo run --features ts-rs gen-bindings</code></td></tr>
+      <tr><td><code>src/components/LensWeightsForm.tsx</code></td><td>+1 slider (diversity 0–1), +1 segmented control (Formula \| RRF)</td></tr>
+      <tr><td><code>docs/wired-but-dormant.md</code></td><td>Move §B.1 and §B.2 from "wired:off" to "wired:on"</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ITEM 4 -->
+<section class="item" id="item-4">
+  <div class="item-hdr">
+    <h2><span class="num">04</span>Wire <code>memex_points_indexed_total</code> in MCP path</h2>
+    <div class="iss"><a href="https://github.com/Two-Weeks-Team/memex/issues/16">issue #16</a></div>
+  </div>
+
+  <h4>The 11 MCP tools — all read-only (verified)</h4>
+  <table>
+    <thead><tr><th>#</th><th>Tool</th><th>Op</th><th>Increments counter?</th></tr></thead>
+    <tbody>
+      <tr><td>1</td><td><code>search</code></td><td>read</td><td>No (correct — search doesn't index)</td></tr>
+      <tr><td>2</td><td><code>recall</code></td><td>read</td><td>No (correct)</td></tr>
+      <tr><td>3</td><td><code>predict_next_actions</code></td><td>read</td><td>No</td></tr>
+      <tr><td>4</td><td><code>mix_match</code></td><td>read</td><td>No</td></tr>
+      <tr><td>5</td><td><code>get_session_payload</code></td><td>read</td><td>No</td></tr>
+      <tr><td>6</td><td><code>get_turn</code></td><td>read</td><td>No</td></tr>
+      <tr><td>7</td><td><code>list_recent_sessions</code></td><td>read</td><td>No</td></tr>
+      <tr><td>8</td><td><code>topology</code></td><td>read</td><td>No</td></tr>
+      <tr><td>9</td><td><code>primer</code></td><td>read</td><td>No</td></tr>
+      <tr><td>10</td><td><code>wrapped</code></td><td>read</td><td>No</td></tr>
+      <tr><td>11</td><td><code>snapshot_export</code></td><td>write (file)</td><td>No (snapshot ≠ index)</td></tr>
+    </tbody>
+  </table>
+
+  <div class="quote">
+    Memex tools mid-conversation. <b>Registered tools (semantic surface — Qdrant primitives are hidden)</b>.
+    <span class="src">— src-tauri/src/mcp.rs:3 (the design principle that the counter respects)</span>
+  </div>
+
+  <h4>This isn't a missing-instrumentation bug</h4>
+  <p>
+    The desktop Tauri indexing path (<code>indexer::upsert_*</code>) correctly increments the counter via
+    <code>WebMetrics::mark_indexed(n)</code> in the web variant. The counter value is correct as it
+    stands. The follow-up activates <em>only if</em> MCP grows a write surface — which is a much
+    bigger product decision than a metric wire-up:
+  </p>
+  <ul class="tight">
+    <li>Security model: any MCP-connected agent could mutate the index</li>
+    <li>Schema contract: what does the agent set vs. what does memex derive?</li>
+    <li>Trust boundary: rate limiting, idempotency, audit trail</li>
+  </ul>
+
+  <h4>Two-stage handling</h4>
+  <table>
+    <thead><tr><th>Stage</th><th>Trigger</th><th>Work</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><b>Stage 1</b><br><span class="ratio">~15 min</span></td>
+        <td>Now</td>
+        <td>Add <code>// TODO(metric, see Issue #16)</code> in <code>mcp.rs</code> at the natural call site, plus a row in <code>wired-but-dormant.md</code> §C</td>
+      </tr>
+      <tr>
+        <td><b>Stage 2</b><br><span class="ratio">+30 min</span></td>
+        <td>Future PR adds MCP write tool</td>
+        <td>That PR also calls <code>mark_indexed(n)</code> + regression test + closes this issue</td>
+      </tr>
+    </tbody>
+  </table>
+</section>
+
+<h2>3 · Final action plan</h2>
+
+<div class="timeline">
+  <div class="timeline-row now">
+    <div class="when">DONE · 2026-05-28 (today)</div>
+    <div class="what">
+      All four items filed as GitHub issues on <code>Two-Weeks-Team/memex</code>:
+      <a href="https://github.com/Two-Weeks-Team/memex/issues/13">#13</a> ·
+      <a href="https://github.com/Two-Weeks-Team/memex/issues/14">#14</a> ·
+      <a href="https://github.com/Two-Weeks-Team/memex/issues/15">#15</a> ·
+      <a href="https://github.com/Two-Weeks-Team/memex/issues/16">#16</a>.
+      Each has full context, blocker analysis, proposed solution, acceptance criteria, and references.
+      Labels: <code>enhancement</code> (uniform — repo had no labels pre-existing).
+    </div>
+  </div>
+
+  <div class="timeline-row">
+    <div class="when">Priority 1 — start when next PR window opens</div>
+    <div class="what">
+      <b>Issue #15</b> (LensWeights collapse via <code>pub use</code>) — fastest, fully internal,
+      unblocks "diverse results" and "RRF fusion" as user-facing knobs, eliminates the entire
+      drift bug class that REV-3 / REV-8 / REV-15 were instances of. Est: 1.5–2 days.
+    </div>
+  </div>
+
+  <div class="timeline-row">
+    <div class="when">Priority 2</div>
+    <div class="what">
+      <b>Issue #14</b> (identifier-aware tokenizer, multi-value payload) — narrow but real win for
+      code-heavy session titles. Self-contained, no upstream dependency. Est: 2–3 days.
+    </div>
+  </div>
+
+  <div class="timeline-row">
+    <div class="when">Bundle into the next unrelated PR</div>
+    <div class="what">
+      <b>Issue #16 Stage 1</b> (15 min — TODO comment + <code>wired-but-dormant.md</code> cross-ref).
+      No standalone PR needed; piggyback whenever another change touches <code>mcp.rs</code>.
+    </div>
+  </div>
+
+  <div class="timeline-row cond">
+    <div class="when">Deferred — largest scope</div>
+    <div class="what">
+      <b>Issue #13</b> (benchmark numbers via Criterion + runtime config) — 3–4 days, largely
+      bound by labeled-queries fixture authoring. Gating criterion is the table itself, not any
+      date. The "illustrative" caveat in <code>docs/benchmarks.md</code> remains honest until the
+      sweep produces real numbers.
+    </div>
+  </div>
+
+  <div class="timeline-row cond">
+    <div class="when">Conditional · MCP grows a write tool</div>
+    <div class="what">
+      <b>Issue #16 Stage 2</b> (full wire-up). Trigger: a separate product PR introduces
+      <code>index_session</code> / <code>enrich_session</code> / etc. That PR closes #16 as part
+      of its acceptance.
+    </div>
+  </div>
+
+  <div class="timeline-row cond">
+    <div class="when">Conditional · whenever MCP grows a write tool</div>
+    <div class="what">
+      <b>Issue #16 Stage 2</b> (full wire-up). Trigger: a separate product PR introduces
+      <code>index_session</code> / <code>enrich_session</code> / etc. That PR closes #16 as part
+      of its acceptance criteria.
+    </div>
+  </div>
+
+</div>
+
+<h2>4 · Verification snapshot</h2>
+<table>
+  <thead><tr><th>Check</th><th>Method</th><th>Result</th></tr></thead>
+  <tbody>
+    <tr><td>4 issues filed on Two-Weeks-Team/memex</td><td><code>gh issue list --state open</code></td><td>✓ #13–#16 confirmed</td></tr>
+    <tr><td>PR #12 state preserved</td><td><code>gh pr view 12 --json state,mergeStateStatus</code></td><td>✓ OPEN, CLEAN, 8 commits</td></tr>
+    <tr><td>Qdrant 1.18 tokenizer set</td><td>fetched <a href="https://qdrant.tech/documentation/manage-data/indexing/#tokenizers">official docs</a></td><td>✓ 4 builtin only (verified 2026-05-28)</td></tr>
+    <tr><td><code>indexer::LensWeights</code> field count</td><td>read <code>src-tauri/src/indexer.rs:934-958</code></td><td>✓ 6 fields, no diversity/fusion</td></tr>
+    <tr><td><code>lens::LensWeights</code> field count</td><td>read <code>src-tauri/src/lens.rs:101-127</code></td><td>✓ 8 fields, includes diversity + fusion</td></tr>
+    <tr><td>MCP tools all read-only</td><td>read <code>src-tauri/src/mcp.rs::tools_catalog</code></td><td>✓ 11 tools, 10 read + 1 snapshot (not index)</td></tr>
+    <tr><td><code>qdrant-client</code> Cargo pin</td><td>grep <code>src-tauri/Cargo.toml</code></td><td>✓ <code>"1"</code> (caret, picks up future 1.x.y)</td></tr>
+    <tr><td>Issue #16 cross-ref placeholder corrected</td><td>REST PATCH after creation</td><td>✓ body 5832 chars, <code>see Issue #16</code> resolved</td></tr>
+  </tbody>
+</table>
+
+<footer class="page">
+  Generated: 2026-05-28 · Memex × Qdrant uplift session · branch <code>feat/web-service-stack</code><br>
+  Source PR: <a href="https://github.com/Two-Weeks-Team/memex/pull/12">Two-Weeks-Team/memex#12</a> · Live landing: <a href="https://two-weeks-team.github.io/memex/">two-weeks-team.github.io/memex</a><br>
+  Related session handoffs: <code>claudedocs/2026-05-28-session-handoff.md</code>
+</footer>
+
+</div>
+</body>
+</html>

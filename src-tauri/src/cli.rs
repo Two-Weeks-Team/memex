@@ -964,6 +964,9 @@ fn cmd_lens(
     code: f32,
     limit: u64,
 ) -> Result<()> {
+    // Issue #15 — `indexer::LensWeights` is a re-export of `lens::LensWeights`
+    // (8 fields). Keep the CLI dense weights as caller-supplied; leave
+    // multivector + diversity + fusion at their conservative defaults.
     let weights = indexer::LensWeights {
         content,
         tool,
@@ -971,6 +974,8 @@ fn cmd_lens(
         error,
         code,
         content_late: 0.0,
+        diversity: None,
+        fusion: indexer::FusionMode::Formula,
     };
     let rt = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
     rt.block_on(async {

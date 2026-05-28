@@ -31,7 +31,8 @@ These need no further work; they're already part of the production query plan.
 | **`content_late` — ColBERT MaxSim multivector rerank** (PR #12 REV-16 promotion) | Schema: `schema.rs` (multivector slot) · indexed at `indexer.rs:621-625` (token-level vectors). Query path: `lens.rs::build_prefetches` emits `Query::new_nearest(VectorInput::new_multi(...))` when weight > 0. | T3.3 flipped both `lens::LensWeights::default()` and `indexer::LensWeights::default()` from `0.0` to **`0.25`** — a rerank-only nudge that doesn't dominate the dense lenses. HNSW for this slot still has `m: 0, ef_construct: 0` (rerank-only, no graph cost). Rollback path: set both defaults back to `0.0`. |
 | **Tenant-flagged `project_name`** keyword index | `schema.rs` payload index list | `is_tenant: true` — Qdrant 1.18 partitions the field as a tenant key. |
 | **`Datetime` index on `start_ts_dt`** | `schema.rs` payload index list | Recency queries are first-class via `DatetimeIndexParamsBuilder`. |
-| **`Text` index on `ai_title`** | `schema.rs` payload index list | Lexical search on session titles. T3.4 investigates tokenizer customisation. |
+| **`Text` index on `ai_title`** | `schema.rs` payload index list | Lexical search on session titles. Issue #14 added a sibling `ai_title_tokens` field for identifier-aware search; `ai_title` itself remains the display string. |
+| **`Text` index on `ai_title_tokens`** — identifier-aware tokenization (Issue #14 promotion) | `schema.rs` payload index list + `schema::identifier_tokens()` helper | Multi-value payload (`Vec<String>`). Each array element is treated as an independent token by Qdrant's Text index. Indexer expands `getUserData refactor` → `["getUserData", "get", "User", "Data", "refactor"]` at upsert time. Same operation as Elasticsearch's `word_delimiter_graph` filter, done client-side. |
 | **`Bool` index on `has_errors`** | `schema.rs` payload index list | Powers the proactive recall pre-filter. |
 | **`Keyword` indices on `intent`, `outcome`, `source_agent`** | `schema.rs` payload index list | Enriched after each session is summarised. |
 | **`Query::RelevanceFeedback`** | `commands.rs::relevance_feedback` · `web.rs::"relevance_feedback"` · `src/main.js::applyRelevanceFeedback` | 👍/👎 buttons on result cards POST positive/negative session-id sets; the next query in-session uses `Query::RelevanceFeedback`. User-driven, no default change needed. |
@@ -42,37 +43,20 @@ These need no further work; they're already part of the production query plan.
 | **`OrderBy` recency** | recents panel · server-sorted | `OrderBy { start_ts_dt, DESC }`. |
 | **Snapshot HTTP endpoints** | `indexer.rs::snapshot_*` | `reqwest`-wrapped POST/GET/POST-upload. |
 | **Strict-mode caps** | `schema.rs::StrictModeConfig` | 85% RAM cap + 100-point query cap. |
+| **`FusionMode::Rrf`** — RRF as alternative to Formula (Issue #15 promotion) | `lens.rs::FusionMode` enum + `LensWeights::fusion` field | Activated by web/Tauri/MCP callers via JSON `"fusion": "Rrf"`. Issue #15 collapsed `indexer::LensWeights` into `lens::LensWeights` so this knob is now exposed on every external surface. |
+| **`Mmr` diversity** — opt-in diversification on `content` prefetch (Issue #15 promotion) | `LensWeights::diversity: Option<f32>` + `build_prefetches` wraps the content prefetch with `Query::new_nearest_with_mmr(d)` when `Some(d)` | Activated by callers via JSON `"diversity": 0.4`. `src/main.js` was already sending this field; Issue #15 makes the backend deserialise it. |
 
 ---
 
 ## B · `wired:off` — built into the schema, gated off by default
 
-These features exist in the v3 collection schema (or the retrieval code path)
-but are intentionally not contributing to default queries. Each has an explicit
-flip target.
+_Currently empty._ The former §B.1 (`FusionMode::Rrf`) and §B.2 (`Mmr` diversity)
+were promoted to §A by **Issue #15**: collapsing `indexer::LensWeights` into the
+canonical `lens::LensWeights` means the public API now exposes both knobs via
+serde JSON, and `src/main.js` was already sending those fields. The activation
+gates that were "wired:off" are now closed.
 
-### B.1 · `FusionMode::Rrf` — Reciprocal Rank Fusion alternative
-
-- **Status flag**: `wired:off`
-- **Where**: `lens.rs::FusionMode` enum has an `Rrf` variant; the default is
-  `Formula`. The retrieval path can swap fusion mode via the enum.
-- **Activation**: UI toggle exposing fusion mode (not yet wired to a control).
-- **Rationale**: Formula with `exp_decay` recency was the right default for
-  the demo (recency matters more than rank position in a session-history
-  corpus). RRF is kept as an alternative for diverse-source fusion.
-- **Tracked by**: future work (not in current goal).
-
-### B.2 · `Mmr` diversity — opt-in
-
-- **Status flag**: `wired:off`
-- **Where**: `lens.rs::LensWeights::diversity: Option<f32>`; default `None`.
-  `build_prefetches` emits `Query::new_nearest_with_mmr(...)` for the
-  `content` lens *if* `diversity = Some(λ)`.
-- **Activation**: UI control or `LensWeights::default().diversity = Some(0.4)`.
-- **Rationale**: MMR is great for "diverse results" UX but hurts the "near
-  duplicates first" intuition for recall — we want both intuitions available,
-  not one as a permanent default.
-- **Tracked by**: future work.
+Future `wired:off` items would land here.
 
 ---
 
@@ -89,8 +73,9 @@ retrieval code yet. Each has a 1-line rationale.
 | Multi-collection (one collection per macro-topic) | One `memex_sessions_v3` collection has been enough. Cross-collection search lands in 1.19. Revisit then. |
 | Geo filter | We don't index "where I was when I wrote this". If we ever do (e.g., laptop-on-trip filtering), this is one payload-index line. |
 | Optimizer tuning (vacuum / indexing threshold knobs) | The defaults handle the hackathon corpus fine. Revisit at 1M+ points. |
-| Custom analyzer (camelCase / snake_case tokenizer for `ai_title`) | **T3.4 RESEARCH DONE — DOCUMENTED 1.18 LIMIT.** SDK 1.18.0 `qdrant_client::qdrant::TextIndexParams` exposes `tokenizer: TokenizerType` with four variants: `Prefix`, `Whitespace`, `Word`, `Multilingual`. None split `camelCaseIdentifiers` or `snake_case` — `Word` treats `getUserData` as a single token. Other SDK knobs ARE available (`lowercase` · `min_token_len` · `max_token_len` · `stopwords` · `phrase_matching` · `stemmer` · ASCII folding), but the code-identifier split we want is not yet a 1.18 primitive. **Workaround paths**: (1) client-side pre-tokenization at index time (cheap), (2) wait for Qdrant 1.19+ to expose a `code` tokenizer or a regex-based splitter. Revisit on next Qdrant minor. Source: `~/.cargo/registry/src/.../qdrant-client-1.18.0/src/qdrant.rs:1180-1205` + `:2096-2120`. |
+| ~~Custom analyzer (camelCase / snake_case tokenizer for `ai_title`)~~ | ~~T3.4 RESEARCH DONE — DOCUMENTED 1.18 LIMIT.~~ **Issue #14 (PR landing this work) closes this row** by promoting to §A above with the client-side `identifier_tokens()` helper. The Qdrant SDK 1.18 limit (4 builtin tokenizers, no custom registration) still stands, but it no longer blocks us — splitting at index time into `ai_title_tokens` gives the same retrieval result as a server-side custom tokenizer would. Forking Qdrant or filing an upstream feature request was considered and rejected (timeline uncertainty + double-migration cost). |
 | API key / JWT / TLS auth on the embedded Qdrant | We loopback-bind to 127.0.0.1 in `docker-compose.yml` ("THR-06") so this is defence-in-depth rather than required. Caddy reverse-proxy handles TLS for the all-in-one server variant. |
+| MCP write tools (`index_session` / `enrich_session` / etc.) + `memex_points_indexed_total` increment site | **Issue #16 — conditional follow-up.** All 11 MCP tools are read-only by design (`mcp.rs:3` documents "Qdrant primitives are hidden"). The `memex_points_indexed_total` Prometheus counter at `/metrics` is correctly zero for MCP-only deployments — always-zero counters are valid measurements per Prometheus best practice. Stage 1 (committed): `TODO(metric, see Issue #16)` marker in `mcp.rs` at the natural increment site. Stage 2 (conditional): activates only when a future product PR adds an MCP write tool — that PR will also wire the metric increment + regression test and close Issue #16. |
 
 ---
 

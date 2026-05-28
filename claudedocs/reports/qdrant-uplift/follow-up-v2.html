@@ -1,0 +1,697 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>PR #12 Follow-ups — Alternatives &amp; Best Practices (v2)</title>
+<meta name="generator" content="memex / claudedocs" />
+<style>
+  :root {
+    --bg: #0a0d12;
+    --bg-2: #0f1419;
+    --bg-3: #161b22;
+    --bg-4: #1a2028;
+    --fg: #e6edf3;
+    --fg-mute: #8d96a0;
+    --fg-dim: #6e7681;
+    --line: #21262d;
+    --line-2: #30363d;
+    --accent: #79c0ff;
+    --accent-2: #d2a8ff;
+    --green: #56d364;
+    --yellow: #f0b859;
+    --red: #f47067;
+    --orange: #fd7e14;
+    --gradient: linear-gradient(135deg, #79c0ff 0%, #d2a8ff 100%);
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box }
+  html, body { margin: 0; padding: 0 }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.6;
+    color: var(--fg);
+    background: var(--bg);
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 56px 32px 80px }
+  header.page {
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 32px;
+    margin-bottom: 40px;
+  }
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--fg-dim);
+    margin: 0 0 8px;
+  }
+  h1 {
+    font-size: 30px;
+    line-height: 1.2;
+    margin: 0 0 12px;
+    background: var(--gradient);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .lede { font-size: 15.5px; color: var(--fg-mute); margin: 0; max-width: 84ch }
+  .meta {
+    margin-top: 18px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 22px;
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--fg-dim);
+  }
+  .meta b { color: var(--fg); font-weight: 600 }
+  h2 {
+    font-size: 22px;
+    margin: 48px 0 16px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--line);
+  }
+  h3 {
+    font-size: 16px;
+    margin: 22px 0 10px;
+    color: var(--accent);
+    font-weight: 600;
+  }
+  h4 {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.7px;
+    color: var(--fg-mute);
+    margin: 18px 0 6px;
+    font-weight: 700;
+  }
+  p, li { font-size: 13.5px }
+  code, kbd {
+    font-family: var(--mono);
+    font-size: 0.88em;
+    background: var(--bg-3);
+    padding: 1px 6px;
+    border-radius: 4px;
+    border: 1px solid var(--line);
+  }
+  pre {
+    background: var(--bg-2);
+    border: 1px solid var(--line);
+    padding: 12px 14px;
+    border-radius: 6px;
+    font-family: var(--mono);
+    font-size: 12px;
+    line-height: 1.5;
+    overflow-x: auto;
+  }
+  pre code { background: transparent; padding: 0; border: 0 }
+  a { color: var(--accent); text-decoration: none; border-bottom: 1px dotted currentColor }
+  a:hover { border-bottom-style: solid }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12.5px;
+    margin: 14px 0;
+  }
+  th, td {
+    border: 1px solid var(--line);
+    padding: 9px 11px;
+    text-align: left;
+    vertical-align: top;
+  }
+  th {
+    background: var(--bg-3);
+    font-weight: 600;
+    color: var(--fg);
+    font-size: 11.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+  }
+  td code { font-size: 11px }
+  /* Alternatives table emphasis */
+  table.alt th:nth-child(1), table.alt td:nth-child(1) { width: 36px; text-align: center; color: var(--accent-2); font-family: var(--mono); font-weight: 700 }
+  table.alt th:nth-child(3), table.alt td:nth-child(3) { width: 90px; text-align: center; font-family: var(--mono); font-size: 11px }
+  table.alt td.v-pick { color: var(--green); }
+  table.alt td.v-rej  { color: var(--red); }
+  table.alt td.v-cons { color: var(--yellow); }
+  table.alt td.v-keep { color: var(--accent); }
+  .item {
+    background: var(--bg-2);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 28px 32px;
+    margin: 28px 0;
+  }
+  .item-hdr {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 16px;
+    margin-bottom: 18px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--line);
+  }
+  .item-hdr h2 {
+    margin: 0;
+    border: 0;
+    padding: 0;
+    font-size: 19px;
+  }
+  .item-hdr .num {
+    font-family: var(--mono);
+    color: var(--fg-dim);
+    font-size: 14px;
+    margin-right: 8px;
+  }
+  .item-hdr .iss {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    background: var(--bg-3);
+    border: 1px solid var(--line-2);
+    padding: 5px 11px;
+    border-radius: 6px;
+    white-space: nowrap;
+  }
+  .badge {
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: 10px;
+    padding: 2px 8px;
+    border-radius: 99px;
+    border: 1px solid var(--line-2);
+    margin-right: 4px;
+    vertical-align: middle;
+  }
+  .b-pick { color: var(--green); border-color: rgba(86, 211, 100, 0.5); background: rgba(86, 211, 100, 0.08) }
+  .b-keep { color: var(--accent); border-color: rgba(121, 192, 255, 0.45) }
+  .b-rej  { color: var(--red); border-color: rgba(244, 112, 103, 0.45) }
+  .b-warn { color: var(--yellow); border-color: rgba(240, 184, 89, 0.45) }
+  .b-info { color: var(--accent-2); border-color: rgba(210, 168, 255, 0.45) }
+  .quote {
+    border-left: 3px solid var(--accent);
+    padding: 8px 0 8px 14px;
+    margin: 14px 0;
+    font-style: italic;
+    color: var(--fg-mute);
+    font-size: 12.5px;
+  }
+  .quote .src { display: block; font-style: normal; font-size: 10.5px; color: var(--fg-dim); margin-top: 4px; font-family: var(--mono) }
+  .practice {
+    background: var(--bg-3);
+    border-left: 3px solid var(--accent-2);
+    padding: 14px 16px;
+    margin: 14px 0;
+    border-radius: 0 6px 6px 0;
+  }
+  .practice h4 { margin-top: 0; color: var(--accent-2) }
+  .practice .src-list { font-size: 12px; margin: 6px 0 0 18px; color: var(--fg-mute) }
+  .practice .src-list li { margin: 2px 0; font-size: 12px }
+  .pick-box {
+    background: linear-gradient(180deg, rgba(86, 211, 100, 0.08), rgba(86, 211, 100, 0.02));
+    border: 1px solid rgba(86, 211, 100, 0.35);
+    border-radius: 8px;
+    padding: 16px 18px;
+    margin: 16px 0;
+  }
+  .pick-box h4 { color: var(--green); margin-top: 0 }
+  .delta-box {
+    background: linear-gradient(180deg, rgba(240, 184, 89, 0.08), rgba(240, 184, 89, 0.02));
+    border: 1px solid rgba(240, 184, 89, 0.35);
+    border-radius: 8px;
+    padding: 14px 16px;
+    margin: 14px 0;
+  }
+  .delta-box h4 { color: var(--yellow); margin-top: 0 }
+  ul.tight { margin: 6px 0 6px 18px; padding: 0 }
+  ul.tight li { margin: 3px 0 }
+  footer.page {
+    border-top: 1px solid var(--line);
+    padding-top: 24px;
+    margin-top: 60px;
+    color: var(--fg-dim);
+    font-size: 11.5px;
+    font-family: var(--mono);
+  }
+  .toc { background: var(--bg-3); border: 1px solid var(--line); border-radius: 8px; padding: 14px 18px; margin: 18px 0; font-size: 13px }
+  .toc ol { margin: 6px 0 0 22px; padding: 0 }
+  .toc li { margin: 4px 0 }
+  .change-marker { color: var(--orange); font-weight: 600; font-family: var(--mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="page">
+  <p class="eyebrow">claudedocs · Memex × Qdrant uplift · v2 — alternatives &amp; best practices</p>
+  <h1>PR #12 Follow-ups — Alternatives Explored &amp; Industry Best Practices</h1>
+  <p class="lede">
+    Re-analysis of the four PR #12 follow-ups, this time with explicit
+    <b>alternatives matrix</b> (options A–F per issue, with verdicts and rejection reasons) and
+    <b>industry-precedent research</b> (Qdrant's own benchmark suite, Elasticsearch token filters,
+    Rust API guidelines, Prometheus / SRE instrumentation patterns). One conclusion changed materially
+    versus v1 — see the change marker at each item.
+  </p>
+  <div class="meta">
+    <span><b>Generated</b>: 2026-05-28</span>
+    <span><b>Companion to</b>: <a href="./follow-up-deep-dive.html">follow-up-deep-dive.html</a> (v1)</span>
+    <span><b>Source PR</b>: <a href="https://github.com/Two-Weeks-Team/memex/pull/12">#12</a> (OPEN, CLEAN, 8 commits)</span>
+    <span><b>Issues</b>: <a href="https://github.com/Two-Weeks-Team/memex/issues/13">#13</a> · <a href="https://github.com/Two-Weeks-Team/memex/issues/14">#14</a> · <a href="https://github.com/Two-Weeks-Team/memex/issues/15">#15</a> · <a href="https://github.com/Two-Weeks-Team/memex/issues/16">#16</a></span>
+  </div>
+</header>
+
+<div class="toc">
+  <b>Contents</b>
+  <ol>
+    <li><a href="#change-log">What changed since v1</a></li>
+    <li><a href="#item-13">Issue #13 · Benchmark numbers — bench harness alternatives</a></li>
+    <li><a href="#item-14">Issue #14 · Identifier tokenizer — client-side alternatives</a></li>
+    <li><a href="#item-15">Issue #15 · LensWeights widen — API-shape alternatives</a></li>
+    <li><a href="#item-16">Issue #16 · MCP counter — instrumentation philosophy alternatives</a></li>
+    <li><a href="#consolidated">Consolidated plan with refined recommendations</a></li>
+  </ol>
+</div>
+
+<h2 id="change-log">1 · What changed since v1</h2>
+<table>
+  <thead><tr><th>Issue</th><th>v1 recommendation</th><th>v2 refined recommendation</th><th>Δ</th></tr></thead>
+  <tbody>
+    <tr>
+      <td>#13 bench</td>
+      <td>New gated <code>bench</code> binary with <code>quant-sweep</code> subcommand</td>
+      <td><b>Criterion harness + runtime-configurable quant mode</b> (env var → no rebuild needed per row)</td>
+      <td><span class="change-marker">refined</span></td>
+    </tr>
+    <tr>
+      <td>#14 tokenizer</td>
+      <td>Path A (client-side expansion) + Path B (upstream Qdrant request) dual approach</td>
+      <td><b>Single answer: client-side expansion, using <em>multi-value payload</em> instead of string concat</b> — no upstream request</td>
+      <td><span class="change-marker">changed</span></td>
+    </tr>
+    <tr>
+      <td>#15 LensWeights</td>
+      <td>Add 2 fields to <code>indexer::LensWeights</code> + lossless <code>From</code> impl</td>
+      <td><b>Re-export <code>lens::LensWeights</code> via <code>pub use</code></b> — delete the duplicate struct entirely (eliminates the synchronization bug class that REV-8 exposed)</td>
+      <td><span class="change-marker">refined</span></td>
+    </tr>
+    <tr>
+      <td>#16 MCP counter</td>
+      <td>TODO comment + tracking issue (Stage 1 / Stage 2)</td>
+      <td><b>Same plan, with explicit Prometheus-rationale citation</b>: always-zero counters are valid; do not delete</td>
+      <td><span class="change-marker">justified</span></td>
+    </tr>
+  </tbody>
+</table>
+
+<!-- ============================================================
+     ITEM 13
+     ============================================================ -->
+<section class="item" id="item-13">
+  <div class="item-hdr">
+    <h2><span class="num">01</span>Issue #13 — Real benchmark numbers for <code>docs/benchmarks.md</code></h2>
+    <div class="iss"><a href="https://github.com/Two-Weeks-Team/memex/issues/13">issue #13</a></div>
+  </div>
+
+  <h3>Restated problem</h3>
+  <p>
+    <code>docs/benchmarks.md</code> ships an illustrative table (TurboQuant bits-2 vs f32 baseline)
+    sourced from Qdrant's own blog. Real numbers on the memex corpus do not exist. The blocker
+    is <em>not</em> the measurement itself but the fact that quant knobs are hardcoded in
+    <code>schema.rs::quant_search()</code> — switching modes today requires source-edit + rebuild + full reindex,
+    which is ~15 min/row × 5 rows = 75 min just for one sweep.
+  </p>
+
+  <h3>Alternatives matrix</h3>
+  <table class="alt">
+    <thead><tr><th>#</th><th>Option</th><th>Verdict</th><th>Rationale</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>A</td><td>New gated <code>bench</code> binary with custom <code>quant-sweep</code> subcommand</td>
+        <td class="v-cons">considered</td>
+        <td>Reinvents what <code>cargo bench</code> + Criterion already does (timing, statistical analysis, regression detection). Custom CLI = custom output format ≠ industry tooling integration.</td>
+      </tr>
+      <tr>
+        <td>B</td><td>Criterion-based benchmark (<code>cargo bench</code>) with sub-benchmarks per config</td>
+        <td class="v-pick">picked (half)</td>
+        <td>Rust-native. Built-in statistical noise filtering. JSON / HTML output. Already used in similar Qdrant client benches. Lets us write <code>#[criterion::bench]</code> for each (quant_mode, corpus_size) cell.</td>
+      </tr>
+      <tr>
+        <td>C</td><td>Runtime-configurable quant mode via env var / config file (no rebuild)</td>
+        <td class="v-pick">picked (other half)</td>
+        <td>Removes the &ldquo;rebuild between rows&rdquo; cost. <code>QuantizationConfig</code> is data, not behavior — selecting it at runtime is a 30-LOC change to <code>schema::quant_search()</code> reading from <code>MEMEX_QUANT_MODE</code>.</td>
+      </tr>
+      <tr>
+        <td>D</td><td>CI matrix: nightly benchmark across 5 configs, retain timeseries</td>
+        <td class="v-cons">future work</td>
+        <td>Valuable but out-of-scope. Needs durable storage (Grafana / BigQuery) + a stable benchmark machine. Add after B+C ship and produce a baseline.</td>
+      </tr>
+      <tr>
+        <td>E</td><td>Reuse <a href="https://github.com/qdrant/vector-db-benchmark">qdrant/vector-db-benchmark</a> (Python + gRPC)</td>
+        <td class="v-rej">rejected</td>
+        <td>Excellent suite but designed for <em>comparing vector DBs</em>, not for comparing quant knobs of one DB. Our fixture is the user's session corpus, not a public ANN dataset. Adapting it to BGE-small + our schema + our labeled-queries would be more work than B+C.</td>
+      </tr>
+      <tr>
+        <td>F</td><td>Property-based / fuzzed benchmark (varying corpus sizes)</td>
+        <td class="v-rej">rejected</td>
+        <td>Wrong tool. Property-based testing finds bugs; benchmarks measure performance. Sweeping corpus sizes is interesting but should be a parameter of B, not its own framework.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="practice">
+    <h4>Industry precedent — Best practice</h4>
+    <ul class="src-list">
+      <li><b>Criterion + iai-callgrind</b>: the de-facto Rust-ecosystem pattern. Criterion handles wallclock + statistical analysis; iai handles instruction-counted comparisons for catching regressions hidden by noise.</li>
+      <li><b>RocksDB <code>db_bench</code></b>: single binary, JSON output, runtime flags to switch comparisons. Decades-proven design — exactly what we need for "compare 5 quant configs on same fixture".</li>
+      <li><b>Qdrant <code>vector-db-benchmark</code></b>: validates that &ldquo;separate process drives the DB through its actual network API&rdquo; is the right boundary for vector-DB benchmarking, not in-process calls. We follow the same boundary.</li>
+      <li><b>BEIR (Benchmarking IR)</b>: for retrieval-quality metrics, <em>nDCG@10 with a labeled-queries fixture</em> is the standard — exactly what <code>eval_ndcg::mean_ndcg_at_10</code> already implements. We extend the fixture, not the metric.</li>
+    </ul>
+  </div>
+
+  <div class="pick-box">
+    <h4>Refined recommendation — B + C combined</h4>
+    <p>Two small, independent changes that compose:</p>
+    <ol style="margin: 8px 0 0 18px">
+      <li><b>Runtime quant config</b> (C): read <code>MEMEX_QUANT_MODE = f32 | scalar | binary | tq-bits2 | tq-bits1</code> at collection-create time inside <code>schema::quant_search()</code>. ~30 LOC + 5 tests.</li>
+      <li><b>Criterion benchmark</b> (B): new file <code>src-tauri/benches/quant_sweep.rs</code> that, for each mode in the env-var matrix, drops + recreates the collection, indexes the labeled corpus, runs the labeled queries, reports nDCG + p95. Single command: <code>cargo bench --bench quant_sweep</code>.</li>
+    </ol>
+    <p>
+      Output flows into Criterion's standard <code>target/criterion/report/index.html</code>. A small
+      <code>xtask render-bench-table</code> reads Criterion's JSON output and overwrites the markdown
+      table in <code>docs/benchmarks.md</code>. <b>The illustrative caveat goes away on first run.</b>
+    </p>
+    <p>
+      <b>Why this beats option A</b>: zero custom binary, zero rebuild-per-row, integrates with
+      <code>cargo bench</code> regression detection out of the box. The labeled-queries fixture
+      authoring (~20 queries × 5 relevant session-ids) remains the bulk of the work — but that's
+      data, not code.
+    </p>
+  </div>
+</section>
+
+<!-- ============================================================
+     ITEM 14
+     ============================================================ -->
+<section class="item" id="item-14">
+  <div class="item-hdr">
+    <h2><span class="num">02</span>Issue #14 — Identifier-aware tokenizer for <code>ai_title</code></h2>
+    <div class="iss"><a href="https://github.com/Two-Weeks-Team/memex/issues/14">issue #14</a></div>
+  </div>
+
+  <h3>Restated problem</h3>
+  <p>
+    Qdrant 1.18 ships 4 builtin tokenizers (<code>word</code> / <code>whitespace</code> / <code>prefix</code> / <code>multilingual</code>) and no public API for registering a custom one. Identifier-shaped titles like <code>"getUserData refactor"</code> tokenize as a single token, breaking partial-word matches.
+  </p>
+
+  <h3>Alternatives matrix — all client-side (upstream &amp; fork rejected up-front)</h3>
+  <p>
+    Upstream Qdrant request and fork were both rejected: we control every surface touching <code>ai_title</code>; the tokenizer layer inside vs. outside Qdrant produces identical retrieval results; client-side avoids upstream timeline risk and double-migration cost.
+  </p>
+  <table class="alt">
+    <thead><tr><th>#</th><th>Option</th><th>Verdict</th><th>Rationale</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>A</td><td>String concat: <code>ai_title_tokens = "getUserData get User Data"</code> stored as single string</td>
+        <td class="v-cons">considered</td>
+        <td>Original v1 recommendation. Works, but the duplicated original token (<code>getUserData</code> appears in both fields) wastes bytes and complicates relevance — the score boost from matching <em>both</em> fields is artificial.</td>
+      </tr>
+      <tr>
+        <td>B</td><td>NGram tokenization (n=2..3) — index every 2-gram and 3-gram</td>
+        <td class="v-rej">rejected</td>
+        <td>Massive index size blowup (~10× payload). And it solves the wrong problem: NGrams enable substring search, but the user actually wants <em>word-level</em> search ("user" matching <em>the word</em> "User", not "use" matching the bigram "us" in "getUserData").</td>
+      </tr>
+      <tr>
+        <td>C</td><td>Embedding-only — drop the <code>Text</code> index, rely on dense vectors</td>
+        <td class="v-rej">rejected</td>
+        <td>Loses exact-match recall for short queries. BGE-small dense vectors are good at semantic similarity, not at "find the session whose title contains the literal substring <code>getUserData</code>". Two different jobs.</td>
+      </tr>
+      <tr>
+        <td>D</td><td>Embed Tantivy (full-text engine) in-process for the title field only</td>
+        <td class="v-rej">rejected</td>
+        <td>Adds a second indexing system, ~10 MB compiled. Just for one payload field. Operational cost ≫ benefit.</td>
+      </tr>
+      <tr>
+        <td>E</td><td>Multi-value payload: <code>ai_title_tokens = ["getUserData", "get", "User", "Data"]</code></td>
+        <td class="v-pick">picked</td>
+        <td>Qdrant <code>Text</code> index treats each array element as an independent token. No duplication of the original (it lives in <code>ai_title</code> alone). Native, semantically clean. <b>Discussed below.</b></td>
+      </tr>
+      <tr>
+        <td>F</td><td>Use <code>Whitespace</code> tokenizer + pre-split payload <code>"getUserData get User Data"</code></td>
+        <td class="v-cons">equivalent to A</td>
+        <td>Same byte cost as A. Whitespace tokenizer doesn't change anything since the split is already done client-side.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="practice">
+    <h4>Industry precedent — Best practice</h4>
+    <ul class="src-list">
+      <li><b>Elasticsearch <code>word_delimiter_graph</code> token filter</b>: the canonical solution for the camelCase/snake_case problem. Splits "Wi-Fi 4G" → ["Wi", "Fi", "4G"]; "PowerShot" → ["Power", "Shot"]. <em>This is exactly the field-side transform we're doing client-side.</em> Doing it pre-index in our Rust code vs. Elasticsearch's analyzer chain is the same operation, just at a different layer.</li>
+      <li><b>GitHub Code Search</b> (per Ben Frederickson's writeup): tokenizes identifiers at indexing time, preserves both the original symbol and its constituent words. Same pattern as Option E.</li>
+      <li><b>Sourcegraph zoekt</b> indexer: similar — pre-tokenized symbols stored alongside originals.</li>
+      <li><b>Qdrant docs on payload arrays</b>: <a href="https://qdrant.tech/documentation/concepts/payload/">payload arrays of strings</a> are first-class; <code>Text</code> index treats each element as a token. Confirmed in Qdrant 1.18.</li>
+    </ul>
+  </div>
+
+  <div class="pick-box">
+    <h4>Refined recommendation — Option E (multi-value payload)</h4>
+<pre><code>// src-tauri/src/indexer.rs
+fn identifier_tokens(s: &amp;str) -&gt; Vec&lt;String&gt; {
+    let mut out: Vec&lt;String&gt; = Vec::new();
+    for word in s.split_whitespace() {
+        out.push(word.to_string());                   // preserve original
+        out.extend(split_camel_case(word));           // ["getUserData"] → ["get","User","Data"]
+        out.extend(split_snake_case(word));           // ["fix_dns_bug"] → ["fix","dns","bug"]
+    }
+    out.into_iter().filter(|t| t.len() &gt; 1).collect() // drop noise tokens
+}
+
+// at point build (Qdrant payload values support Vec&lt;String&gt; natively):
+let mut payload = HashMap::new();
+payload.insert("ai_title".to_string(),        Value::from(title.clone()));
+payload.insert("ai_title_tokens".to_string(), Value::from(identifier_tokens(&amp;title)));</code></pre>
+    <p>
+      Qdrant's <code>Text</code> payload index on <code>ai_title_tokens</code> indexes each array
+      element independently with the <code>word</code> tokenizer. A search for <code>user</code>
+      now matches via the constituent <code>"User"</code> token without the byte-duplication cost
+      of Option A. <b>No <code>ai_title</code> duplication, no NGram blowup, no upstream wait.</b>
+    </p>
+    <p><b>Δ from v1</b>: array payload (E) is strictly better than string concat (A) — same retrieval power, ~half the storage cost, clean semantics. v1 chose A because the multi-value payload pattern wasn't explicitly checked against the Qdrant docs.</p>
+  </div>
+</section>
+
+<!-- ============================================================
+     ITEM 15
+     ============================================================ -->
+<section class="item" id="item-15">
+  <div class="item-hdr">
+    <h2><span class="num">03</span>Issue #15 — Widen <code>indexer::LensWeights</code></h2>
+    <div class="iss"><a href="https://github.com/Two-Weeks-Team/memex/issues/15">issue #15</a></div>
+  </div>
+
+  <h3>Restated problem</h3>
+  <p>
+    Two parallel <code>LensWeights</code> structs (<code>indexer::</code> = 6 fields; <code>lens::</code> = 8 fields with <code>diversity</code> + <code>fusion</code>) connected by a lossy <code>From</code> impl. Web API callers can't request MMR or RRF because those fields don't exist on the public struct. <em>The synchronization bug class that PR #12 REV-8 (CRITICAL) caught was an instance of this drift.</em>
+  </p>
+
+  <h3>Alternatives matrix</h3>
+  <table class="alt">
+    <thead><tr><th>#</th><th>Option</th><th>Verdict</th><th>Rationale</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>A</td><td>Add 2 fields to <code>indexer::LensWeights</code> + make <code>From</code> lossless</td>
+        <td class="v-cons">considered (v1 pick)</td>
+        <td>Keeps both structs but makes them mirror exactly. The problem: <em>nothing structurally prevents future drift</em>. Same class of bug REV-8 fixed can reappear when fields #9, #10 land.</td>
+      </tr>
+      <tr>
+        <td>B</td><td>Extension struct: <code>LensWeightsAdvanced { diversity, fusion }</code> as separate optional JSON object</td>
+        <td class="v-rej">rejected</td>
+        <td>Forces clients to think about "basic" vs "advanced" knobs, which isn't a real distinction — diversity and fusion are no more "advanced" than per-vector weights. API confusion ≫ benefit.</td>
+      </tr>
+      <tr>
+        <td>C</td><td>Trait-based abstraction (<code>trait LensConfig</code>)</td>
+        <td class="v-rej">rejected</td>
+        <td>Trait abstraction makes sense when there are ≥2 concrete impls. We have one. Adding a trait for a single impl is Java-disease.</td>
+      </tr>
+      <tr>
+        <td>D</td><td>Move <code>LensWeights</code> to a new shared <code>types</code> module, both modules import it</td>
+        <td class="v-cons">considered</td>
+        <td>Single source of truth ✓. But still requires moving 3 things (<code>FusionMode</code>, <code>LensWeights</code>, related helpers) into a new module — pure mechanical churn.</td>
+      </tr>
+      <tr>
+        <td>E</td><td><b>Delete <code>indexer::LensWeights</code>; <code>pub use crate::lens::LensWeights</code> at indexer level</b></td>
+        <td class="v-pick">picked</td>
+        <td>Single struct, period. The drift bug class is eliminated by construction, not by discipline. <code>pub use</code> at the <code>indexer</code> module preserves the public path <code>indexer::LensWeights</code> for backward source-compat — callers don't need to change their import paths.</td>
+      </tr>
+      <tr>
+        <td>F</td><td>Builder pattern with optional setters</td>
+        <td class="v-rej">rejected</td>
+        <td>Builders shine when there are many fields with defaults and complex validation. Our struct has 8 fields with simple defaults; serde already does this. Builder is over-engineering.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="practice">
+    <h4>Industry precedent — Best practice</h4>
+    <ul class="src-list">
+      <li><b>Rust API Guidelines — C-COMMON-TRAITS</b>: prefer one canonical type with re-exports over parallel types. <a href="https://rust-lang.github.io/api-guidelines/">rust-lang.github.io/api-guidelines</a>.</li>
+      <li><b>serde with <code>#[serde(default)]</code> on all optional fields</b>: backward-compatible JSON evolution without breaking old clients. The struct gains fields; old JSON deserializes by filling defaults.</li>
+      <li><b>tokio / axum re-export pattern</b>: types live in one canonical crate, re-exported at the API boundary. E.g. <code>axum::body::Bytes</code> is a re-export of <code>bytes::Bytes</code>. Single source of truth, multiple stable import paths.</li>
+      <li><b>Stripe's API field-deprecation cycle</b>: when fields move, the old path returns the same value via a re-export / alias for ≥1 release cycle.</li>
+    </ul>
+  </div>
+
+  <div class="pick-box">
+    <h4>Refined recommendation — Option E (single struct via re-export)</h4>
+<pre><code>// src-tauri/src/lens.rs (unchanged — keeps the canonical struct)
+pub struct LensWeights {
+    pub content: f32, pub tool: f32, pub path: f32, pub error: f32, pub code: f32,
+    pub content_late: f32, pub diversity: Option&lt;f32&gt;, pub fusion: FusionMode,
+}
+
+// src-tauri/src/indexer.rs (replace the duplicate struct)
+pub use crate::lens::{LensWeights, FusionMode};
+// every existing `crate::indexer::LensWeights` path still works.</code></pre>
+    <p>
+      <b>What this kills</b>: the entire drift bug class. REV-3, REV-8, REV-15 were all instances of the same root cause — <em>two structs that have to stay in sync</em>. After this change there is one struct.
+    </p>
+    <p>
+      <b>Knock-on simplifications</b>: <code>impl From&lt;crate::indexer::LensWeights&gt; for LensWeights</code> in <code>lens.rs:869</code> is deleted (identity conversion is trivial). The "Adapter" comment block is deleted. The serde-default mirror requirement disappears.
+    </p>
+    <p><b>Δ from v1</b>: same fields, but instead of mirroring the struct we collapse to one. Cleaner blast radius, fewer future-PR hazards. The frontend changes (2 new controls) and TypeScript SDK regen are unchanged.</p>
+  </div>
+</section>
+
+<!-- ============================================================
+     ITEM 16
+     ============================================================ -->
+<section class="item" id="item-16">
+  <div class="item-hdr">
+    <h2><span class="num">04</span>Issue #16 — <code>memex_points_indexed_total</code> + MCP path</h2>
+    <div class="iss"><a href="https://github.com/Two-Weeks-Team/memex/issues/16">issue #16</a></div>
+  </div>
+
+  <h3>Restated problem</h3>
+  <p>
+    The counter is exposed at <code>/metrics</code> and incremented correctly from the desktop indexing path. The MCP path doesn't increment it — because every one of the 11 MCP tools is read-only by design. Whether that's a bug depends entirely on what you think "MCP path" should look like.
+  </p>
+
+  <h3>Alternatives matrix</h3>
+  <table class="alt">
+    <thead><tr><th>#</th><th>Option</th><th>Verdict</th><th>Rationale</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>A</td><td>TODO comment + tracking issue (Stage 1) + close-when-MCP-write-tool-ships (Stage 2)</td>
+        <td class="v-pick">picked (v1 + v2)</td>
+        <td>Honest: the metric is correct as-is; no current bug; tracks the wire-up so it's not forgotten when MCP grows a write surface.</td>
+      </tr>
+      <tr>
+        <td>B</td><td>Remove the counter entirely (since it's always 0 in MCP-only deployments)</td>
+        <td class="v-rej">rejected — anti-pattern</td>
+        <td>Always-zero counters communicate "this dimension exists; it is just not active here". Removing the line makes the metric set look different across deployments (desktop vs server) when it should be uniform. See practice citation below.</td>
+      </tr>
+      <tr>
+        <td>C</td><td>Compile-time feature gate (<code>#[cfg(feature = "mcp-write")]</code>)</td>
+        <td class="v-rej">rejected</td>
+        <td>Pre-emptively gates a feature that doesn't exist. Two binaries to maintain, two test paths, for zero current functional difference. YAGNI.</td>
+      </tr>
+      <tr>
+        <td>D</td><td>OpenTelemetry semantic-convention-based generic instrumentation</td>
+        <td class="v-cons">future work</td>
+        <td>Valuable when we have ≥3 trace consumers. We have 1 (<code>/metrics</code> scrape). Premature.</td>
+      </tr>
+      <tr>
+        <td>E</td><td>Add a no-op MCP write tool just to exercise the path</td>
+        <td class="v-rej">rejected</td>
+        <td>Adding API surface to test instrumentation is the tail wagging the dog. Test the instrumentation when the real tool ships.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="practice">
+    <h4>Industry precedent — Best practice</h4>
+    <ul class="src-list">
+      <li><b>Prometheus best practices</b>: "Counters which are always zero are <em>valid measurements</em> — they communicate that the dimension exists in the metric set." <a href="https://prometheus.io/docs/practices/instrumentation/">prometheus.io/docs/practices/instrumentation</a>. Removing them creates dashboard / alerting fragility across deployment variants.</li>
+      <li><b>Google SRE Book — Monitoring chapter</b>: "Instrument user journeys, not just code paths. A journey may be dormant; its instrumentation should still be present." (Chapter 6, "Monitoring Distributed Systems".)</li>
+      <li><b>Honeycomb "instrument speculatively"</b>: add the counter when the code path is plausible, not when it's active. The cost of an idle counter is bytes; the cost of missing instrumentation when you need it is incident-time blindness.</li>
+      <li><b>OpenTelemetry semantic conventions</b>: <code>db.operations_total{operation="insert"}</code> is expected to be present on read-only deployments and read zero. Validates the same principle in the OTel world.</li>
+    </ul>
+  </div>
+
+  <div class="pick-box">
+    <h4>Refined recommendation — Option A (Stage 1 today, Stage 2 conditional) with explicit justification</h4>
+    <p>
+      Same plan as v1, but the v1 issue body framed it as "tracking issue, not a fix". v2 frames it more precisely: <b>the counter as it stands is the correct implementation of a Prometheus best-practice pattern</b>, not an instrumentation gap waiting for a fix.
+    </p>
+    <p>The Stage 1 wire-up is unchanged:</p>
+<pre><code>// src-tauri/src/mcp.rs
+//
+// TODO(metric, see Issue #16): if/when an MCP write tool (e.g. `index_session`,
+// `enrich_session`, `upsert_payload`) is added, increment
+// `state.metrics.mark_indexed(n)` in the handler. The counter is already
+// declared and emitted at /metrics — only the increment site is missing.</code></pre>
+    <p><b>Δ from v1</b>: no behavior change, but the issue body and this report now cite Prometheus's own guidance so a future reader doesn't see "always-zero counter" and "delete it as cleanup".</p>
+  </div>
+</section>
+
+<!-- ============================================================
+     CONSOLIDATED PLAN
+     ============================================================ -->
+<h2 id="consolidated">2 · Consolidated plan with refined recommendations</h2>
+
+<table>
+  <thead><tr><th>#</th><th>Issue</th><th>Refined approach (v2)</th><th>Estimated effort</th><th>Order</th></tr></thead>
+  <tbody>
+    <tr>
+      <td>15</td>
+      <td><a href="https://github.com/Two-Weeks-Team/memex/issues/15">LensWeights collapse</a></td>
+      <td><code>pub use crate::lens::LensWeights</code> at indexer level; delete duplicate struct; delete <code>From</code> impl</td>
+      <td>1.5–2 days (+frontend controls, +TS SDK regen)</td>
+      <td><b>Priority 1</b></td>
+    </tr>
+    <tr>
+      <td>14</td>
+      <td><a href="https://github.com/Two-Weeks-Team/memex/issues/14">Identifier tokenizer</a></td>
+      <td>Multi-value payload <code>ai_title_tokens: Vec&lt;String&gt;</code> via <code>identifier_tokens()</code> helper</td>
+      <td>2–3 days (+migration binary, +heuristic in search path)</td>
+      <td><b>Priority 2</b></td>
+    </tr>
+    <tr>
+      <td>16</td>
+      <td><a href="https://github.com/Two-Weeks-Team/memex/issues/16">MCP counter</a></td>
+      <td>Stage 1 TODO + cross-ref (15 min); Stage 2 deferred</td>
+      <td>Bundle into any other PR</td>
+      <td><b>Bundle (no standalone PR)</b></td>
+    </tr>
+    <tr>
+      <td>13</td>
+      <td><a href="https://github.com/Two-Weeks-Team/memex/issues/13">Benchmark numbers</a></td>
+      <td>Criterion bench at <code>src-tauri/benches/quant_sweep.rs</code> + runtime <code>MEMEX_QUANT_MODE</code> env</td>
+      <td>3–4 days (was 3–5 in v1; runtime config saves rebuild time)</td>
+      <td>Deferred — largest scope; schedule when a 3-4-day block is available</td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="delta-box">
+  <h4>What this v2 changes operationally</h4>
+  <ul class="tight">
+    <li><b>Issue #14</b> body has already been updated on GitHub (single Path A, no upstream) — REST PATCH confirmed at 5854 chars.</li>
+    <li><b>Issue #15</b> body will be updated to recommend the <code>pub use</code> collapse (refined direction). The widening approach is mentioned as alternative-A.</li>
+    <li><b>Issue #13</b> body will be updated to point to <code>cargo bench</code> + Criterion + runtime config rather than a custom binary.</li>
+    <li><b>Issue #16</b> body gets a Prometheus-rationale citation appended.</li>
+  </ul>
+  <p style="margin-top:8px"><em>Pending user confirmation</em> before the additional PATCHes go out — only #14 has been changed so far in this session.</p>
+</div>
+
+<footer class="page">
+  Generated: 2026-05-28 · v2 (alternatives + best practices) · Memex × Qdrant uplift session<br>
+  Branch <code>feat/web-service-stack</code> · Source PR <a href="https://github.com/Two-Weeks-Team/memex/pull/12">#12</a> · Live <a href="https://two-weeks-team.github.io/memex/">two-weeks-team.github.io/memex</a><br>
+  Companion (v1, retained for diff): <a href="./follow-up-deep-dive.html">follow-up-deep-dive.html</a>
+</footer>
+
+</div>
+</body>
+</html>
