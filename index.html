@@ -68,7 +68,7 @@ p.muted, .muted{ color:var(--fg-mute); }
 code, pre{ font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace; font-size:13.5px; }
 code{ background:rgba(255,255,255,.07); padding:.12em .42em; border-radius:5px; border:1px solid rgba(255,255,255,.06); }
 pre{ background:#0a0a12; border:1px solid var(--line); border-radius:10px; padding:14px 16px; overflow-x:auto; color:#dcdce6; }
-pre .c{ color:#7a7a86; } pre .p{ color:#bf5af2; }
+pre .c{ color:#7a7a86; } pre .p{ color:#bf5af2; } pre .s{ color:#a3e07f; }
 hr{ border:0; border-top:1px solid var(--line); margin:0; }
 
 /* ─── nav ───────────────────────────────────────────────────────────────── */
@@ -222,6 +222,32 @@ section.tight{ padding:64px 0; }
 .tool .ds{ color:var(--fg-mute); font-size:14px; margin:.25em 0 0; display:block; }
 @media (max-width:820px){ .tools{ grid-template-columns:1fr; } }
 
+/* ─── qdrant techniques grid ────────────────────────────────────────────── */
+.qd-grid{ display:grid; grid-template-columns:repeat(2, 1fr); gap:18px; margin-top:30px; }
+.qd{ background:var(--card); border:1px solid var(--line); border-radius:var(--r-lg); padding:24px; position:relative; overflow:hidden; }
+.qd::before{ content:""; position:absolute; left:0; right:0; top:0; height:2px; background:currentColor; opacity:.8; }
+.qd header{ display:flex; align-items:center; gap:12px; margin-bottom:14px; }
+.qd .qd-no{ display:inline-flex; align-items:center; justify-content:center; min-width:34px; height:26px; padding:0 9px; border-radius:6px; background:rgba(255,255,255,.06); border:1px solid var(--line-2); color:currentColor; font-family:ui-monospace, monospace; font-size:12.5px; font-weight:700; letter-spacing:.04em; }
+.qd h3{ margin:0; font-size:17.5px; color:var(--fg); }
+.qd p{ color:var(--fg-mute); font-size:14.5px; margin:.4em 0 .6em; }
+.qd p b{ color:var(--fg); font-weight:600; }
+.qd pre{ margin:10px 0; font-size:12.5px; }
+.qd .qd-ptr{ font-size:13px; color:var(--fg-low); margin:6px 0 0; }
+.qd .qd-ptr a{ color:#9cd2ff; font-family:ui-monospace, monospace; font-size:12.5px; }
+.qd.L-content{ color:var(--L-content); } .qd.L-tool{ color:var(--L-tool); }
+.qd.L-path{ color:var(--L-path); } .qd.L-error{ color:var(--L-error); }
+.qd.L-code{ color:var(--L-code); }
+@media (max-width:880px){ .qd-grid{ grid-template-columns:1fr; } }
+
+.qd-extras{ margin-top:30px; background:var(--card); border:1px solid var(--line); border-radius:var(--r-md); padding:22px 26px; }
+.qd-extras h3{ margin:0 0 10px; font-size:16.5px; color:var(--fg); }
+.qd-bullets{ list-style:none; margin:0; padding:0; display:grid; grid-template-columns:1fr 1fr; gap:8px 28px; }
+.qd-bullets li{ position:relative; padding-left:20px; color:var(--fg-mute); font-size:14.5px; }
+.qd-bullets li::before{ content:"▸"; position:absolute; left:0; top:0; color:var(--accent); font-weight:700; }
+.qd-bullets li b{ color:var(--fg); font-weight:600; }
+.qd-bullets li code{ font-size:12px; }
+@media (max-width:760px){ .qd-bullets{ grid-template-columns:1fr; } }
+
 /* ─── run blocks ────────────────────────────────────────────────────────── */
 .run-grid{ display:grid; grid-template-columns:1fr 1fr; gap:22px; margin-top:28px; }
 .run-card{ background:var(--card); border:1px solid var(--line); border-radius:var(--r-lg); padding:24px; position:relative; }
@@ -279,6 +305,7 @@ footer .fine{ margin-top:42px; padding-top:22px; border-top:1px solid var(--line
       <a href="#recall">Recall</a>
       <a href="#agents">Agents</a>
       <a href="#architecture">Architecture</a>
+      <a href="#qdrant">Qdrant</a>
       <a href="#mcp">11 MCP tools</a>
       <a href="#run">Run</a>
     </nav>
@@ -660,6 +687,135 @@ footer .fine{ margin-top:42px; padding-top:22px; border-top:1px solid var(--line
       <span><b>Vector store</b> · Qdrant 1.18.1, collection <code>memex_sessions</code></span>
       <span><b>Point id</b> · uuid_v5(session_id) — stable across rebuilds</span>
       <span><b>Hosts</b> · Tauri (desktop), single-image container (server), MCP clients (agents)</span>
+    </div>
+  </div>
+</section>
+
+<!-- ════════════════════ QDRANT TECHNIQUES ════════════════════ -->
+<section id="qdrant" aria-labelledby="qdrant-h">
+  <div class="wrap">
+    <p class="eyebrow-2">Qdrant — every feature we lean on</p>
+    <h2 id="qdrant-h">The Qdrant techniques behind each surface.</h2>
+    <p class="lead">Memex is built on six concrete Qdrant 1.18 primitives — not just "vector search". Each surface above maps to a specific server-side feature that a single-vector setup couldn't reproduce. Code pointers are real; click any to read the call site.</p>
+
+    <div class="qd-grid">
+      <article class="qd L-content">
+        <header>
+          <span class="qd-no">Q1</span>
+          <h3>Named vectors per point</h3>
+        </header>
+        <p class="qd-what"><b>What it is.</b> One Qdrant point holds five named dense vectors — <code>content</code>, <code>tool</code>, <code>path</code>, <code>error</code>, <code>code</code>, each 384-d cosine BGE-small — stored as a single <code>VectorParamsMap</code>. Five orthogonal lenses on the same conversation, each with its own binary-quantized HNSW index.</p>
+        <p class="qd-why"><b>Why it matters.</b> A single-vector store forces you to pick one "meaning". Five named vectors let us ask "what tools fired?" and "what files were touched?" as independent questions on the same point.</p>
+<pre><span class="c">// PointStruct: one id, many named vectors, one payload</span>
+PointStruct {
+  id: uuid_v5(session_id),
+  vectors: NamedVectors { content, tool, path, error, code },
+  payload: { project, branch, has_errors, source_path, … }
+}</pre>
+        <p class="qd-ptr"><a href="https://github.com/Two-Weeks-Team/memex/blob/main/src-tauri/src/indexer.rs" target="_blank" rel="noopener">indexer.rs</a> · <a href="https://github.com/Two-Weeks-Team/memex/blob/main/docs/qdrant-features.md#1-lens-slider--multi-named-vector-scoring-with-weights" target="_blank" rel="noopener">qdrant-features.md §1</a></p>
+      </article>
+
+      <article class="qd L-tool">
+        <header>
+          <span class="qd-no">Q2</span>
+          <h3>Universal Query — weighted multi-vector scoring</h3>
+        </header>
+        <p class="qd-what"><b>What it is.</b> The lens slider issues one Universal Query per non-zero weight via <code>QueryPointsBuilder.using("&lt;name&gt;")</code>, then blends per-vector scores with continuous weights. Not RRF: rank-based fusion ignores weights, so we compute <code>Σ(score<sub>i</sub> · w<sub>i</sub>) / Σ w<sub>i</sub></code> ourselves.</p>
+        <p class="qd-why"><b>Why it matters.</b> "Weight tool calls 2× more than prose" is a real, continuous knob. RRF can't say that.</p>
+<pre>QueryPointsBuilder::new(<span class="s">"memex_sessions"</span>)
+  .query(embedded)
+  .using(<span class="s">"content"</span>)   <span class="c">// or tool / path / error / code</span>
+  .limit(20)
+  .with_payload(true)</pre>
+        <p class="qd-ptr"><a href="https://github.com/Two-Weeks-Team/memex/blob/main/src-tauri/src/indexer.rs" target="_blank" rel="noopener">indexer.rs::lens_search</a></p>
+      </article>
+
+      <article class="qd L-code">
+        <header>
+          <span class="qd-no">Q3</span>
+          <h3>Discovery API — context pairs for mix &amp; match</h3>
+        </header>
+        <p class="qd-what"><b>What it is.</b> <code>DiscoverInput { target, context: ContextInput }</code> wrapped in a <code>Query</code>: each <code>ContextInputPair { positive, negative }</code> is a discrimination hint Qdrant uses to re-rank around <code>target</code>. Mix &amp; match → "find sessions like A and B, biased against C".</p>
+        <p class="qd-why"><b>Why it matters.</b> Plain recommend ("more like Y") and plain search ("near Q") can't express "find X — but only the kind that isn't like Z". Discovery API does, server-side, in one round-trip.</p>
+<pre>Query::Discover(DiscoverInput {
+  target:  positive_a,
+  context: ContextInput {
+    pairs: [
+      ContextInputPair { positive: a, negative: c },
+      ContextInputPair { positive: b, negative: c },
+    ],
+  },
+})</pre>
+        <p class="qd-ptr"><a href="https://github.com/Two-Weeks-Team/memex/blob/main/src-tauri/src/indexer.rs" target="_blank" rel="noopener">indexer.rs::mix_match</a> · <a href="https://github.com/Two-Weeks-Team/memex/blob/main/docs/qdrant-features.md#2-mix--match--discovery-api-with-context-pairs" target="_blank" rel="noopener">qdrant-features.md §2</a></p>
+      </article>
+
+      <article class="qd L-path">
+        <header>
+          <span class="qd-no">Q4</span>
+          <h3>Distance Matrix → MST (server-side K-NN graph)</h3>
+        </header>
+        <p class="qd-what"><b>What it is.</b> <code>search_matrix_pairs</code> with <code>.using("content").sample(N).limit(K)</code> returns top-K nearest neighbors per sampled point — a sampled K-NN graph in <em>one round-trip</em>. We feed pairs into <code>petgraph::UnGraph</code> and compute the minimum spanning tree client-side for the galaxy.</p>
+        <p class="qd-why"><b>Why it matters.</b> Most vector DBs make you do N² queries client-side or expose only batch search. Qdrant ships the K-NN graph as a first-class endpoint — exactly what an MST renderer needs.</p>
+<pre>SearchMatrixPointsBuilder::new(<span class="s">"memex_sessions"</span>)
+  .using(<span class="s">"content"</span>)
+  .sample(N)   <span class="c">// points to consider</span>
+  .limit(K)    <span class="c">// neighbors per point</span>
+<span class="c">// → SearchMatrixPairs { pairs: [(a, b, score), …] }</span>
+<span class="c">// → petgraph::min_spanning_tree</span></pre>
+        <p class="qd-ptr"><a href="https://github.com/Two-Weeks-Team/memex/blob/main/src-tauri/src/indexer.rs" target="_blank" rel="noopener">indexer.rs::topology</a> · <a href="https://github.com/Two-Weeks-Team/memex/blob/main/docs/qdrant-features.md#3-topology--distance-matrix--mst" target="_blank" rel="noopener">qdrant-features.md §3</a></p>
+      </article>
+
+      <article class="qd L-error">
+        <header>
+          <span class="qd-no">Q5</span>
+          <h3>Payload filter as cheap HNSW pre-filter</h3>
+        </header>
+        <p class="qd-what"><b>What it is.</b> Proactive recall searches the dedicated <code>error</code> named vector while passing a keyword/bool filter on the <code>has_errors</code> payload field. Because the field has a Qdrant field index (<code>CreateFieldIndexCollectionBuilder</code>), the filter runs as a cheap HNSW pre-filter — not a full collection scan.</p>
+        <p class="qd-why"><b>Why it matters.</b> "Have I seen this error before?" needs to ignore happy-path sessions whose text happens to overlap. The dedicated error vector + the indexed payload predicate make recall feel instant on 1000s of points.</p>
+<pre>QueryPointsBuilder::new(<span class="s">"memex_sessions"</span>)
+  .query(embedded_error)
+  .using(<span class="s">"error"</span>)              <span class="c">// the dedicated lens</span>
+  .filter(Filter {
+    must: vec![ Condition::matches(<span class="s">"has_errors"</span>, true) ],
+  })
+  .limit(5)
+  .with_payload(true)</pre>
+        <p class="qd-ptr"><a href="https://github.com/Two-Weeks-Team/memex/blob/main/src-tauri/src/indexer.rs" target="_blank" rel="noopener">indexer.rs::recall</a> · <a href="https://github.com/Two-Weeks-Team/memex/blob/main/docs/qdrant-features.md#5-proactive-recall--error-named-vector--payload-filter" target="_blank" rel="noopener">qdrant-features.md §5</a></p>
+      </article>
+
+      <article class="qd L-tool" style="color:#ffd60a">
+        <header>
+          <span class="qd-no">Q6</span>
+          <h3>Native snapshots — HTTP create / download / restore</h3>
+        </header>
+        <p class="qd-what"><b>What it is.</b> Qdrant exposes built-in collection snapshots over HTTP. Memex wraps the three endpoints with <code>reqwest</code> so a corpus is a single portable file — move it between machines, archive it, sign it. Embeddings + payload travel together; raw JSONL stays on disk.</p>
+        <p class="qd-why"><b>Why it matters.</b> No external object store, no ad-hoc dump format. The collection IS the artifact.</p>
+<pre><span class="c">// create + filename</span>
+POST /collections/{c}/snapshots
+<span class="c">// download bytes</span>
+GET  /collections/{c}/snapshots/{name}
+<span class="c">// restore</span>
+POST /collections/{c}/snapshots/upload?priority=snapshot</pre>
+        <p class="qd-ptr"><a href="https://github.com/Two-Weeks-Team/memex/blob/main/src-tauri/src/indexer.rs" target="_blank" rel="noopener">indexer.rs::snapshot_export / snapshot_import</a> · <a href="https://github.com/Two-Weeks-Team/memex/blob/main/docs/qdrant-features.md#snapshot--boring-but-essential" target="_blank" rel="noopener">qdrant-features.md · Snapshot</a></p>
+      </article>
+    </div>
+
+    <div class="qd-extras">
+      <h3>And the small things that make it fast</h3>
+      <ul class="qd-bullets">
+        <li><b>Deterministic point ids.</b> <code>point_id = uuid_v5(session_id)</code> — upserts are idempotent; rebuilds don't duplicate.</li>
+        <li><b>Binary-quantized HNSW per named vector.</b> Each of the five lenses has its own index — recall &amp; latency tuned per lens, not per collection.</li>
+        <li><b>Field-indexed payload predicates.</b> <code>has_errors</code> (bool), <code>project</code>, <code>branch</code> are indexed via <code>CreateFieldIndexCollectionBuilder</code> — filters short-circuit before HNSW walk.</li>
+        <li><b>Server-side FormulaQuery.</b> Prefetches carry per-vector recency decay, applied server-side — no client round-trip to re-score.</li>
+        <li><b>Payload kept lean (≤1 KB).</b> Only metadata + <code>source_path</code>; the transcript itself stays in JSONL on disk and is re-parsed on demand for replay.</li>
+        <li><b>Two transports, one client surface.</b> gRPC (<code>qdrant-client</code> 1.18) for queries; HTTP (<code>reqwest</code>) for snapshot endpoints. Same collection, same data.</li>
+      </ul>
+      <p class="muted" style="font-size:14px;margin-top:14px">
+        Full engineer's tour →
+        <a href="https://github.com/Two-Weeks-Team/memex/blob/main/docs/qdrant-features.md" target="_blank" rel="noopener">docs/qdrant-features.md</a>
+        · Collection schema and indexing path →
+        <a href="https://github.com/Two-Weeks-Team/memex/blob/main/docs/architecture.md" target="_blank" rel="noopener">docs/architecture.md</a>.
+      </p>
     </div>
   </div>
 </section>
