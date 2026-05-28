@@ -281,11 +281,52 @@ footer .fine{ margin-top:42px; padding-top:22px; border-top:1px solid var(--line
 @media (max-width:780px){ footer .row{ grid-template-columns:1fr 1fr; } }
 @media (max-width:520px){ footer .row{ grid-template-columns:1fr; } }
 
+/* ─── architecture: entry animation + hover detail dialog ───────────────── */
+.arch-wrap{ position:relative; }
+.arch-wrap svg{ display:block; transition:opacity .9s cubic-bezier(.2,.6,.2,1); opacity:.2; }
+.arch-wrap svg.arch-revealed{ opacity:1; }
+.arch-wrap svg .trunk, .arch-wrap svg .branch{
+  stroke-dasharray:1600; stroke-dashoffset:1600;
+  transition:stroke-dashoffset 1.6s .35s cubic-bezier(.4,0,.2,1);
+}
+.arch-wrap svg.arch-revealed .trunk, .arch-wrap svg.arch-revealed .branch{ stroke-dashoffset:0; }
+.arch-wrap svg .hov{ cursor:help; outline:none; transition:filter .22s ease; }
+.arch-wrap svg .hov:hover, .arch-wrap svg .hov:focus-visible{
+  filter:brightness(1.18) drop-shadow(0 0 14px rgba(255,214,10,.22));
+}
+.arch-wrap svg .hov:focus-visible rect:first-of-type{ stroke:#ffd60a; stroke-width:1.8; }
+
+.arch-tip{
+  position:absolute; left:0; top:0;
+  width:380px; max-width:calc(100vw - 36px);
+  background:#0a0a14; border:1px solid #34344a; border-radius:14px;
+  padding:18px 20px; z-index:30;
+  box-shadow:0 22px 50px rgba(0,0,0,.6), 0 0 0 1px rgba(255,255,255,.04) inset, 0 0 30px rgba(255,214,10,.05);
+  opacity:0; transform:translateY(-6px) scale(.97);
+  transition:opacity .18s ease, transform .24s cubic-bezier(.2,.7,.3,1);
+  pointer-events:none; visibility:hidden;
+}
+.arch-tip.show{ opacity:1; transform:translateY(0) scale(1); pointer-events:auto; visibility:visible; }
+.arch-tip h4{ margin:0 0 8px; font-size:14.5px; font-weight:700; color:var(--fg); display:flex; align-items:center; gap:10px; letter-spacing:-.005em; }
+.arch-tip h4 .sw{ width:11px; height:11px; border-radius:3px; flex-shrink:0; box-shadow:0 0 10px currentColor; }
+.arch-tip p{ font-size:13.5px; color:var(--fg-mute); margin:0 0 10px; line-height:1.55; }
+.arch-tip pre{ font-size:11.5px; padding:9px 12px; margin:6px 0 10px; background:#06060c; border-color:rgba(255,255,255,.06); white-space:pre-wrap; }
+.arch-tip pre code{ background:transparent; padding:0; border:0; }
+.arch-tip .tip-link{ font-size:12.5px; color:#9cd2ff; font-family:ui-monospace, "SF Mono", monospace; border-bottom:1px solid rgba(156,210,255,.28); }
+.arch-tip .tip-link:hover{ border-bottom-color:rgba(156,210,255,.7); }
+.arch-tip .arr{ position:absolute; left:50%; top:-7px; width:12px; height:12px; background:#0a0a14;
+                border:1px solid #34344a; border-right:none; border-bottom:none;
+                transform:translateX(-50%) rotate(45deg); }
+.arch-tip.below .arr{ top:auto; bottom:-7px; border:1px solid #34344a; border-left:none; border-top:none; }
+
 /* ─── reduced motion fallback ───────────────────────────────────────────── */
 @media (prefers-reduced-motion: reduce){
   *, *::before, *::after{ animation-duration:.01ms !important; animation-iteration-count:1 !important; transition-duration:.01ms !important; }
   .hero h1 .a, .hero .eyebrow, .hero .sub, .hero .pills, .hero .ctas, .hero .legend{ opacity:1 !important; transform:none !important; animation:none !important; }
   .recall .term .line{ opacity:1 !important; animation:none !important; }
+  .arch-wrap svg{ opacity:1 !important; transition:none !important; }
+  .arch-wrap svg .trunk, .arch-wrap svg .branch{ stroke-dasharray:none !important; stroke-dashoffset:0 !important; transition:none !important; }
+  .arch-tip{ transition:none !important; transform:none !important; }
 }
 </style>
 </head>
@@ -692,30 +733,40 @@ footer .fine{ margin-top:42px; padding-top:22px; border-top:1px solid var(--line
             <rect class="panel-a" x="680" y="600" width="320" height="194" rx="9"/>
             <text class="lyr-l-a" x="698" y="622">FIVE NAMED-VECTOR LENSES</text>
             <g transform="translate(698, 632)">
-              <rect x="0"  y="6"  width="284" height="28" rx="6" fill="#091820" stroke="#6cd6ff" stroke-width="1"/>
+              <g class="hov" data-tip="store-content" tabindex="0" role="button" focusable="true">
+<rect x="0"  y="6"  width="284" height="28" rx="6" fill="#091820" stroke="#6cd6ff" stroke-width="1"/>
               <text class="chip"   x="12" y="22" fill="#6cd6ff">content</text>
               <text class="chip-s" x="86" y="22" fill="#7caec4">user · assistant prose</text>
               <text class="micro"  x="272" y="22" text-anchor="end" fill="#7caec4">384-d</text>
+</g>
 
-              <rect x="0"  y="38" width="284" height="28" rx="6" fill="#1f150a" stroke="#ffb454" stroke-width="1"/>
+              <g class="hov" data-tip="store-tool" tabindex="0" role="button" focusable="true">
+<rect x="0"  y="38" width="284" height="28" rx="6" fill="#1f150a" stroke="#ffb454" stroke-width="1"/>
               <text class="chip"   x="12" y="54" fill="#ffb454">tool</text>
               <text class="chip-s" x="86" y="54" fill="#a98750">tool_use names</text>
               <text class="micro"  x="272" y="54" text-anchor="end" fill="#a98750">384-d</text>
+</g>
 
-              <rect x="0"  y="70" width="284" height="28" rx="6" fill="#152007" stroke="#b5e48c" stroke-width="1"/>
+              <g class="hov" data-tip="store-path" tabindex="0" role="button" focusable="true">
+<rect x="0"  y="70" width="284" height="28" rx="6" fill="#152007" stroke="#b5e48c" stroke-width="1"/>
               <text class="chip"   x="12" y="86" fill="#b5e48c">path</text>
               <text class="chip-s" x="86" y="86" fill="#7da45d">file paths</text>
               <text class="micro"  x="272" y="86" text-anchor="end" fill="#7da45d">384-d</text>
+</g>
 
-              <rect x="0"  y="102" width="284" height="28" rx="6" fill="#220a10" stroke="#ff6b7a" stroke-width="1"/>
+              <g class="hov" data-tip="store-error" tabindex="0" role="button" focusable="true">
+<rect x="0"  y="102" width="284" height="28" rx="6" fill="#220a10" stroke="#ff6b7a" stroke-width="1"/>
               <text class="chip"   x="12" y="118" fill="#ff6b7a">error</text>
               <text class="chip-s" x="86" y="118" fill="#a87780">is_error spans</text>
               <text class="micro"  x="272" y="118" text-anchor="end" fill="#a87780">384-d</text>
+</g>
 
-              <rect x="0"  y="134" width="284" height="28" rx="6" fill="#1b1226" stroke="#c792ea" stroke-width="1"/>
+              <g class="hov" data-tip="store-code" tabindex="0" role="button" focusable="true">
+<rect x="0"  y="134" width="284" height="28" rx="6" fill="#1b1226" stroke="#c792ea" stroke-width="1"/>
               <text class="chip"   x="12" y="150" fill="#c792ea">code</text>
               <text class="chip-s" x="86" y="150" fill="#9272b0">identifiers</text>
               <text class="micro"  x="272" y="150" text-anchor="end" fill="#9272b0">384-d</text>
+</g>
             </g>
           </g>
 
@@ -767,7 +818,8 @@ footer .fine{ margin-top:42px; padding-top:22px; border-top:1px solid var(--line
 
         <g><!-- 5 capability tiles, each with a mini-viz -->
           <!-- Tile 1: Lens slider -->
-          <rect class="card" x="140" y="886" width="232" height="240" rx="10"/>
+          <g class="hov" data-tip="cap-lens" tabindex="0" role="button" focusable="true">
+<rect class="card" x="140" y="886" width="232" height="240" rx="10"/>
           <rect x="140" y="886" width="232" height="3" fill="url(#vbar)"/>
           <!-- mini-viz: 5 weighted lens bars -->
           <g transform="translate(160, 906)">
@@ -785,9 +837,11 @@ footer .fine{ margin-top:42px; padding-top:22px; border-top:1px solid var(--line
           <text class="mut"     x="160" y="1069">not RRF.</text>
           <text class="micro"   x="160" y="1095" fill="#6cd6ff">▸ uses ALL 5 lenses</text>
           <text class="micro"   x="160" y="1112" fill="#65656f">indexer.rs::lens_search</text>
+</g>
 
           <!-- Tile 2: Topology MST -->
-          <rect class="card" x="378" y="886" width="232" height="240" rx="10"/>
+          <g class="hov" data-tip="cap-topology" tabindex="0" role="button" focusable="true">
+<rect class="card" x="378" y="886" width="232" height="240" rx="10"/>
           <rect x="378" y="886" width="232" height="3" fill="#b5e48c"/>
           <!-- mini-viz: MST -->
           <g transform="translate(398, 906)">
@@ -814,9 +868,11 @@ footer .fine{ margin-top:42px; padding-top:22px; border-top:1px solid var(--line
           <text class="mut"     x="398" y="1069">one round-trip → petgraph</text>
           <text class="micro"   x="398" y="1095" fill="#b5e48c">▸ uses content lens</text>
           <text class="micro"   x="398" y="1112" fill="#65656f">indexer.rs::topology</text>
+</g>
 
           <!-- Tile 3: Mix & match -->
-          <rect class="card" x="616" y="886" width="232" height="240" rx="10"/>
+          <g class="hov" data-tip="cap-mix" tabindex="0" role="button" focusable="true">
+<rect class="card" x="616" y="886" width="232" height="240" rx="10"/>
           <rect x="616" y="886" width="232" height="3" fill="#c792ea"/>
           <!-- mini-viz: A + B → C with positive/negative -->
           <g transform="translate(636, 906)">
@@ -847,9 +903,11 @@ footer .fine{ margin-top:42px; padding-top:22px; border-top:1px solid var(--line
           <text class="mut"     x="636" y="1069">server-side, one round-trip.</text>
           <text class="micro"   x="636" y="1095" fill="#c792ea">▸ context pairs</text>
           <text class="micro"   x="636" y="1112" fill="#65656f">indexer.rs::mix_match</text>
+</g>
 
           <!-- Tile 4: Proactive recall -->
-          <rect class="card" x="854" y="886" width="232" height="240" rx="10"/>
+          <g class="hov" data-tip="cap-recall" tabindex="0" role="button" focusable="true">
+<rect class="card" x="854" y="886" width="232" height="240" rx="10"/>
           <rect x="854" y="886" width="232" height="3" fill="#ff6b7a"/>
           <!-- mini-viz: red error → fix candidate -->
           <g transform="translate(874, 906)">
@@ -881,9 +939,11 @@ footer .fine{ margin-top:42px; padding-top:22px; border-top:1px solid var(--line
           <text class="mut"     x="874" y="1069">this failure before?"</text>
           <text class="micro"   x="874" y="1095" fill="#ff6b7a">▸ uses error lens</text>
           <text class="micro"   x="874" y="1112" fill="#65656f">indexer.rs::recall</text>
+</g>
 
           <!-- Tile 5: Predict -->
-          <rect class="card" x="1092" y="886" width="232" height="240" rx="10"/>
+          <g class="hov" data-tip="cap-predict" tabindex="0" role="button" focusable="true">
+<rect class="card" x="1092" y="886" width="232" height="240" rx="10"/>
           <rect x="1092" y="886" width="232" height="3" fill="#ffd60a"/>
           <!-- mini-viz: now + neighbors → next -->
           <g transform="translate(1112, 906)">
@@ -913,6 +973,7 @@ footer .fine{ margin-top:42px; padding-top:22px; border-top:1px solid var(--line
           <text class="mut"     x="1112" y="1069">did at the same juncture.</text>
           <text class="micro"   x="1112" y="1095" fill="#ffd60a">▸ uses content lens</text>
           <text class="micro"   x="1112" y="1112" fill="#65656f">indexer.rs::predict_*</text>
+</g>
         </g>
 
         <!-- QUERY → MCP manifold collect -->
@@ -988,7 +1049,8 @@ footer .fine{ margin-top:42px; padding-top:22px; border-top:1px solid var(--line
 
         <g><!-- 4 host tiles, each with a mini-viz -->
           <!-- Desktop · Tauri -->
-          <rect class="card" x="140" y="1340" width="290" height="118" rx="10"/>
+          <g class="hov" data-tip="host-desktop" tabindex="0" role="button" focusable="true">
+<rect class="card" x="140" y="1340" width="290" height="118" rx="10"/>
           <g transform="translate(160, 1358)"><!-- window mockup -->
             <rect x="0" y="0" width="48" height="32" rx="3" fill="#0a0a14" stroke="#6cd6ff" stroke-width="1"/>
             <line x1="0" y1="7" x2="48" y2="7" stroke="#6cd6ff" stroke-width="1"/>
@@ -1003,9 +1065,11 @@ footer .fine{ margin-top:42px; padding-top:22px; border-top:1px solid var(--line
           <text class="sub"  x="220" y="1384">native window · OS notifications</text>
           <text class="mut"  x="160" y="1416">live recall · menubar · macOS</text>
           <text class="micro" x="160" y="1436" fill="#6cd6ff">npm run tauri build</text>
+</g>
 
           <!-- Server · Docker -->
-          <rect class="card" x="440" y="1340" width="290" height="118" rx="10"/>
+          <g class="hov" data-tip="host-server" tabindex="0" role="button" focusable="true">
+<rect class="card" x="440" y="1340" width="290" height="118" rx="10"/>
           <g transform="translate(460, 1358)"><!-- container -->
             <rect x="0" y="0" width="40" height="30" rx="2" fill="#0a0a14" stroke="#ffb454" stroke-width="1"/>
             <line x1="0" y1="9" x2="40" y2="9" stroke="#ffb454" stroke-width="1"/>
@@ -1019,9 +1083,11 @@ footer .fine{ margin-top:42px; padding-top:22px; border-top:1px solid var(--line
           <text class="sub"  x="512" y="1384">browser UI · JSON API · MCP</text>
           <text class="mut"  x="460" y="1416">offline · non-root · loopback</text>
           <text class="micro" x="460" y="1436" fill="#ffb454">docker run -p 8765:8765 memex-allinone</text>
+</g>
 
           <!-- Agent hooks -->
-          <rect class="card" x="740" y="1340" width="290" height="118" rx="10"/>
+          <g class="hov" data-tip="host-hooks" tabindex="0" role="button" focusable="true">
+<rect class="card" x="740" y="1340" width="290" height="118" rx="10"/>
           <g transform="translate(760, 1358)"><!-- hook timeline -->
             <line x1="0" y1="14" x2="56" y2="14" stroke="#23232c" stroke-width="1"/>
             <circle cx="4"  cy="14" r="2.5" fill="#b5e48c"/>
@@ -1034,9 +1100,11 @@ footer .fine{ margin-top:42px; padding-top:22px; border-top:1px solid var(--line
           <text class="sub"  x="820" y="1384">SessionStart · PostToolUse · End</text>
           <text class="mut"  x="760" y="1416">Companion primer · Loop Breaker</text>
           <text class="micro" x="760" y="1436" fill="#c792ea">.claude/settings.local.json · fail-open</text>
+</g>
 
           <!-- Any MCP host -->
-          <rect class="card" x="1040" y="1340" width="290" height="118" rx="10"/>
+          <g class="hov" data-tip="host-mcp" tabindex="0" role="button" focusable="true">
+<rect class="card" x="1040" y="1340" width="290" height="118" rx="10"/>
           <g transform="translate(1060, 1358)"><!-- mcp.json glyph -->
             <rect x="0" y="0" width="48" height="32" rx="3" fill="#0a0a14" stroke="#c792ea" stroke-width="1"/>
             <text class="micro" x="3" y="9"  font-size="6" fill="#c792ea">{ "mcpServers":</text>
@@ -1047,12 +1115,21 @@ footer .fine{ margin-top:42px; padding-top:22px; border-top:1px solid var(--line
           <text class="sub"  x="1120" y="1384">pull-only · committed config</text>
           <text class="mut"  x="1060" y="1416">no plugin · drops in /.mcp.json</text>
           <text class="micro" x="1060" y="1436" fill="#c792ea">claude mcp add memex ‹stdio › or HTTP</text>
+</g>
         </g>
       </svg>
       <p id="arch-cap" class="muted" style="margin-top:20px;font-size:13.5px;text-align:center;line-height:1.6">
         Six layers, read top to bottom: <b>sources → ingest → store → query → expose → hosts</b>.<br/>
         The whole path is one Rust binary, one Qdrant collection (one point per session, five named-vector lenses), and one embedder.
       </p>
+
+      <div class="arch-tip" id="arch-tip" role="tooltip" aria-hidden="true" aria-live="polite">
+        <span class="arr" aria-hidden="true"></span>
+        <h4><span class="sw"></span><span class="t">Detail</span></h4>
+        <p class="b">Hover or focus on a card.</p>
+        <pre style="display:none"><code class="c"></code></pre>
+        <a class="tip-link" target="_blank" rel="noopener" style="display:none">source ↗</a>
+      </div>
     </div>
 
     <div class="arch-legend" aria-label="Architecture facts">
@@ -1721,6 +1798,243 @@ POST /collections/{c}/snapshots/upload?priority=snapshot</pre>
   } else {
     reveal();
   }
+})();
+
+/* ─── architecture: entry animation + hover detail dialog ────────────────
+   When the architecture section enters the viewport, the SVG fades in and
+   the trunk/branch arrows draw themselves via stroke-dashoffset.
+   Each interactive group (5 lens chips, 5 capability tiles, 4 host tiles)
+   carries data-tip="<key>"; hover or focus shows a positioned detail card
+   with body + code snippet + source link. ESC closes. prefers-reduced-motion
+   collapses all animation timings. */
+(function () {
+  var sec = document.getElementById('architecture');
+  if (!sec) return;
+  var tip = document.getElementById('arch-tip');
+  if (!tip) return;
+  var svg = sec.querySelector('svg');
+  var wrap = sec.querySelector('.arch-wrap');
+  var prm = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  /* ── entry animation ── */
+  if (svg) {
+    if (prm) {
+      svg.classList.add('arch-revealed');
+    } else if ('IntersectionObserver' in window) {
+      var ioArch = new IntersectionObserver(function (entries) {
+        entries.forEach(function (en) {
+          if (en.isIntersecting) {
+            svg.classList.add('arch-revealed');
+            ioArch.disconnect();
+          }
+        });
+      }, { threshold: 0.18 });
+      ioArch.observe(svg);
+    } else {
+      svg.classList.add('arch-revealed');
+    }
+  }
+
+  /* ── content registry — 14 hover targets ── */
+  var REPO = 'https://github.com/Two-Weeks-Team/memex/blob/main';
+  var TIPS = {
+    /* STORE — 5 named-vector lenses */
+    'store-content': {
+      title: 'content lens · 384-d', color: '#6cd6ff',
+      body: 'The semantic core — the joined user + assistant prose for a session. The default lens; drop it to 0 to feel what the others see. Built once at index time with BGE-small (cosine-normalised).',
+      code: 'embed(joined_user_and_assistant_turns)  →  Vector<f32>·384',
+      link: { text: 'indexer.rs · index_session', href: REPO + '/src-tauri/src/indexer.rs' }
+    },
+    'store-tool': {
+      title: 'tool lens · 384-d', color: '#ffb454',
+      body: 'The shape of the agent\'s action — Bash, Edit, Read, WebFetch, ToolResult — independent of prose. Surfaces sessions whose tool-shape twins are out there, even when wording diverges.',
+      code: 'embed(join(tool_use.names))  →  Vector<f32>·384',
+      link: { text: 'indexer.rs · tool extract', href: REPO + '/src-tauri/src/indexer.rs' }
+    },
+    'store-path': {
+      title: 'path lens · 384-d', color: '#b5e48c',
+      body: 'The repo-coordinate footprint — file paths touched in this session. Two unrelated topics that worked the same code paths show up as neighbors here.',
+      code: 'embed(join(unique_file_paths))  →  Vector<f32>·384',
+      link: { text: 'indexer.rs · path extract', href: REPO + '/src-tauri/src/indexer.rs' }
+    },
+    'store-error': {
+      title: 'error lens · 384-d', color: '#ff6b7a',
+      body: 'Built from ONLY the error spans — is_error tool results + heuristic "Error:" lines. The recall surface keys on this lens with a has_errors=true payload filter to ask: "have I solved this exact failure before?"',
+      code: 'embed(join(error_spans_only))  →  Vector<f32>·384',
+      link: { text: 'qdrant-features.md · §5', href: REPO + '/docs/qdrant-features.md#5-proactive-recall--error-named-vector--payload-filter' }
+    },
+    'store-code': {
+      title: 'code lens · 384-d', color: '#c792ea',
+      body: 'Identifier and snippet density — function names, types, API symbols. Surfaces sessions that wrote near the same code shapes, even across projects with different prose.',
+      code: 'embed(join(code_blocks + identifiers))  →  Vector<f32>·384',
+      link: { text: 'indexer.rs · code extract', href: REPO + '/src-tauri/src/indexer.rs' }
+    },
+    /* QUERY — 5 capabilities */
+    'cap-lens': {
+      title: 'Lens slider — weighted multi-vector', color: '#6cd6ff',
+      body: 'Five sliders, one Universal Query per non-zero weight, blended as Σ(score · w) / Σ w. NOT RRF — RRF is rank-based and ignores weights. This gives continuous control over which lens dominates.',
+      code: 'QueryPointsBuilder::new("memex_sessions")\n  .query(embedded_q)\n  .using("content")          // or tool / path / error / code\n  .limit(20)\n  .with_payload(true)',
+      link: { text: 'indexer.rs::lens_search', href: REPO + '/src-tauri/src/indexer.rs' }
+    },
+    'cap-topology': {
+      title: 'Topology — Distance Matrix → MST', color: '#b5e48c',
+      body: 'search_matrix_pairs returns a sampled K-NN graph (sample N points, top-K neighbors each) in ONE round-trip. We feed those pairs into petgraph and compute the Minimum Spanning Tree client-side. The result is a sparse, connected backbone of the whole corpus.',
+      code: 'SearchMatrixPointsBuilder::new(C)\n  .using("content")\n  .sample(N)\n  .limit(K)\n→  petgraph::min_spanning_tree(pairs)',
+      link: { text: 'qdrant-features.md · §3', href: REPO + '/docs/qdrant-features.md#3-topology--distance-matrix--mst' }
+    },
+    'cap-mix': {
+      title: 'Mix & match — Discovery API', color: '#c792ea',
+      body: 'Qdrant\'s Discovery API accepts {target, context: [ContextInputPair{positive, negative}, …]}. Each pair is a discrimination hint Qdrant uses to re-rank around target. "Find sessions like A and B but unlike C" in one round-trip, server-side.',
+      code: 'Query::Discover(DiscoverInput {\n  target:  positive_a,\n  context: ContextInput {\n    pairs: [(a, c), (b, c), …]\n  }\n})',
+      link: { text: 'qdrant-features.md · §2', href: REPO + '/docs/qdrant-features.md#2-mix--match--discovery-api-with-context-pairs' }
+    },
+    'cap-recall': {
+      title: 'Proactive recall — error lens + filter', color: '#ff6b7a',
+      body: 'Polls ~12s for fresh is_error events. On a hit, embeds the error text with BGE-small and queries the dedicated error vector with a has_errors=true payload predicate. The bool field has a Qdrant field index, so the predicate runs as a cheap HNSW pre-filter — not a full collection scan.',
+      code: 'QueryPointsBuilder::new(C)\n  .query(embedded_error)\n  .using("error")\n  .filter(Filter { must: vec![\n      Condition::matches("has_errors", true) ]})\n  .limit(5)',
+      link: { text: 'qdrant-features.md · §5', href: REPO + '/docs/qdrant-features.md#5-proactive-recall--error-named-vector--payload-filter' }
+    },
+    'cap-predict': {
+      title: 'Predict next-action — k-NN over outcomes', color: '#ffd60a',
+      body: 'Embeds the current session\'s tip with the content vector, finds k nearest past sessions, then surfaces what *those* sessions did next at the same juncture. Past-you\'s next action, surfaced before you ask.',
+      code: 'QueryPointsBuilder::new(C)\n  .query(embedded_now)\n  .using("content")\n  .limit(k_neighbors)\n→  aggregate(neighbors.tail_actions)',
+      link: { text: 'indexer.rs · predict_next_action', href: REPO + '/src-tauri/src/indexer.rs' }
+    },
+    /* SURFACES — 4 hosts */
+    'host-desktop': {
+      title: 'Desktop · Tauri (macOS)', color: '#6cd6ff',
+      body: 'Native window built with Tauri. Live proactive recall in the menubar, OS-level notifications when a past fix matches the fresh error you just hit. Apple Silicon build from source.',
+      code: 'npm install && npm run tauri build\nopen src-tauri/target/release/bundle/macos/Memex.app',
+      link: { text: 'README · install desktop', href: REPO + '/README.md' }
+    },
+    'host-server': {
+      title: 'Server · single Docker image', color: '#ffb454',
+      body: 'Qdrant + web UI + JSON API + MCP — all in one container. Embedder pre-baked, corpus auto-indexes on boot. Runs as a non-root user, binds 127.0.0.1:8765 by default. Fully offline.',
+      code: 'docker run -p 8765:8765 memex-allinone\n# browser UI · JSON API · MCP — all on :8765',
+      link: { text: 'deploy/web/README.md', href: REPO + '/deploy/web/README.md' }
+    },
+    'host-hooks': {
+      title: 'Agent hooks · Claude · Codex', color: '#ff6b7a',
+      body: 'Four Claude Code hooks: SessionStart injects the Companion primer; UserPromptSubmit injects relevance-gated recall; PostToolUse runs the Loop Breaker on repeated-error stuck patterns; SessionEnd reindexes the just-finished session. Hooks fail OPEN — engine down means no memory, never a stall.',
+      code: 'memex install --hooks\n# writes to gitignored .claude/settings.local.json',
+      link: { text: 'docs/agent-integration.md', href: REPO + '/docs/agent-integration.md' }
+    },
+    'host-mcp': {
+      title: 'Any MCP host — pull-only', color: '#c792ea',
+      body: 'A committed /.mcp.json registers the memex server (stdio). Claude Code, Cursor, and any MCP host expose the 11 typed tools without any plugin. The same surface is also reachable over HTTP for the all-in-one container.',
+      code: 'claude mcp add memex            # stdio (binary)\nclaude mcp add --transport http \\ \n  memex-web http://localhost:8765/mcp',
+      link: { text: 'docs/agent-integration.md', href: REPO + '/docs/agent-integration.md' }
+    }
+  };
+
+  /* ── tooltip controller ── */
+  var titleEl = tip.querySelector('.t');
+  var swEl    = tip.querySelector('.sw');
+  var bodyEl  = tip.querySelector('.b');
+  var preEl   = tip.querySelector('pre');
+  var codeEl  = tip.querySelector('pre .c');
+  var linkEl  = tip.querySelector('.tip-link');
+  var hideTimer = null;
+
+  function position(target) {
+    var trect = target.getBoundingClientRect();
+    var wrect = wrap.getBoundingClientRect();
+    /* Measure tip after content set (might be hidden) — force a reflow with show-class peek */
+    var prevVis = tip.style.visibility;
+    tip.style.visibility = 'hidden';
+    tip.style.display = 'block';
+    var th = tip.offsetHeight;
+    var tw = tip.offsetWidth;
+    tip.style.display = '';
+    tip.style.visibility = prevVis;
+
+    var centerX = trect.left + trect.width / 2 - wrect.left;
+    var left = centerX - tw / 2;
+    var maxLeft = wrect.width - tw - 8;
+    left = Math.max(8, Math.min(left, maxLeft));
+
+    /* Choose above-or-below based on space in viewport */
+    var spaceBelow = window.innerHeight - trect.bottom;
+    var spaceAbove = trect.top;
+    var below = (spaceBelow > th + 24) || (spaceBelow > spaceAbove);
+    var top;
+    if (below) {
+      top = trect.bottom - wrect.top + 12;
+      tip.classList.add('below');
+    } else {
+      top = trect.top - wrect.top - th - 12;
+      tip.classList.remove('below');
+    }
+
+    /* Arrow horizontal offset */
+    var arrowX = centerX - left;
+    arrowX = Math.max(16, Math.min(arrowX, tw - 16));
+    var arr = tip.querySelector('.arr');
+    if (arr) arr.style.left = arrowX + 'px';
+
+    tip.style.left = left + 'px';
+    tip.style.top  = top + 'px';
+  }
+
+  function show(key, target) {
+    var t = TIPS[key];
+    if (!t) return;
+    if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
+    titleEl.textContent = t.title;
+    swEl.style.background = t.color;
+    swEl.style.color = t.color;
+    bodyEl.textContent = t.body;
+    if (t.code) { codeEl.textContent = t.code; preEl.style.display = 'block'; }
+    else { preEl.style.display = 'none'; }
+    if (t.link) {
+      linkEl.textContent = t.link.text + ' ↗';
+      linkEl.href = t.link.href;
+      linkEl.style.display = 'inline-block';
+    } else {
+      linkEl.style.display = 'none';
+    }
+    position(target);
+    tip.classList.add('show');
+    tip.setAttribute('aria-hidden', 'false');
+  }
+  function hide() {
+    tip.classList.remove('show');
+    tip.setAttribute('aria-hidden', 'true');
+  }
+  function deferHide() {
+    if (hideTimer) clearTimeout(hideTimer);
+    hideTimer = setTimeout(hide, 100);
+  }
+
+  /* hover delegation on the SVG */
+  if (svg) {
+    svg.addEventListener('mouseover', function (e) {
+      var el = e.target;
+      while (el && el !== svg && !(el.getAttribute && el.getAttribute('data-tip'))) el = el.parentNode;
+      if (el && el !== svg) show(el.getAttribute('data-tip'), el);
+    });
+    svg.addEventListener('mouseout', function (e) {
+      var to = e.relatedTarget;
+      if (!to || !(tip.contains(to) || svg.contains(to))) deferHide();
+    });
+    svg.addEventListener('focusin', function (e) {
+      var el = e.target;
+      while (el && el !== svg && !(el.getAttribute && el.getAttribute('data-tip'))) el = el.parentNode;
+      if (el && el !== svg) show(el.getAttribute('data-tip'), el);
+    });
+    svg.addEventListener('focusout', function (e) {
+      var to = e.relatedTarget;
+      if (!to || (!svg.contains(to) && !tip.contains(to))) deferHide();
+    });
+    /* keep tip open if user moves over the tip itself */
+    tip.addEventListener('mouseenter', function () { if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; } });
+    tip.addEventListener('mouseleave', deferHide);
+  }
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && tip.classList.contains('show')) hide();
+  });
+  window.addEventListener('resize', function () { if (tip.classList.contains('show')) hide(); });
+  window.addEventListener('scroll', function () { if (tip.classList.contains('show')) hide(); }, { passive: true });
 })();
 </script>
 </body>
