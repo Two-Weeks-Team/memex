@@ -281,6 +281,80 @@ footer .fine{ margin-top:42px; padding-top:22px; border-top:1px solid var(--line
 @media (max-width:780px){ footer .row{ grid-template-columns:1fr 1fr; } }
 @media (max-width:520px){ footer .row{ grid-template-columns:1fr; } }
 
+/* ─── topology: full-width galaxy with hover ─────────────────────────────── */
+.topo-galaxy{ position:relative; margin:32px 0 22px; background:linear-gradient(180deg, #0a0a14, #06060c); border:1px solid var(--line); border-radius:var(--r-lg); padding:18px 18px 14px; overflow:hidden; }
+.topo-galaxy svg{ width:100%; height:auto; display:block; }
+.topo-galaxy .galaxy-node{ cursor:pointer; transition:filter .2s ease; outline:none; }
+.topo-galaxy .galaxy-node:hover circle, .topo-galaxy .galaxy-node:focus-visible circle{ filter:brightness(1.25) drop-shadow(0 0 12px currentColor); }
+.topo-galaxy .galaxy-edge{ transition:stroke .25s ease, stroke-opacity .25s ease; }
+.topo-galaxy .galaxy-edge.dim{ stroke-opacity:.06; }
+.topo-galaxy .galaxy-edge.hi{ stroke-opacity:.85; stroke-width:1.8; }
+.topo-galaxy .galaxy-legend{ position:absolute; left:18px; bottom:14px; display:flex; flex-wrap:wrap; gap:10px 14px; font:600 11px ui-sans-serif,system-ui,sans-serif; color:var(--fg-mute); letter-spacing:.04em; }
+.topo-galaxy .galaxy-legend .gl-sw{ display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px; vertical-align:middle; box-shadow:0 0 6px currentColor; }
+.topo-galaxy .galaxy-hint{ position:absolute; right:18px; top:14px; font:700 10px ui-sans-serif,system-ui,sans-serif; letter-spacing:.18em; color:var(--fg-low); text-transform:uppercase; }
+.topo-tip{ position:absolute; pointer-events:none; opacity:0; visibility:hidden; z-index:5;
+  background:#0a0a14; border:1px solid #34344a; border-radius:11px; padding:12px 14px; min-width:240px; max-width:320px;
+  box-shadow:0 18px 38px rgba(0,0,0,.5), 0 0 0 1px rgba(255,255,255,.04) inset;
+  transform:translateY(-4px) scale(.96); transform-origin:50% 100%;
+  transition:opacity .16s ease, transform .22s cubic-bezier(.2,.7,.3,1); }
+.topo-tip.show{ opacity:1; visibility:visible; transform:translateY(0) scale(1); }
+.topo-tip h5{ margin:0 0 4px; display:flex; align-items:center; gap:8px; font:700 13px ui-sans-serif,system-ui,sans-serif; color:var(--fg); }
+.topo-tip h5 .sw{ width:10px; height:10px; border-radius:50%; box-shadow:0 0 8px currentColor; }
+.topo-tip .topo-meta{ font:600 10.5px ui-monospace,monospace; color:var(--fg-low); letter-spacing:.04em; text-transform:uppercase; margin:0 0 6px; }
+.topo-tip .topo-subject{ font:500 12.5px ui-sans-serif,system-ui,sans-serif; color:var(--fg-mute); margin:0 0 6px; line-height:1.45; }
+.topo-tip .topo-foot{ display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; }
+.topo-tip .topo-pill{ font:600 9.5px ui-sans-serif,system-ui,sans-serif; letter-spacing:.10em; text-transform:uppercase; padding:2px 8px; border-radius:999px; background:rgba(255,255,255,.05); border:1px solid var(--line-2); color:var(--fg-mute); }
+.topo-tip .topo-pill.err{ color:#ff6b7a; border-color:rgba(255,107,122,.4); background:rgba(255,107,122,.08); }
+
+/* ─── recall: typewriter terminal + side flow ──────────────────────────── */
+.recall-stage{ margin-top:28px; display:grid; grid-template-columns:1.5fr 1fr; gap:22px; align-items:stretch; }
+@media (max-width:840px){ .recall-stage{ grid-template-columns:1fr; } }
+.recall-term{ background:#06060c; border:1px solid var(--line); border-radius:var(--r-md); padding:16px 18px; font-family:ui-monospace,"SF Mono",Menlo,monospace; font-size:13px; color:#dcdce6; min-height:280px; position:relative; }
+.recall-term .rt-bar{ display:flex; align-items:center; gap:6px; padding-bottom:10px; margin-bottom:10px; border-bottom:1px solid rgba(255,255,255,.06); }
+.recall-term .rt-bar i{ display:inline-block; width:9px; height:9px; border-radius:50%; }
+.recall-term .rt-bar i:nth-child(1){ background:#ff6b7a; }
+.recall-term .rt-bar i:nth-child(2){ background:#ffd60a; }
+.recall-term .rt-bar i:nth-child(3){ background:#b5e48c; }
+.recall-term .rt-bar span{ margin-left:8px; font:600 10.5px ui-sans-serif,system-ui,sans-serif; color:var(--fg-low); letter-spacing:.10em; text-transform:uppercase; }
+.recall-term .rt-line{ display:block; min-height:1.6em; line-height:1.6; white-space:pre-wrap; }
+.recall-term .rt-cursor{ display:inline-block; width:8px; height:1.05em; vertical-align:-2px; background:#dcdce6; margin-left:2px; animation:rtblink 1s steps(1) infinite; }
+@keyframes rtblink{ 50%{ opacity:0; } }
+.recall-term .rt-mute{ color:#7c7c89; }
+.recall-term .rt-err { color:#ff8a96; }
+.recall-term .rt-ok  { color:#a3e07f; }
+.recall-term .rt-key { color:#9cd2ff; }
+.recall-term .rt-num { color:#ffd60a; }
+.recall-term .rt-code{ background:rgba(255,255,255,.05); padding:.04em .4em; border-radius:4px; border:1px solid rgba(255,255,255,.05); color:#cfe7ff; }
+.recall-flow{ display:flex; flex-direction:column; gap:8px; background:#0a0a14; border:1px solid var(--line); border-radius:var(--r-md); padding:16px 18px; }
+.recall-flow .rf-head{ font:700 10.5px ui-sans-serif,system-ui,sans-serif; color:var(--fg-low); letter-spacing:.16em; text-transform:uppercase; margin:0 0 4px; display:flex; align-items:center; gap:8px; }
+.recall-flow .rf-step{ display:flex; align-items:center; gap:12px; padding:9px 10px; border-radius:8px; border:1px solid var(--line); background:#06060c; transition:border-color .25s ease, background .25s ease, transform .25s ease; }
+.recall-flow .rf-step.active{ border-color:currentColor; background:rgba(255,255,255,.02); transform:translateX(4px); }
+.recall-flow .rf-step .rf-ic{ width:30px; height:30px; flex-shrink:0; border-radius:8px; border:1px solid var(--line-2); display:inline-flex; align-items:center; justify-content:center; background:rgba(255,255,255,.02); transition:border-color .25s ease, color .25s ease; }
+.recall-flow .rf-step.active .rf-ic{ border-color:currentColor; color:currentColor; }
+.recall-flow .rf-step .rf-ic svg{ width:14px; height:14px; }
+.recall-flow .rf-step .rf-ic svg path, .recall-flow .rf-step .rf-ic svg circle, .recall-flow .rf-step .rf-ic svg line, .recall-flow .rf-step .rf-ic svg rect{ stroke:currentColor; fill:none; stroke-width:1.4; stroke-linecap:round; stroke-linejoin:round; }
+.recall-flow .rf-step .rf-body{ display:flex; flex-direction:column; }
+.recall-flow .rf-step .rf-title{ font:700 12px ui-monospace,monospace; color:var(--fg-mute); transition:color .25s ease; }
+.recall-flow .rf-step.active .rf-title{ color:currentColor; }
+.recall-flow .rf-step .rf-sub{ font:500 10.5px ui-sans-serif,system-ui,sans-serif; color:var(--fg-low); margin-top:1px; }
+.recall-flow .rf-step.poll{ color:#6cd6ff; }
+.recall-flow .rf-step.err { color:#ff6b7a; }
+.recall-flow .rf-step.emb { color:#b5e48c; }
+.recall-flow .rf-step.qry { color:#c792ea; }
+.recall-flow .rf-step.mat { color:#ffd60a; }
+.recall-flow .rf-step.not { color:#ffb454; }
+.recall-flow .rf-pulse{ margin-top:auto; padding-top:6px; display:flex; align-items:center; gap:8px; color:var(--fg-low); font:600 10px ui-sans-serif,system-ui,sans-serif; letter-spacing:.14em; text-transform:uppercase; }
+.recall-flow .rf-pulse .rf-dot{ width:8px; height:8px; border-radius:50%; background:#6cd6ff; box-shadow:0 0 10px #6cd6ff; animation:rfpulse 12s ease-in-out infinite; }
+@keyframes rfpulse{ 0%,90%,100%{ opacity:.25; transform:scale(.6); } 4%,8%{ opacity:1; transform:scale(1.2); } }
+
+.recall-context{ margin-top:28px; display:grid; grid-template-columns:repeat(3, 1fr); gap:14px; }
+@media (max-width:860px){ .recall-context{ grid-template-columns:1fr; } }
+.recall-context .rc-card{ background:var(--card); border:1px solid var(--line); border-radius:var(--r-md); padding:18px 20px; transition:transform .25s ease, border-color .25s ease, box-shadow .25s ease; }
+.recall-context .rc-card:hover{ transform:translateY(-3px); border-color:#ff6b7a; box-shadow:0 16px 30px rgba(0,0,0,.4); }
+.recall-context .rc-card h3{ font-size:14px; margin:0 0 6px; color:#ff6b7a; display:flex; align-items:center; gap:8px; }
+.recall-context .rc-card h3 .n{ font:700 10px ui-monospace,monospace; padding:2px 7px; border-radius:999px; background:rgba(255,107,122,.10); border:1px solid rgba(255,107,122,.30); }
+.recall-context .rc-card p{ color:var(--fg-mute); font-size:13.5px; margin:0; line-height:1.55; }
+
 /* ─── universal: stagger reveal + hover lift for any card grid ─────────── */
 [data-stagger] > *{ opacity:0; transform:translateY(14px); transition:opacity .55s cubic-bezier(.2,.7,.3,1), transform .55s cubic-bezier(.2,.7,.3,1); }
 [data-stagger].is-revealed > *{ opacity:1; transform:translateY(0); }
@@ -1855,56 +1929,42 @@ POST /collections/{c}/snapshots/upload?priority=snapshot</pre>
   <div class="wrap">
     <p class="eyebrow-2">The map</p>
     <h2 id="topology-h">Topology — your corpus as a minimum-spanning galaxy.</h2>
-    <p class="lead">Every session is a node, colored by project. Edges connect each session to its nearest content-vector neighbor — a <strong>Minimum Spanning Tree</strong> over cosine distance. Drift along the edges and you walk the conceptual neighborhood, not the timeline.</p>
+    <p class="lead">Every session is a node, colored by project. Edges connect each session to its nearest content-vector neighbor — a <strong>Minimum Spanning Tree</strong> over cosine distance. Hover any node to see what that session was about; drift along the edges and you walk the conceptual neighborhood, not the timeline.</p>
 
-    <div class="topo-vis">
-      <svg viewBox="0 0 520 320" role="img" aria-label="Illustrative MST galaxy with 14 session nodes connected by their nearest content-vector neighbor.">
-        <defs>
-          <radialGradient id="hg" cx="50%" cy="50%" r="50%">
-            <stop offset="0%" stop-color="#ffd60a" stop-opacity=".25"/>
-            <stop offset="100%" stop-color="#ffd60a" stop-opacity="0"/>
-          </radialGradient>
-        </defs>
-        <rect width="520" height="320" fill="transparent"/>
-        <!-- MST edges (drawn first so nodes sit on top) -->
-        <g stroke="rgba(255,255,255,.18)" stroke-width="1" fill="none">
-          <line x1="90" y1="90" x2="160" y2="60"/>
-          <line x1="160" y1="60" x2="230" y2="110"/>
-          <line x1="230" y1="110" x2="300" y2="80"/>
-          <line x1="300" y1="80" x2="380" y2="130"/>
-          <line x1="380" y1="130" x2="440" y2="80"/>
-          <line x1="230" y1="110" x2="200" y2="190"/>
-          <line x1="200" y1="190" x2="130" y2="230"/>
-          <line x1="200" y1="190" x2="280" y2="220"/>
-          <line x1="280" y1="220" x2="360" y2="240"/>
-          <line x1="280" y1="220" x2="340" y2="170"/>
-          <line x1="340" y1="170" x2="380" y2="130"/>
-          <line x1="160" y1="60" x2="90" y2="160"/>
-          <line x1="90" y1="160" x2="130" y2="230"/>
-        </g>
-        <!-- nodes — 4 project colors -->
-        <g>
-          <circle cx="90"  cy="90"  r="6" fill="#6cd6ff"/>
-          <circle cx="160" cy="60"  r="6" fill="#6cd6ff"/>
-          <circle cx="230" cy="110" r="8" fill="#ffd60a"/>
-          <circle cx="300" cy="80"  r="5" fill="#bf5af2"/>
-          <circle cx="380" cy="130" r="6" fill="#bf5af2"/>
-          <circle cx="440" cy="80"  r="5" fill="#b5e48c"/>
-          <circle cx="90"  cy="160" r="5" fill="#6cd6ff"/>
-          <circle cx="130" cy="230" r="6" fill="#b5e48c"/>
-          <circle cx="200" cy="190" r="9" fill="#ffd60a"/>
-          <circle cx="280" cy="220" r="6" fill="#ff6b7a"/>
-          <circle cx="340" cy="170" r="5" fill="#ff6b7a"/>
-          <circle cx="360" cy="240" r="5" fill="#ff6b7a"/>
-        </g>
-        <!-- soft halo on the focused node -->
-        <circle cx="200" cy="190" r="34" fill="url(#hg)"/>
-        <text x="208" y="186" fill="#fff" font-size="11" font-family="ui-monospace,Menlo,monospace">you are here</text>
-      </svg>
-      <div class="why">
-        <h3>Drift, don't search</h3>
-        <p>A timeline tells you <em>when</em>. A topology tells you <em>near what</em>. The MST keeps the graph <strong>connected and sparse</strong> — every node has at least one neighbor, no node is more than a handful of hops from any other.</p>
-        <p>Click an edge and you've crossed a conceptual border in one move. Two seemingly unrelated projects often turn out to share an edge — and that edge is usually the insight you forgot you had.</p>
+    <div class="topo-galaxy" id="topo-galaxy">
+      <svg id="topo-svg" viewBox="0 0 1200 620" role="img" aria-label="Interactive MST galaxy of session nodes connected by their nearest content-vector neighbor."></svg>
+      <div class="galaxy-hint">Hover a node ↗</div>
+      <div class="galaxy-legend">
+        <span style="color:#ffd60a"><i class="gl-sw"></i>memex</span>
+        <span style="color:#6cd6ff"><i class="gl-sw"></i>project-x</span>
+        <span style="color:#bf5af2"><i class="gl-sw"></i>project-y</span>
+        <span style="color:#b5e48c"><i class="gl-sw"></i>project-philosophy</span>
+        <span style="color:#ff6b7a"><i class="gl-sw"></i>project-redesign</span>
+      </div>
+      <div class="topo-tip" id="topo-tip" role="tooltip" aria-hidden="true">
+        <h5><span class="sw"></span><span class="t-title"></span></h5>
+        <p class="topo-meta"><span class="t-project"></span> · <span class="t-age"></span></p>
+        <p class="topo-subject t-subject"></p>
+        <div class="topo-foot">
+          <span class="topo-pill t-deg"></span>
+          <span class="topo-pill t-err" style="display:none">had errors</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="feature-grid" data-stagger>
+      <div class="fcard">
+        <h3>Drift, don't search <span class="badge">UX</span></h3>
+        <p>A timeline tells you <em>when</em>. A topology tells you <em>near what</em>. The MST keeps the graph <strong>connected &amp; sparse</strong> — every node has at least one neighbor, none more than a handful of hops away.</p>
+      </div>
+      <div class="fcard">
+        <h3>Cross-project edges <span class="badge">insight</span></h3>
+        <p>The shortest edge between two clusters is usually the insight you forgot you had. The same code path showed up in two seemingly unrelated projects — you remember it now because the edge is right there in front of you.</p>
+      </div>
+      <div class="fcard">
+        <h3>Server-side in one call <span class="badge">qdrant</span></h3>
+        <p>The K-NN graph isn't computed client-side. Qdrant's <code>search_matrix_pairs</code> returns the sampled K-NN edges in one round-trip; <code>petgraph</code> turns them into the spanning tree.</p>
+        <code class="mono">SearchMatrixPointsBuilder::new(C).using("content")</code>
       </div>
     </div>
   </div>
@@ -1945,19 +2005,83 @@ POST /collections/{c}/snapshots/upload?priority=snapshot</pre>
     <p class="eyebrow-2">The reflex</p>
     <h2 id="recall-h">Proactive recall — the error lens reaches for you.</h2>
     <p class="lead">Every ~12 seconds the desktop app polls <code>tail_recent_errors()</code>. On a fresh error, it embeds the error text with BGE-small and queries the dedicated <code>error</code> named vector with a <code>has_errors = true</code> payload filter — asking, on your behalf, <em>"have I solved a similar failure before?"</em>. If yes, the next-action hint surfaces as an OS notification before you ask.</p>
-    <div class="recall">
-      <div class="term" id="recall-term" aria-live="polite">
-        <span class="line mute"># a fresh agent error just landed in this session</span>
-        <span class="line err">  Error: failed to connect to Qdrant gRPC at :6334 (connection refused)</span>
-        <span class="line mute"># memex polls every ~12s, embeds the error, queries the `error` named vector</span>
-        <span class="line">  → <span class="ok">match</span>  project-x  · 4 days ago  · solved: <code>docker compose up qdrant</code></span>
-        <span class="line">  → <span class="ok">match</span>  project-y  · 11 days ago · solved: started qdrant container first</span>
-        <span class="line mute"># OS notification fires — past-you's next action, surfaced on its own</span>
+
+    <div class="recall-stage">
+      <div class="recall-term" id="recall-term" aria-live="polite" aria-label="Live demonstration of the proactive recall loop">
+        <div class="rt-bar" aria-hidden="true">
+          <i></i><i></i><i></i>
+          <span>memex · proactive-recall loop · live</span>
+        </div>
+        <div id="rt-out"></div>
       </div>
-      <div class="why">
-        <h3>The dedicated error lens earns its keep</h3>
-        <p>The <code>error</code> vector is built from <em>only</em> the error spans — not the surrounding chat. So "connection refused on :6334" doesn't get drowned out by the user's pleasantries. The payload filter <code>has_errors = true</code> keeps the search inside sessions that actually broke.</p>
-        <p>Five sliders, five lenses — but recall is the one that <em>moves first</em>. The proactive loop is what makes a memex feel alive.</p>
+
+      <div class="recall-flow" aria-label="Recall flow: poll → error → embed → query → match → notify">
+        <p class="rf-head"><span>How the loop runs</span></p>
+
+        <div class="rf-step poll" data-step="poll">
+          <span class="rf-ic"><svg viewBox="0 0 18 18"><path d="M9 2 V5 M9 13 V16 M2 9 H5 M13 9 H16 M4 4 L6 6 M12 12 L14 14 M14 4 L12 6 M4 14 L6 12"/><circle cx="9" cy="9" r="3"/></svg></span>
+          <div class="rf-body">
+            <span class="rf-title">poll  every ~12s</span>
+            <span class="rf-sub"><code>tail_recent_errors()</code> · cheap ≈50ms / 80 sessions</span>
+          </div>
+        </div>
+
+        <div class="rf-step err" data-step="err">
+          <span class="rf-ic"><svg viewBox="0 0 18 18"><path d="M9 2 L16 15 H2 Z"/><line x1="9" y1="7" x2="9" y2="11"/><circle cx="9" cy="13" r=".7" fill="currentColor"/></svg></span>
+          <div class="rf-body">
+            <span class="rf-title">fresh is_error</span>
+            <span class="rf-sub">tool_result event, this session</span>
+          </div>
+        </div>
+
+        <div class="rf-step emb" data-step="emb">
+          <span class="rf-ic"><svg viewBox="0 0 18 18"><circle cx="9" cy="9" r="6.5"/><circle cx="3.5" cy="9" r="1.1" fill="currentColor"/><circle cx="9" cy="3.5" r="1.1" fill="currentColor"/><circle cx="14.5" cy="9" r="1.1" fill="currentColor"/><circle cx="9" cy="14.5" r="1.1" fill="currentColor"/></svg></span>
+          <div class="rf-body">
+            <span class="rf-title">embed</span>
+            <span class="rf-sub">BGE-small · 384-d cosine</span>
+          </div>
+        </div>
+
+        <div class="rf-step qry" data-step="qry">
+          <span class="rf-ic"><svg viewBox="0 0 18 18"><circle cx="8" cy="8" r="5"/><line x1="11.5" y1="11.5" x2="16" y2="16"/></svg></span>
+          <div class="rf-body">
+            <span class="rf-title">query  .using("error")</span>
+            <span class="rf-sub">filter: has_errors=true · HNSW pre-filter</span>
+          </div>
+        </div>
+
+        <div class="rf-step mat" data-step="mat">
+          <span class="rf-ic"><svg viewBox="0 0 18 18"><path d="M3 9 L7.5 13 L15 5"/></svg></span>
+          <div class="rf-body">
+            <span class="rf-title">match  top-K</span>
+            <span class="rf-sub">past session that fixed this</span>
+          </div>
+        </div>
+
+        <div class="rf-step not" data-step="not">
+          <span class="rf-ic"><svg viewBox="0 0 18 18"><path d="M4 12 V8 a5 5 0 0 1 10 0 V12 Z"/><line x1="3" y1="12" x2="15" y2="12"/><path d="M7.5 15 a1.5 1.5 0 0 0 3 0"/></svg></span>
+          <div class="rf-body">
+            <span class="rf-title">notify  os</span>
+            <span class="rf-sub">past-you's next action, surfaced</span>
+          </div>
+        </div>
+
+        <div class="rf-pulse" aria-hidden="true"><span class="rf-dot"></span><span>polling · every 12s</span></div>
+      </div>
+    </div>
+
+    <div class="recall-context">
+      <div class="rc-card">
+        <h3><span class="n">01</span>Dedicated error lens</h3>
+        <p>The <code>error</code> vector is built from <em>only</em> the <code>is_error=true</code> spans and heuristic "Error:" lines — not the surrounding chat. "connection refused on :6334" doesn't get drowned out by pleasantries.</p>
+      </div>
+      <div class="rc-card">
+        <h3><span class="n">02</span>Indexed payload predicate</h3>
+        <p><code>has_errors</code> is a bool payload field with a Qdrant field index. The filter runs as a cheap <strong>HNSW pre-filter</strong>, not a full-collection scan — so recall feels instant on 1000s of points.</p>
+      </div>
+      <div class="rc-card">
+        <h3><span class="n">03</span>Fail-open under load</h3>
+        <p>If the Memex engine isn't running, the polling loop logs and continues — the agent's session never blocks on Memex. Recall is the one surface that <em>moves first</em>; everything else stays out of your way.</p>
       </div>
     </div>
   </div>
@@ -2755,6 +2879,425 @@ POST /collections/{c}/snapshots/upload?priority=snapshot</pre>
   chips.forEach(function (c) {
     c.addEventListener('click', function () { apply(c.getAttribute('data-cat')); });
   });
+})();
+
+/* ─── topology galaxy: 35-node MST renderer + hover tip + drift ────────── */
+(function () {
+  var svg = document.getElementById('topo-svg');
+  var tip = document.getElementById('topo-tip');
+  var stage = document.getElementById('topo-galaxy');
+  if (!svg || !tip || !stage) return;
+  var prm = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  /* ── canonical mock corpus: 5 projects · 35 sessions · plausible subjects ── */
+  var PROJ = {
+    memex:    { color:'#ffd60a' },
+    'project-x':            { color:'#6cd6ff' },
+    'project-y':            { color:'#bf5af2' },
+    'project-philosophy':   { color:'#b5e48c' },
+    'project-redesign':     { color:'#ff6b7a' },
+  };
+  /* Deterministic node positions — clustered by project. r is base size; nodes
+     are pre-placed so the SVG renders identically each load (no jitter). */
+  var NODES = [
+    /* memex cluster (centre-left) */
+    { id: 'm01', x: 220, y: 270, r: 7, p: 'memex',     subj: 'qdrant snapshot HTTP ↩ snapshot upload',         age: '2 days ago',  err: false },
+    { id: 'm02', x: 290, y: 220, r: 8, p: 'memex',     subj: 'lens slider — multi-vector weight blend',         age: 'today',       err: false },
+    { id: 'm03', x: 340, y: 300, r: 9, p: 'memex',     subj: 'BGE-small Mutex contention under bulk index',     age: '4 days ago',  err: true },
+    { id: 'm04', x: 250, y: 360, r: 6, p: 'memex',     subj: 'topology MST — petgraph + matrix pairs',          age: '3 days ago',  err: false },
+    { id: 'm05', x: 410, y: 230, r: 7, p: 'memex',     subj: 'companion primer — cold-start killer',            age: '1 day ago',   err: false },
+    { id: 'm06', x: 170, y: 200, r: 6, p: 'memex',     subj: 'discovery API — context-pair re-rank',            age: '5 days ago',  err: false },
+    { id: 'm07', x: 380, y: 380, r: 5, p: 'memex',     subj: 'wrapped report — payload-only aggregation',       age: '6 days ago',  err: false },
+    { id: 'm08', x: 460, y: 320, r: 6, p: 'memex',     subj: 'agent-integration · /.mcp.json + hooks',          age: 'today',       err: false },
+    /* project-x (top-right) */
+    { id: 'x01', x: 620, y: 130, r: 6, p: 'project-x', subj: 'webpack to esbuild — bundle plugin chain',         age: '8 days ago',  err: false },
+    { id: 'x02', x: 720, y: 170, r: 5, p: 'project-x', subj: 'esbuild plugin — fastembed wasm load',             age: '6 days ago',  err: true  },
+    { id: 'x03', x: 690, y: 90,  r: 6, p: 'project-x', subj: 'react-query — stale-while-revalidate',             age: '12 days ago', err: false },
+    { id: 'x04', x: 800, y: 130, r: 7, p: 'project-x', subj: 'Vite SSR hydration mismatch',                       age: '4 days ago',  err: true  },
+    { id: 'x05', x: 580, y: 220, r: 5, p: 'project-x', subj: 'feature flag rollout — telemetry guard',          age: '15 days ago', err: false },
+    { id: 'x06', x: 870, y: 200, r: 5, p: 'project-x', subj: 'CSV streaming parser — back-pressure',            age: '20 days ago', err: false },
+    { id: 'x07', x: 660, y: 260, r: 6, p: 'project-x', subj: 'shared types via tsconfig path map',              age: '9 days ago',  err: false },
+    /* project-y (right) */
+    { id: 'y01', x: 940, y: 280, r: 7, p: 'project-y', subj: 'tauri ipc — payload size limit, stream chunks',   age: '7 days ago',  err: true  },
+    { id: 'y02', x: 1030,y: 220, r: 6, p: 'project-y', subj: 'tauri plugin-fs sandbox — scope conflict',         age: '11 days ago', err: false },
+    { id: 'y03', x: 1080,y: 320, r: 5, p: 'project-y', subj: 'rust async drop — connection pool leak',          age: '9 days ago',  err: false },
+    { id: 'y04', x: 940, y: 370, r: 6, p: 'project-y', subj: 'cargo workspace — feature unification',           age: '14 days ago', err: false },
+    { id: 'y05', x: 990, y: 150, r: 5, p: 'project-y', subj: 'webview2 — high-DPI rendering glitch',            age: '21 days ago', err: false },
+    /* project-philosophy (bottom-left) */
+    { id: 'p01', x: 320, y: 470, r: 7, p: 'project-philosophy', subj: 'Vannevar Bush — associative trails',     age: '5 days ago',  err: false },
+    { id: 'p02', x: 240, y: 510, r: 6, p: 'project-philosophy', subj: 'Engelbart vs Sutherland — augment vs sim', age: '10 days ago', err: false },
+    { id: 'p03', x: 410, y: 530, r: 6, p: 'project-philosophy', subj: 'Hypercard stack — bidirectional links',  age: '6 days ago',  err: false },
+    { id: 'p04', x: 180, y: 430, r: 5, p: 'project-philosophy', subj: 'second-brain note-taking decoupled',     age: '16 days ago', err: false },
+    { id: 'p05', x: 360, y: 580, r: 5, p: 'project-philosophy', subj: 'Tufte data-ink — minimum ratio',          age: '18 days ago', err: false },
+    { id: 'p06', x: 480, y: 470, r: 6, p: 'project-philosophy', subj: 'Kay — "the medium is the message"',      age: '8 days ago',  err: false },
+    /* project-redesign (bottom-right) */
+    { id: 'r01', x: 700, y: 460, r: 7, p: 'project-redesign', subj: 'dark mode — OKLCH palette',                 age: '3 days ago',  err: false },
+    { id: 'r02', x: 800, y: 510, r: 6, p: 'project-redesign', subj: 'IntersectionObserver entry stagger',       age: 'today',       err: false },
+    { id: 'r03', x: 860, y: 420, r: 6, p: 'project-redesign', subj: 'animation timing — cubic-bezier curves',   age: '4 days ago',  err: false },
+    { id: 'r04', x: 970, y: 490, r: 5, p: 'project-redesign', subj: 'svg viewBox vs CSS scaling',                age: '6 days ago',  err: false },
+    { id: 'r05', x: 640, y: 540, r: 5, p: 'project-redesign', subj: 'reduced-motion media query coverage',      age: '7 days ago',  err: false },
+    { id: 'r06', x: 1040,y: 560, r: 6, p: 'project-redesign', subj: 'focus-visible vs :focus — keyboard nav',   age: '11 days ago', err: false },
+    /* floaters / cross-cluster bridges */
+    { id: 'f01', x: 530, y: 380, r: 5, p: 'memex',     subj: 'cross-corpus mix — A + B − C',                    age: '12 days ago', err: false },
+  ];
+  var EDGES = [
+    /* memex cluster internal */
+    ['m02','m01'], ['m02','m03'], ['m03','m04'], ['m03','m05'], ['m02','m06'],
+    ['m04','m07'], ['m05','m08'], ['m03','f01'],
+    /* memex → bridge → project-redesign (the "they share something" insight) */
+    ['m07','f01'], ['f01','r01'], ['r01','r03'], ['r01','r02'], ['r03','r04'],
+    ['r02','r05'], ['r04','r06'],
+    /* memex → project-philosophy (Bush conceptual bridge) */
+    ['m04','p06'], ['p06','p01'], ['p01','p02'], ['p02','p04'], ['p01','p03'], ['p03','p05'],
+    /* memex/project-redesign → project-x */
+    ['m05','x01'], ['x01','x03'], ['x01','x05'], ['x05','x07'], ['x07','x02'], ['x01','x04'], ['x04','x06'],
+    /* project-x → project-y */
+    ['x04','y05'], ['y05','y02'], ['y02','y01'], ['y01','y04'], ['y01','y03'],
+  ];
+
+  var SVG_NS = 'http://www.w3.org/2000/svg';
+
+  /* render edges first so nodes paint on top */
+  var nodeMap = {};
+  NODES.forEach(function (n) { nodeMap[n.id] = n; });
+
+  var edgeEls = [];
+  EDGES.forEach(function (e, i) {
+    var a = nodeMap[e[0]], b = nodeMap[e[1]];
+    if (!a || !b) return;
+    var line = document.createElementNS(SVG_NS, 'line');
+    line.setAttribute('x1', a.x); line.setAttribute('y1', a.y);
+    line.setAttribute('x2', b.x); line.setAttribute('y2', b.y);
+    line.setAttribute('stroke', 'rgba(255,255,255,.18)');
+    line.setAttribute('stroke-width', '1');
+    line.setAttribute('class', 'galaxy-edge');
+    line.setAttribute('data-a', e[0]);
+    line.setAttribute('data-b', e[1]);
+    line.style.strokeDasharray = '300';
+    line.style.strokeDashoffset = prm ? '0' : '300';
+    line.style.transition = 'stroke-dashoffset 1s cubic-bezier(.4,0,.2,1)';
+    line.style.transitionDelay = (0.25 + (i % 12) * 0.05) + 's';
+    svg.appendChild(line);
+    edgeEls.push(line);
+  });
+
+  /* render nodes */
+  var nodeGroups = {};
+  NODES.forEach(function (n, i) {
+    var g = document.createElementNS(SVG_NS, 'g');
+    g.setAttribute('class', 'galaxy-node');
+    g.setAttribute('data-id', n.id);
+    g.setAttribute('tabindex', '0');
+    g.setAttribute('role', 'button');
+    g.setAttribute('aria-label', n.p + ' · ' + n.subj);
+    g.setAttribute('transform', 'translate(' + n.x + ',' + n.y + ')');
+
+    var halo = document.createElementNS(SVG_NS, 'circle');
+    halo.setAttribute('r', n.r * 3);
+    halo.setAttribute('fill', PROJ[n.p].color);
+    halo.setAttribute('opacity', '0');
+    halo.setAttribute('class', 'galaxy-halo');
+    g.appendChild(halo);
+
+    var c = document.createElementNS(SVG_NS, 'circle');
+    c.setAttribute('r', n.r);
+    c.setAttribute('fill', PROJ[n.p].color);
+    c.setAttribute('color', PROJ[n.p].color);
+    c.style.transformOrigin = '0 0';
+    c.style.transform = prm ? 'scale(1)' : 'scale(0)';
+    c.style.transition = 'transform .55s cubic-bezier(.25,.8,.3,1)';
+    c.style.transitionDelay = (0.4 + (i % 14) * 0.04) + 's';
+    g.appendChild(c);
+
+    if (n.err) {
+      var ring = document.createElementNS(SVG_NS, 'circle');
+      ring.setAttribute('r', n.r + 3);
+      ring.setAttribute('fill', 'none');
+      ring.setAttribute('stroke', '#ff6b7a');
+      ring.setAttribute('stroke-width', '1');
+      ring.setAttribute('opacity', '.55');
+      g.appendChild(ring);
+    }
+
+    /* hover/focus */
+    g.addEventListener('mouseenter', function () { focusNode(n); });
+    g.addEventListener('mouseleave', function () { blurNode(); });
+    g.addEventListener('focus', function () { focusNode(n); });
+    g.addEventListener('blur', function () { blurNode(); });
+
+    svg.appendChild(g);
+    nodeGroups[n.id] = { g: g, c: c, halo: halo };
+  });
+
+  /* tip update */
+  var tTitle  = tip.querySelector('.t-title');
+  var tSw     = tip.querySelector('.sw');
+  var tProj   = tip.querySelector('.t-project');
+  var tAge    = tip.querySelector('.t-age');
+  var tSubj   = tip.querySelector('.t-subject');
+  var tDeg    = tip.querySelector('.t-deg');
+  var tErr    = tip.querySelector('.t-err');
+
+  function focusNode(n) {
+    var nb = {};
+    edgeEls.forEach(function (e) {
+      var a = e.getAttribute('data-a'), b = e.getAttribute('data-b');
+      if (a === n.id || b === n.id) { e.classList.add('hi'); e.style.stroke = PROJ[n.p].color; nb[a === n.id ? b : a] = true; }
+      else { e.classList.add('dim'); }
+    });
+    Object.keys(nodeGroups).forEach(function (id) {
+      var ng = nodeGroups[id];
+      if (id !== n.id && !nb[id]) ng.c.setAttribute('opacity', '.35');
+      else ng.c.setAttribute('opacity', '1');
+    });
+    var halo = nodeGroups[n.id].halo;
+    halo.setAttribute('opacity', '.22');
+
+    /* fill tip content */
+    tTitle.textContent = n.id;
+    tSw.style.background = PROJ[n.p].color;
+    tSw.style.color = PROJ[n.p].color;
+    tProj.textContent = n.p;
+    tProj.style.color = PROJ[n.p].color;
+    tAge.textContent = n.age;
+    tSubj.textContent = '"' + n.subj + '"';
+    tDeg.textContent = 'degree ' + Object.keys(nb).length;
+    tErr.style.display = n.err ? 'inline-block' : 'none';
+
+    /* position tip — convert SVG coord → screen → stage-relative */
+    var stageRect = stage.getBoundingClientRect();
+    var svgRect = svg.getBoundingClientRect();
+    var scale = svgRect.width / 1200;
+    var sx = n.x * scale + (svgRect.left - stageRect.left);
+    var sy = n.y * scale + (svgRect.top  - stageRect.top);
+    /* place above the node; flip below if no room */
+    var tipW = 280, tipH = 130;
+    var below = sy < tipH + 24;
+    var tipL = Math.max(8, Math.min(sx - tipW/2, stageRect.width - tipW - 8));
+    var tipT = below ? sy + 20 : sy - tipH - 12;
+    tip.style.left = tipL + 'px';
+    tip.style.top  = tipT + 'px';
+    tip.classList.add('show');
+    tip.setAttribute('aria-hidden', 'false');
+  }
+  function blurNode() {
+    edgeEls.forEach(function (e) { e.classList.remove('hi'); e.classList.remove('dim'); e.style.stroke = ''; });
+    Object.keys(nodeGroups).forEach(function (id) {
+      nodeGroups[id].c.setAttribute('opacity', '1');
+      nodeGroups[id].halo.setAttribute('opacity', '0');
+    });
+    tip.classList.remove('show');
+    tip.setAttribute('aria-hidden', 'true');
+  }
+
+  /* entry trigger via IntersectionObserver */
+  if (!prm && 'IntersectionObserver' in window) {
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (en) {
+        if (en.isIntersecting) {
+          edgeEls.forEach(function (e) { e.style.strokeDashoffset = '0'; });
+          NODES.forEach(function (n) {
+            var ng = nodeGroups[n.id];
+            if (ng && ng.c) ng.c.style.transform = 'scale(1)';
+          });
+          io.disconnect();
+        }
+      });
+    }, { threshold: 0.18 });
+    io.observe(svg);
+  } else {
+    edgeEls.forEach(function (e) { e.style.strokeDashoffset = '0'; });
+    Object.keys(nodeGroups).forEach(function (id) { nodeGroups[id].c.style.transform = 'scale(1)'; });
+  }
+
+  /* subtle ambient drift on nodes (gentle Brownian, slow) */
+  if (!prm) {
+    var t0 = performance.now();
+    function drift(now) {
+      var t = (now - t0) / 1000;
+      NODES.forEach(function (n, i) {
+        var ph = i * 0.37;
+        var dx = Math.sin(t * 0.5 + ph) * 2.2 + Math.sin(t * 0.21 + ph * 1.7) * 1.3;
+        var dy = Math.cos(t * 0.4 + ph * 1.3) * 1.6 + Math.sin(t * 0.27 + ph * 0.9) * 1.1;
+        var g = nodeGroups[n.id];
+        if (g && g.g) g.g.setAttribute('transform', 'translate(' + (n.x + dx) + ',' + (n.y + dy) + ')');
+      });
+      requestAnimationFrame(drift);
+    }
+    requestAnimationFrame(drift);
+  }
+})();
+
+/* ─── recall: typewriter loop cycling through 3 mock error→match cases ─── */
+(function () {
+  var out = document.getElementById('rt-out');
+  var stage = document.getElementById('recall-term');
+  var flow = document.querySelector('.recall-flow');
+  if (!out || !stage || !flow) return;
+  var prm = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  var CYCLES = [
+    {
+      poll:    '# polling tail_recent_errors() …',
+      err:     'Error: failed to connect to Qdrant gRPC at :6334 (connection refused)',
+      embed:   'embed("connection refused on :6334") → 384-d',
+      query:   '.using("error").filter(has_errors=true).limit(5)',
+      matches: [
+        { sub: 'project-x  · 4 days ago', fix: 'docker compose up qdrant' },
+        { sub: 'project-y  · 11 days ago', fix: 'started qdrant container first' },
+      ],
+      notify:  'past-you ran: <code class="rt-code">docker compose up qdrant</code>',
+    },
+    {
+      poll:    '# polling tail_recent_errors() …',
+      err:     'Error: thread \'tokio-runtime-worker\' panicked: TextEmbedding not Send',
+      embed:   'embed("TextEmbedding panicked Send") → 384-d',
+      query:   '.using("error").filter(has_errors=true).limit(5)',
+      matches: [
+        { sub: 'memex  · 12 days ago', fix: 'Mutex<TextEmbedding> wrap; lock once' },
+      ],
+      notify:  'past-you wrote: <code class="rt-code">Mutex&lt;TextEmbedding&gt;</code>',
+    },
+    {
+      poll:    '# polling tail_recent_errors() …',
+      err:     'Error: Tauri IPC payload exceeds 4 MB (stream required)',
+      embed:   'embed("Tauri IPC payload exceeds 4 MB") → 384-d',
+      query:   '.using("error").filter(has_errors=true).limit(5)',
+      matches: [
+        { sub: 'project-y  · 7 days ago', fix: 'chunk payload via tauri::Window::emit' },
+      ],
+      notify:  'past-you ran: <code class="rt-code">window.emit("chunk", &amp;part)</code>',
+    },
+  ];
+
+  var stepEls = {
+    poll: flow.querySelector('.rf-step[data-step="poll"]'),
+    err:  flow.querySelector('.rf-step[data-step="err"]'),
+    emb:  flow.querySelector('.rf-step[data-step="emb"]'),
+    qry:  flow.querySelector('.rf-step[data-step="qry"]'),
+    mat:  flow.querySelector('.rf-step[data-step="mat"]'),
+    not:  flow.querySelector('.rf-step[data-step="not"]'),
+  };
+  function setActive(name) {
+    Object.keys(stepEls).forEach(function (k) {
+      stepEls[k].classList.toggle('active', k === name);
+    });
+  }
+
+  var ci = 0;
+  var aborted = false;
+
+  function typeLine(parent, cls, html, speed) {
+    return new Promise(function (resolve) {
+      var span = document.createElement('span');
+      span.className = 'rt-line ' + (cls || '');
+      var cursor = document.createElement('span');
+      cursor.className = 'rt-cursor';
+      span.appendChild(cursor);
+      parent.appendChild(span);
+
+      var i = 0;
+      var s = html;
+      function step() {
+        if (aborted) return resolve();
+        i += 1;
+        var piece = s.slice(0, i);
+        /* parse any inline <code> as html */
+        cursor.remove();
+        span.innerHTML = piece;
+        span.appendChild(cursor);
+        if (i < s.length) {
+          setTimeout(step, speed || 14);
+        } else {
+          cursor.remove();
+          resolve();
+        }
+      }
+      setTimeout(step, 30);
+    });
+  }
+
+  function sleep(ms) {
+    return new Promise(function (res) {
+      if (aborted) return res();
+      setTimeout(res, ms);
+    });
+  }
+
+  function clearOut() {
+    out.innerHTML = '';
+  }
+
+  function runCycle(c) {
+    clearOut();
+    Object.keys(stepEls).forEach(function (k) { stepEls[k].classList.remove('active'); });
+    setActive('poll');
+    return typeLine(out, 'rt-mute', c.poll, 12)
+      .then(function () { return sleep(450); })
+      .then(function () { setActive('err'); return typeLine(out, 'rt-err', '  ' + c.err, 16); })
+      .then(function () { return sleep(450); })
+      .then(function () { setActive('emb'); return typeLine(out, 'rt-mute', '  → ' + c.embed, 13); })
+      .then(function () { setActive('qry'); return typeLine(out, 'rt-key', '  → ' + c.query, 13); })
+      .then(function () { return sleep(400); })
+      .then(function () {
+        setActive('mat');
+        var p = Promise.resolve();
+        c.matches.forEach(function (m, mi) {
+          p = p.then(function () {
+            return typeLine(out, '', '  → <span class="rt-ok">match</span>  ' + m.sub + '  · solved: <code class="rt-code">' + m.fix + '</code>', 13);
+          }).then(function () { return sleep(200); });
+        });
+        return p;
+      })
+      .then(function () { return sleep(350); })
+      .then(function () { setActive('not'); return typeLine(out, 'rt-mute', '  ↗ os-notify: ' + c.notify, 13); })
+      .then(function () { return sleep(2800); });
+  }
+
+  function loop() {
+    if (aborted) return;
+    runCycle(CYCLES[ci]).then(function () {
+      ci = (ci + 1) % CYCLES.length;
+      loop();
+    });
+  }
+
+  function start() {
+    if (prm) {
+      /* render the first cycle statically, no animation */
+      var c = CYCLES[0];
+      out.innerHTML = '';
+      function addLine(cls, html) {
+        var el = document.createElement('span');
+        el.className = 'rt-line ' + cls;
+        el.innerHTML = html;
+        out.appendChild(el);
+      }
+      addLine('rt-mute', c.poll);
+      addLine('rt-err', '  ' + c.err);
+      addLine('rt-mute', '  → ' + c.embed);
+      addLine('rt-key',  '  → ' + c.query);
+      c.matches.forEach(function (m) {
+        addLine('', '  → <span class="rt-ok">match</span>  ' + m.sub + '  · solved: <code class="rt-code">' + m.fix + '</code>');
+      });
+      addLine('rt-mute', '  ↗ os-notify: ' + c.notify);
+      Object.keys(stepEls).forEach(function (k) { stepEls[k].classList.add('active'); });
+      return;
+    }
+    loop();
+  }
+
+  /* trigger when the section scrolls into view */
+  if ('IntersectionObserver' in window) {
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (en) {
+        if (en.isIntersecting) { start(); io.disconnect(); }
+      });
+    }, { threshold: 0.20 });
+    io.observe(stage);
+  } else {
+    start();
+  }
 })();
 
 /* ─── hero parallax — subtle constellation drift toward the cursor ──────── */
