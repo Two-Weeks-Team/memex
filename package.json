@@ -8,6 +8,7 @@
     "tauri:dist": "tauri build -- --no-default-features"
   },
   "devDependencies": {
+    "@playwright/test": "^1.60.0",
     "@tauri-apps/cli": "^2"
   }
 }

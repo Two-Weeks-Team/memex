@@ -6,12 +6,14 @@
 //! Only compiled under the `web` feature.
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::Instant;
 
 use anyhow::{Context, Result};
 use axum::{
     extract::{Path, Query, State},
-    http::StatusCode,
+    http::{header, StatusCode},
     response::{Html, IntoResponse, Response},
     routing::{get, post},
     Json, Router,
@@ -22,12 +24,69 @@ use tower_http::services::ServeDir;
 
 use crate::{crud, indexer, lens, mcp, parser, retrieval, schema, sec};
 
+/// T3.2 (qdrant-improvement-goal.md) — operational observability for the
+/// Docker server variant. The all-in-one container ran with no `/metrics`
+/// endpoint before this; SREs had no way to alert on rate/latency without
+/// log scraping. These eight families let Prometheus scrape /metrics on :8765
+/// alongside the existing /api/health.
+///
+/// Atomic counters are cheap enough that we don't gate them behind a feature
+/// flag — every handler bumps the relevant counter unconditionally. The
+/// embedder lock-wait histogram is a single Gauge surfaced via `seconds`
+/// suffix; we accumulate the total wait time and the count separately so
+/// the Prom client can compute an average.
+#[derive(Debug, Default)]
+struct WebMetrics {
+    queries_total:          AtomicU64,   // memex_queries_total (search + lens combined)
+    recall_polls_total:     AtomicU64,   // memex_recall_polls_total
+    // PR #12 REV-1 (Gemini HIGH) — rename: the previous "embedder_lock_waits"
+    // was misleading; nothing actually locked a mutex. What we measure now is
+    // the wall-clock duration of the embedder-bearing indexer call in each
+    // handler — a proxy for embedder throughput plus its Qdrant round-trip.
+    // Stored in ms internally; emitted as seconds in the Prom exposition.
+    embedder_call_ms_sum:   AtomicU64,   // memex_embedder_call_seconds_sum
+    embedder_call_count:    AtomicU64,   // memex_embedder_call_seconds_count
+    snapshot_bytes:         AtomicU64,   // memex_snapshot_bytes (last successful export size)
+    points_indexed_total:   AtomicU64,   // memex_points_indexed_total
+    errors_recalled_total:  AtomicU64,   // memex_errors_recalled_total (hits surfaced by recall lane)
+    mcp_calls_total:        AtomicU64,   // memex_mcp_calls_total (informational)
+    process_start:          std::sync::OnceLock<Instant>, // for memex_process_uptime_seconds
+}
+
+impl WebMetrics {
+    fn mark_query(&self)        { self.queries_total.fetch_add(1, Ordering::Relaxed); }
+    fn mark_recall_poll(&self)  { self.recall_polls_total.fetch_add(1, Ordering::Relaxed); }
+    /// PR #12 REV-2 (Gemini medium) — bulk add instead of looping `fetch_add(1)`
+    /// per hit. One atomic op per call, regardless of how many hits the recall
+    /// lane surfaced.
+    fn mark_recall_hits(&self, n: u64) {
+        if n > 0 {
+            self.errors_recalled_total.fetch_add(n, Ordering::Relaxed);
+        }
+    }
+    fn mark_mcp_call(&self)     { self.mcp_calls_total.fetch_add(1, Ordering::Relaxed); }
+    fn mark_indexed(&self, n: u64) { self.points_indexed_total.fetch_add(n, Ordering::Relaxed); }
+    /// PR #12 REV-1 (Gemini HIGH) — actually instrument the family that
+    /// /metrics exposes. Call this around any embedder-bearing handler so the
+    /// summary buckets accumulate real samples (not the zero-forever values
+    /// gemini-code-assist flagged on the first review pass).
+    fn record_embedder_call(&self, elapsed: std::time::Duration) {
+        let ms = elapsed.as_millis().min(u64::MAX as u128) as u64;
+        self.embedder_call_ms_sum.fetch_add(ms, Ordering::Relaxed);
+        self.embedder_call_count.fetch_add(1, Ordering::Relaxed);
+    }
+    fn started_at(&self) -> Instant {
+        *self.process_start.get_or_init(Instant::now)
+    }
+}
+
 #[derive(Clone)]
 struct WebState {
     qdrant: Arc<qdrant_client::Qdrant>,
     embedder: Arc<indexer::Embedder>,
     mcp: mcp::SharedMcpState,
     ui_dir: PathBuf,
+    metrics: Arc<WebMetrics>,
 }
 
 /// Filesystem root the browser UI scans for sessions (list_sessions, replay,
@@ -100,15 +159,28 @@ pub async fn serve(port: u16, ui_dir: PathBuf) -> Result<()> {
         }
     }
 
+    let metrics = Arc::new(WebMetrics::default());
+    // Stamp the process_start lazy-init now so /metrics uptime starts here,
+    // not on the first request.
+    let _ = metrics.started_at();
+
     let state = WebState {
         qdrant,
         embedder,
         mcp: mcp::new_shared_state(),
         ui_dir: ui_dir.clone(),
+        metrics,
     };
 
     let api = Router::new()
         .route("/api/health", get(health))
+        // T3.2 — Prometheus exposition for the Docker server variant.
+        .route("/metrics", get(metrics_handler))
+        // PR #12 REV-14 (self-review) — closes the snapshot_bytes orphan
+        // metric. Posts to indexer::snapshot_export, reads the resulting
+        // file size, updates WebMetrics::snapshot_bytes, returns
+        // { name, bytes } so the operator can verify the export landed.
+        .route("/api/snapshot/export", post(snapshot_export_handler))
         .route("/api/search", get(search))
         .route("/api/lens", post(lens))
         .route("/api/recall", get(recall))
@@ -165,6 +237,96 @@ async fn health(State(s): State<WebState>) -> Json<Value> {
     }))
 }
 
+// ---- /metrics (Prometheus exposition format 0.0.4) -----------------------
+//
+// T3.2 (qdrant-improvement-goal.md) — eight metric families let Prometheus
+// scrape the all-in-one container alongside `/api/health`. Output uses the
+// canonical `text/plain; version=0.0.4; charset=utf-8` content type so
+// `prometheus-client_python` and the official Go `prometheus_client` both
+// parse it without a custom format handler.
+//
+// All values come from the atomic counters in `WebMetrics`. The embedder
+// call family is a Summary-style pair (sum_seconds + count) populated by
+// each search/lens/recall handler via record_embedder_call(); the
+// process_uptime family is computed from `Instant::now() - started_at`.
+//
+// PR #12 REV-1 (Gemini HIGH) — the previous "lock_waits" family advertised
+// a measurement that wasn't actually taken. The family is now renamed
+// `embedder_call_seconds` (sum + count) and is properly instrumented in
+// each embedder-bearing handler — the summary buckets accumulate real
+// samples.
+
+async fn metrics_handler(State(s): State<WebState>) -> Response {
+    let m = &*s.metrics;
+    let started = m.started_at();
+    let uptime_secs = started.elapsed().as_secs_f64();
+
+    let queries          = m.queries_total.load(Ordering::Relaxed);
+    let recall_polls     = m.recall_polls_total.load(Ordering::Relaxed);
+    let call_ms_sum      = m.embedder_call_ms_sum.load(Ordering::Relaxed);
+    let call_count       = m.embedder_call_count.load(Ordering::Relaxed);
+    let snapshot_bytes   = m.snapshot_bytes.load(Ordering::Relaxed);
+    let points_indexed   = m.points_indexed_total.load(Ordering::Relaxed);
+    let errors_recalled  = m.errors_recalled_total.load(Ordering::Relaxed);
+    let mcp_calls        = m.mcp_calls_total.load(Ordering::Relaxed);
+
+    // Prometheus 0.0.4 text exposition. One HELP + TYPE comment per family,
+    // single metric line per family for counters. Six families minimum per
+    // SOT §3 acceptance ("Prometheus exposition with >=6 metric families");
+    // we ship eight to cover the SLO axes the operator most likely wants.
+    let body = format!(
+"# HELP memex_queries_total Total search + lens queries served by the web variant.
+# TYPE memex_queries_total counter
+memex_queries_total {queries}
+
+# HELP memex_recall_polls_total Total proactive-recall poll cycles.
+# TYPE memex_recall_polls_total counter
+memex_recall_polls_total {recall_polls}
+
+# HELP memex_errors_recalled_total Total recall hits surfaced to the UI / agent.
+# TYPE memex_errors_recalled_total counter
+memex_errors_recalled_total {errors_recalled}
+
+# HELP memex_points_indexed_total Total session points indexed via /api/index or MCP.
+# TYPE memex_points_indexed_total counter
+memex_points_indexed_total {points_indexed}
+
+# HELP memex_snapshot_bytes Size in bytes of the most recent successful Qdrant snapshot export (0 if none).
+# TYPE memex_snapshot_bytes gauge
+memex_snapshot_bytes {snapshot_bytes}
+
+# HELP memex_embedder_call_seconds Wall-clock duration of each embedder-bearing search/lens/recall call (summary).
+# TYPE memex_embedder_call_seconds summary
+memex_embedder_call_seconds_sum {call_seconds_sum}
+memex_embedder_call_seconds_count {call_count}
+
+# HELP memex_mcp_calls_total Total MCP JSON-RPC calls received on /mcp.
+# TYPE memex_mcp_calls_total counter
+memex_mcp_calls_total {mcp_calls}
+
+# HELP memex_process_uptime_seconds Seconds since this memex-web process started.
+# TYPE memex_process_uptime_seconds gauge
+memex_process_uptime_seconds {uptime_secs}
+",
+        queries           = queries,
+        recall_polls      = recall_polls,
+        errors_recalled   = errors_recalled,
+        points_indexed    = points_indexed,
+        snapshot_bytes    = snapshot_bytes,
+        call_seconds_sum  = (call_ms_sum as f64) / 1000.0,
+        call_count        = call_count,
+        mcp_calls         = mcp_calls,
+        uptime_secs       = uptime_secs,
+    );
+
+    let mut response = body.into_response();
+    response.headers_mut().insert(
+        header::CONTENT_TYPE,
+        "text/plain; version=0.0.4; charset=utf-8".parse().unwrap(),
+    );
+    response
+}
+
 #[derive(Deserialize)]
 struct SearchQ {
     q: String,
@@ -176,10 +338,13 @@ fn default_limit() -> u64 {
 }
 
 async fn search(State(s): State<WebState>, Query(q): Query<SearchQ>) -> ApiResult {
+    s.metrics.mark_query();
     let limit = clamp_limit(q.limit);
+    let t = Instant::now();
     let hits = indexer::search_content(s.qdrant.as_ref(), s.embedder.as_ref(), &q.q, limit)
         .await
         .map_err(err500)?;
+    s.metrics.record_embedder_call(t.elapsed());
     Ok(Json(json!({ "query": q.q, "hits": hits })))
 }
 
@@ -192,14 +357,16 @@ struct LensReq {
 }
 
 async fn lens(State(s): State<WebState>, Json(body): Json<LensReq>) -> ApiResult {
+    s.metrics.mark_query();
     let weights = body.weights.unwrap_or(indexer::LensWeights {
         content: 1.0,
         tool: 1.0,
         path: 1.0,
         error: 1.0,
         code: 1.0,
-        content_late: 0.0,
+        content_late: 0.25, // matches T3.3 — LensWeights::default() in lens.rs
     });
+    let t = Instant::now();
     let hits = indexer::lens_search(
         s.qdrant.as_ref(),
         s.embedder.as_ref(),
@@ -210,13 +377,22 @@ async fn lens(State(s): State<WebState>, Json(body): Json<LensReq>) -> ApiResult
     )
     .await
     .map_err(err500)?;
+    s.metrics.record_embedder_call(t.elapsed());
     Ok(Json(json!({ "query": body.query, "hits": hits })))
 }
 
 async fn recall(State(s): State<WebState>, Query(q): Query<SearchQ>) -> ApiResult {
+    s.metrics.mark_recall_poll();
+    let t = Instant::now();
     let hits = indexer::recall(s.qdrant.as_ref(), s.embedder.as_ref(), &q.q, clamp_limit(q.limit))
         .await
         .map_err(err500)?;
+    s.metrics.record_embedder_call(t.elapsed());
+    // PR #12 REV-2 (Gemini medium) — one atomic add for the whole batch.
+    // The previous `for _ in 0..hits.len() { mark_recall_hit() }` issued N
+    // independent `fetch_add(1)` ops, each fighting cache coherence on the
+    // counter; mark_recall_hits(n) does a single `fetch_add(n, Relaxed)`.
+    s.metrics.mark_recall_hits(hits.len() as u64);
     Ok(Json(json!({ "error_text": q.q, "hits": hits })))
 }
 
@@ -294,6 +470,7 @@ async fn index_path(State(s): State<WebState>, Json(body): Json<IndexReq>) -> Ap
     let report = indexer::bulk_index_arc(s.qdrant.as_ref(), s.embedder.clone(), &sessions)
         .await
         .map_err(err500)?;
+    s.metrics.mark_indexed(report.indexed as u64);
     Ok(Json(json!({
         "path": body.path,
         "total": total,
@@ -303,11 +480,67 @@ async fn index_path(State(s): State<WebState>, Json(body): Json<IndexReq>) -> Ap
     })))
 }
 
+// ---- Snapshot export (PR #12 REV-14 self-review) -------------------------
+//
+// Closes the `memex_snapshot_bytes` orphan metric. Before this route existed,
+// the Prometheus gauge was always 0 because nothing in the web variant ever
+// triggered a snapshot. Now an operator can POST to /api/snapshot/export,
+// the indexer's snapshot endpoint is exercised, and the resulting file's
+// size on disk lands in the gauge so Prometheus can alert on absent backups.
+//
+// The snapshot lives under MEMEX_SNAPSHOT_DIR (or the user's HOME by default)
+// — the existing indexer::snapshot_export resolves the path; we just measure
+// what it produced.
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct SnapshotReq {
+    /// Optional destination directory. Defaults to $MEMEX_SNAPSHOT_DIR or
+    /// $HOME — the indexer applies the same resolution as the desktop CLI.
+    dir: Option<String>,
+}
+
+async fn snapshot_export_handler(
+    State(s): State<WebState>,
+    Json(body): Json<SnapshotReq>,
+) -> ApiResult {
+    use std::path::PathBuf;
+    // indexer::snapshot_export expects a FILE path, not a directory — it
+    // writes the snapshot bytes directly to `dest`. Mirror what
+    // commands::snapshot_export_default does on the desktop side: resolve a
+    // directory (caller-supplied or env MEMEX_SNAPSHOT_DIR or HOME), append
+    // a timestamped filename, then hand that file path to the indexer.
+    let dir: PathBuf = match body.dir {
+        Some(d) => PathBuf::from(d),
+        None => std::env::var("MEMEX_SNAPSHOT_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| {
+                std::env::var("HOME")
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|_| PathBuf::from("/tmp"))
+            }),
+    };
+    let ts = chrono::Utc::now().format("%Y-%m-%dT%H-%M-%S").to_string();
+    let dest = dir.join(format!("memex-snapshot-{ts}.snapshot"));
+    let name = indexer::snapshot_export(&dest).await.map_err(err500)?;
+    // Measure the resulting file size and update the Prometheus gauge.
+    let bytes = tokio::fs::metadata(&dest).await.map(|m| m.len()).unwrap_or(0);
+    s.metrics
+        .snapshot_bytes
+        .store(bytes, Ordering::Relaxed);
+    Ok(Json(json!({
+        "name": name,
+        "path": dest.to_string_lossy(),
+        "bytes": bytes,
+    })))
+}
+
 // ---- MCP over HTTP -------------------------------------------------------
 
 /// POST /mcp — JSON-RPC 2.0 request in, response out. Same tools as stdio MCP.
 /// Register from Claude CLI:  `claude mcp add --transport http memex-web http://localhost:<port>/mcp`
 async fn mcp_post(State(s): State<WebState>, Json(body): Json<Value>) -> impl axum::response::IntoResponse {
+    s.metrics.mark_mcp_call();
     match mcp::handle_rpc_value(&s.mcp, body).await {
         Some(resp) => (StatusCode::OK, Json(resp)).into_response(),
         // Notification (no id) — JSON-RPC says no response body.
