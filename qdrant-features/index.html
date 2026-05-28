@@ -1,0 +1,422 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Memex × Qdrant — Feature Status After PR #19</title>
+<style>
+  :root {
+    --bg: #0a0d12;
+    --bg-2: #0f1419;
+    --bg-3: #161b22;
+    --fg: #e6edf3;
+    --fg-mute: #8d96a0;
+    --fg-dim: #6e7681;
+    --line: #21262d;
+    --line-2: #30363d;
+    --accent: #79c0ff;
+    --accent-2: #d2a8ff;
+    --green: #56d364;
+    --yellow: #f0b859;
+    --red: #f47067;
+    --gray: #6e7681;
+    --gradient: linear-gradient(135deg, #79c0ff 0%, #d2a8ff 100%);
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box }
+  html, body { margin: 0; padding: 0 }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.55;
+    color: var(--fg);
+    background: var(--bg);
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1240px; margin: 0 auto; padding: 56px 32px 80px }
+  header.page {
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 28px;
+    margin-bottom: 36px;
+  }
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--fg-dim);
+    margin: 0 0 8px;
+  }
+  h1 {
+    font-size: 30px;
+    line-height: 1.2;
+    margin: 0 0 10px;
+    background: var(--gradient);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .lede { font-size: 15px; color: var(--fg-mute); margin: 0; max-width: 80ch }
+  .meta {
+    margin-top: 18px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 22px;
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--fg-dim);
+  }
+  .meta b { color: var(--fg); font-weight: 600 }
+  h2 {
+    font-size: 19px;
+    margin: 44px 0 14px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--line);
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+  }
+  h2 .cat-num {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--fg-dim);
+    font-weight: normal;
+  }
+  h2 .cat-count {
+    margin-left: auto;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--fg-mute);
+    font-weight: normal;
+  }
+  p { font-size: 13.5px; color: var(--fg-mute); margin: 12px 0 }
+  code {
+    font-family: var(--mono);
+    font-size: 0.88em;
+    background: var(--bg-3);
+    padding: 1px 6px;
+    border-radius: 4px;
+    border: 1px solid var(--line);
+    color: var(--fg);
+  }
+  a { color: var(--accent); text-decoration: none; border-bottom: 1px dotted currentColor }
+  a:hover { border-bottom-style: solid }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12.5px;
+    margin: 12px 0;
+  }
+  th, td {
+    border: 1px solid var(--line);
+    padding: 8px 11px;
+    text-align: left;
+    vertical-align: top;
+  }
+  th {
+    background: var(--bg-3);
+    font-weight: 600;
+    color: var(--fg);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+  }
+  td:nth-child(1) { width: 36%; }
+  td:nth-child(2) { width: 10%; white-space: nowrap; text-align: center; font-family: var(--mono); font-size: 11.5px; }
+  td:nth-child(3) { color: var(--fg-mute); }
+  .s-on   { color: var(--green); }
+  .s-opt  { color: var(--yellow); }
+  .s-def  { color: var(--gray); }
+  .s-blk  { color: var(--red); }
+  .new {
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: 9.5px;
+    padding: 1px 6px;
+    border-radius: 99px;
+    background: rgba(121, 192, 255, 0.12);
+    border: 1px solid rgba(121, 192, 255, 0.4);
+    color: var(--accent);
+    margin-left: 6px;
+    vertical-align: middle;
+    letter-spacing: 0.3px;
+  }
+  .summary-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 14px;
+    margin: 18px 0 8px;
+  }
+  @media (max-width: 800px) { .summary-grid { grid-template-columns: 1fr 1fr } }
+  .summary-card {
+    background: var(--bg-2);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 16px;
+    text-align: center;
+  }
+  .summary-card.s-on  { border-color: rgba(86, 211, 100, 0.4); }
+  .summary-card.s-opt { border-color: rgba(240, 184, 89, 0.4); }
+  .summary-card.s-def { border-color: rgba(110, 118, 129, 0.4); }
+  .summary-card.s-blk { border-color: rgba(244, 112, 103, 0.4); }
+  .summary-card .v {
+    font-family: var(--mono);
+    font-size: 32px;
+    font-weight: 700;
+    line-height: 1;
+    margin-bottom: 4px;
+  }
+  .summary-card .l { font-size: 11px; color: var(--fg-mute); text-transform: uppercase; letter-spacing: 0.5px; }
+  .summary-card .d { font-size: 11px; color: var(--fg-dim); margin-top: 6px; }
+  .legend {
+    margin: 20px 0 10px;
+    padding: 14px 16px;
+    background: var(--bg-2);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    font-size: 13px;
+  }
+  .legend .row { display: flex; flex-wrap: wrap; gap: 14px 28px; margin-top: 6px; }
+  .legend code { font-size: 11.5px; }
+  .delta-note {
+    margin-top: 22px;
+    padding: 14px 16px;
+    background: linear-gradient(180deg, rgba(121, 192, 255, 0.08), rgba(121, 192, 255, 0.02));
+    border: 1px solid rgba(121, 192, 255, 0.3);
+    border-radius: 8px;
+    font-size: 13px;
+  }
+  .delta-note h3 { margin: 0 0 6px; font-size: 14px; color: var(--accent); }
+  footer.page {
+    border-top: 1px solid var(--line);
+    padding-top: 22px;
+    margin-top: 50px;
+    color: var(--fg-dim);
+    font-size: 11.5px;
+    font-family: var(--mono);
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="page">
+  <p class="eyebrow">claudedocs · Memex × Qdrant 1.18 · feature status</p>
+  <h1>Qdrant Feature Status — Memex Post-PR#19 Reference</h1>
+  <p class="lede">
+    Comprehensive classification of every Qdrant 1.18 feature against the Memex codebase
+    as it will look after PRs <a href="https://github.com/Two-Weeks-Team/memex/pull/17">#17</a>,
+    <a href="https://github.com/Two-Weeks-Team/memex/pull/18">#18</a>, and
+    <a href="https://github.com/Two-Weeks-Team/memex/pull/19">#19</a> land on
+    <code>main</code>. Replaces the rough §A/§B/§C cut in
+    <code>docs/wired-but-dormant.md</code> with a flat 51-row matrix.
+  </p>
+  <div class="meta">
+    <span><b>Generated</b>: 2026-05-28</span>
+    <span><b>Qdrant SDK</b>: <code>qdrant-client = "1"</code> (1.18.x)</span>
+    <span><b>Open PRs at write time</b>: <a href="https://github.com/Two-Weeks-Team/memex/pull/17">#17</a> · <a href="https://github.com/Two-Weeks-Team/memex/pull/18">#18</a> · <a href="https://github.com/Two-Weeks-Team/memex/pull/19">#19</a></span>
+    <span><b>Branch</b>: <code>feat/qdrant-followup-landing</code></span>
+  </div>
+</header>
+
+<div class="legend">
+  <b>Status legend</b>
+  <div class="row">
+    <span><span class="s-on">✅ default-on</span> &nbsp; — active on every query / upsert; no caller action needed</span>
+    <span><span class="s-opt">🟡 opt-in</span> &nbsp; — wired in the code; activated by API caller or env var</span>
+    <span><span class="s-def">⏸️ deferred</span> &nbsp; — intentionally not adopted (hackathon scale, no use case, redundant)</span>
+    <span><span class="s-blk">🔒 blocked</span> &nbsp; — Qdrant 1.18 does not expose; client-side workaround if any</span>
+  </div>
+</div>
+
+<div class="summary-grid">
+  <div class="summary-card s-on">
+    <div class="v s-on">33</div>
+    <div class="l">default-on</div>
+    <div class="d">Active on every query</div>
+  </div>
+  <div class="summary-card s-opt">
+    <div class="v s-opt">4</div>
+    <div class="l">opt-in</div>
+    <div class="d">Activated by JSON / env var</div>
+  </div>
+  <div class="summary-card s-def">
+    <div class="v s-def">13</div>
+    <div class="l">deferred</div>
+    <div class="d">Out of scope by choice</div>
+  </div>
+  <div class="summary-card s-blk">
+    <div class="v s-blk">1</div>
+    <div class="l">blocked</div>
+    <div class="d">SDK 1.18 limit</div>
+  </div>
+</div>
+
+<div class="delta-note">
+  <h3>What changed since PR #12 (pre-follow-up baseline)</h3>
+  <ul style="margin: 4px 0 0 18px; padding: 0">
+    <li><b>PR #17 (#14)</b>: <code>ai_title_tokens</code> multi-value Text index added (identifier-aware search). <span class="new">NEW</span></li>
+    <li><b>PR #17 (#15)</b>: <code>FusionMode::Rrf</code> and <code>Mmr</code> diversity promoted from §B "wired:off" to §A "wired:on" via <code>indexer::LensWeights</code> collapse. <code>indexer::LensWeights</code> is now a <code>pub use</code> of <code>lens::LensWeights</code>, so the two struct's field-set drift bug class is structurally eliminated.</li>
+    <li><b>PR #17 (#16 Stage 1)</b>: MCP <code>points_indexed_total</code> TODO marker + Prometheus best-practice citation added to <code>mcp.rs</code>.</li>
+    <li><b>PR #18 (#13)</b>: <code>MEMEX_QUANT_MODE</code> runtime env var added to <code>schema::QuantMode</code> + Criterion bench scaffold in <code>benches/quant_sweep.rs</code>. <span class="new">NEW</span></li>
+    <li><b>PR #19</b>: Landing surface updated to reflect the three changes above (Q7 status paragraph, TurboQuant bullet sweep recipe, <code>ai_title_tokens</code> example, footer Docs links). No code/schema change.</li>
+  </ul>
+</div>
+
+<!-- ════════════════════ 1. Vector primitives ════════════════════ -->
+<h2><span class="cat-num">01</span>Vector primitives <span class="cat-count">3 rows · 3 default-on</span></h2>
+<table>
+  <thead><tr><th>Feature</th><th>Status</th><th>Reason / Code path</th></tr></thead>
+  <tbody>
+    <tr><td>5 dense named vectors (<code>content</code>, <code>tool</code>, <code>path</code>, <code>error</code>, <code>code</code>) at 384-d cosine BGE-small</td><td class="s-on">✅ default-on</td><td><code>schema::DENSE_VECTORS</code> · <code>lens.rs::active_dense_specs</code>. Per-vector HNSW tuning (see §3).</td></tr>
+    <tr><td>2 sparse vectors (<code>path_sparse</code>, <code>tool_sparse</code>) with <code>Modifier::Idf</code></td><td class="s-on">✅ default-on</td><td><code>schema::SPARSE_VECTORS</code>. Server-side IDF — no client-side TF-IDF state. Ride on <code>w.path&gt;0</code> / <code>w.tool&gt;0</code> gates.</td></tr>
+    <tr><td>1 multivector (<code>content_late</code>, ColBERT MaxSim rerank)</td><td class="s-on">✅ default-on</td><td>PR #12 T3.3 flipped <code>LensWeights::default().content_late</code> from 0.0 → 0.25. HNSW config <code>m=0, ef_construct=0</code> — rerank-only, no graph cost. <code>schema::MULTIVECTOR_NAME</code>.</td></tr>
+  </tbody>
+</table>
+
+<!-- ════════════════════ 2. Quantization ════════════════════ -->
+<h2><span class="cat-num">02</span>Quantization <span class="cat-count">6 rows · 2 on · 2 opt-in · 2 deferred</span></h2>
+<table>
+  <thead><tr><th>Feature</th><th>Status</th><th>Reason / Code path</th></tr></thead>
+  <tbody>
+    <tr><td>TurboQuant bits-2 + <code>always_ram: true</code></td><td class="s-on">✅ default-on</td><td>Production default. 8× compression, recall stays at 98-99% with rescore + 2× oversampling. <code>schema::QuantMode::TqBits2.to_inner_quantization()</code>.</td></tr>
+    <tr><td>TurboQuant bits-1 <span class="new">NEW</span></td><td class="s-opt">🟡 opt-in</td><td><b>PR #18 #13</b>: <code>MEMEX_QUANT_MODE=tq-bits1 cargo bench --bench quant_sweep</code>. Higher compression, lower recall — useful for sweep comparisons.</td></tr>
+    <tr><td>f32 baseline (no quantization) <span class="new">NEW</span></td><td class="s-opt">🟡 opt-in</td><td><b>PR #18 #13</b>: <code>MEMEX_QUANT_MODE=f32</code>. Reference row for recall comparisons. Selected by omitting the builder's quantization_config call.</td></tr>
+    <tr><td>Scalar (int8) quantization</td><td class="s-def">⏸️ deferred</td><td>Out of #13 first round. Would need a separate <code>QuantMode::Scalar</code> variant + builder plumbing. ~30 LOC follow-up if a sweep needs more granularity.</td></tr>
+    <tr><td>Binary quantization</td><td class="s-def">⏸️ deferred</td><td>Same rationale as Scalar. The f32 / tq-bits1 / tq-bits2 triple already spans the interesting recall vs. disk-size space.</td></tr>
+    <tr><td>Search-time <code>rescore: true</code> + <code>oversampling: 2.0</code></td><td class="s-on">✅ default-on</td><td>Applied to every read-side query. <code>schema::quantization_search_params()</code>.</td></tr>
+  </tbody>
+</table>
+
+<!-- ════════════════════ 3. HNSW ════════════════════ -->
+<h2><span class="cat-num">03</span>HNSW indexing <span class="cat-count">3 rows · 3 default-on</span></h2>
+<table>
+  <thead><tr><th>Feature</th><th>Status</th><th>Reason / Code path</th></tr></thead>
+  <tbody>
+    <tr><td>Per-vector HNSW tuning</td><td class="s-on">✅ default-on</td><td><code>content m=24/ef=200</code> · <code>code m=20/150</code> · <code>error m=16/100</code> · <code>tool &amp; path m=12/64</code> · <code>content_late m=0/0</code>. Each lens earns its graph density.</td></tr>
+    <tr><td>Global <code>hnsw_config</code> (fallback for unconfigured vectors)</td><td class="s-on">✅ default-on</td><td><code>schema::HNSW_M</code> / <code>HNSW_EF_CONSTRUCT</code> on the collection. Picked up by any future vector that doesn't carry its own override.</td></tr>
+    <tr><td>ACORN filterable HNSW (<code>hnsw_ef</code> + <code>exact=false</code>)</td><td class="s-on">✅ default-on</td><td><code>retrieval::search_params_filtered_acorn()</code>. <code>is_tenant=true</code> on <code>project_name</code> provides the structural half (KB-04).</td></tr>
+  </tbody>
+</table>
+
+<!-- ════════════════════ 4. Payload indexes ════════════════════ -->
+<h2><span class="cat-num">04</span>Payload indexes <span class="cat-count">8 rows · 7 default-on · 1 deferred</span></h2>
+<table>
+  <thead><tr><th>Feature</th><th>Status</th><th>Reason / Code path</th></tr></thead>
+  <tbody>
+    <tr><td><code>Keyword</code> on <code>project_name</code> (with <code>is_tenant: true</code>)</td><td class="s-on">✅ default-on</td><td>Qdrant 1.18 partitions the field as a tenant key — narrows the HNSW walk before vector compare.</td></tr>
+    <tr><td><code>Keyword</code> on <code>project_path</code>, <code>git_branch</code>, <code>intent</code>, <code>outcome</code>, <code>source_agent</code></td><td class="s-on">✅ default-on</td><td>Enrich-stage payload (P5 <code>enrich.rs</code>). <code>source_agent</code> = KH-01 multi-agent fork.</td></tr>
+    <tr><td><code>Text</code> on <code>ai_title</code></td><td class="s-on">✅ default-on</td><td>Display string + lexical search on titles. <code>Word</code> tokenizer.</td></tr>
+    <tr><td><code>Text</code> on <code>ai_title_tokens</code> (multi-value <code>Vec&lt;String&gt;</code>) <span class="new">NEW</span></td><td class="s-on">✅ default-on</td><td><b>PR #17 #14</b>: identifier-aware sibling. <code>schema::identifier_tokens()</code> expands <code>getUserData</code> → <code>[getUserData, get, User, Data]</code> at upsert. Same operation as Elasticsearch <code>word_delimiter_graph</code> filter, done client-side.</td></tr>
+    <tr><td><code>Datetime</code> on <code>start_ts_dt</code></td><td class="s-on">✅ default-on</td><td><code>DatetimeIndexParamsBuilder</code>. Recency queries are first-class.</td></tr>
+    <tr><td><code>Bool</code> on <code>has_errors</code></td><td class="s-on">✅ default-on</td><td>Proactive recall pre-filter.</td></tr>
+    <tr><td><code>Integer</code> on <code>schema_version</code></td><td class="s-on">✅ default-on</td><td>Migration identifier — distinguishes v2-lifted vs v3-native points.</td></tr>
+    <tr><td><code>Geo</code> filter</td><td class="s-def">⏸️ deferred</td><td>We don't index "where I was when I wrote this". If we ever do, one payload-index line.</td></tr>
+  </tbody>
+</table>
+
+<!-- ════════════════════ 5. Query primitives ════════════════════ -->
+<h2><span class="cat-num">05</span>Query primitives <span class="cat-count">11 rows · 9 on · 2 opt-in · 1 deferred</span></h2>
+<table>
+  <thead><tr><th>Feature</th><th>Status</th><th>Reason / Code path</th></tr></thead>
+  <tbody>
+    <tr><td><code>Query::new_nearest</code> (basic NN search)</td><td class="s-on">✅ default-on</td><td>Every lens prefetch. <code>lens.rs::build_prefetches</code>.</td></tr>
+    <tr><td><code>Query::new_formula</code> (<code>FusionMode::Formula</code> + <code>exp_decay</code>)</td><td class="s-on">✅ default-on</td><td>Default top-level fusion across the prefetch chain. KA-01.</td></tr>
+    <tr><td><code>Query::new_rrf</code> (<code>FusionMode::Rrf</code> alternative fusion)</td><td class="s-opt">🟡 opt-in</td><td><b>PR #17 #15</b>: callers pass JSON <code>"fusion": "Rrf"</code> in <code>LensWeights</code>. Frontend (<code>src/main.js</code>) was already sending the field; backend now deserialises it.</td></tr>
+    <tr><td><code>Query::new_nearest_with_mmr</code> (MMR diversity on content prefetch)</td><td class="s-opt">🟡 opt-in</td><td><b>PR #17 #15</b>: callers pass JSON <code>"diversity": 0.4</code>. <code>lens.rs::build_prefetches</code> wraps content lane with NearestWithMmr.</td></tr>
+    <tr><td><code>Query::RelevanceFeedback</code> (👍/👎 bias)</td><td class="s-on">✅ default-on</td><td><code>commands::relevance_feedback</code> · <code>web.rs "relevance_feedback"</code> · <code>src/main.js::applyRelevanceFeedback</code>. User-driven, in-session.</td></tr>
+    <tr><td><code>DiscoverInput</code> + <code>ContextInput</code> (Mix &amp; Match)</td><td class="s-on">✅ default-on</td><td><code>indexer::mix_match</code> · <code>retrieval::mix_match_with_pairs</code>. Multi-pair discrimination, server-side. KB-03.</td></tr>
+    <tr><td><code>SearchMatrixPairs</code> for topology K-NN graph</td><td class="s-on">✅ default-on</td><td><code>indexer::topology</code> — one round-trip K-NN → <code>petgraph::min_spanning_tree</code>.</td></tr>
+    <tr><td><code>HasIdCondition</code> re-rank</td><td class="s-on">✅ default-on</td><td><code>retrieval.rs</code>. Cheap personalisation: known-set re-rank without a full search.</td></tr>
+    <tr><td>Server-side <code>group_by</code> (<code>query_groups</code>)</td><td class="s-on">✅ default-on</td><td><code>retrieval::lens_search_grouped</code>. KA-03. One query returns top-K per project.</td></tr>
+    <tr><td><code>OrderBy { start_ts_dt, DESC }</code></td><td class="s-on">✅ default-on</td><td>Recents panel — server-sorted. <code>retrieval::list_sessions_ordered</code>. KB-05.</td></tr>
+    <tr><td><code>Query::Recommend</code> (<code>AverageVector</code>, <code>BestScore</code>)</td><td class="s-def">⏸️ deferred</td><td>DiscoverInput already covers "more like this batch" with the target-required constraint. Recommend is a redundant entry point for our UX. Revisit if DiscoverInput's target requirement becomes painful.</td></tr>
+  </tbody>
+</table>
+
+<!-- ════════════════════ 6. Schema / Collection management ════════════════════ -->
+<h2><span class="cat-num">06</span>Schema / Collection management <span class="cat-count">9 rows · 6 on · 3 deferred</span></h2>
+<table>
+  <thead><tr><th>Feature</th><th>Status</th><th>Reason / Code path</th></tr></thead>
+  <tbody>
+    <tr><td>Named-vectors + sparse-vectors + multivector config in one collection</td><td class="s-on">✅ default-on</td><td><code>build_v3_create_collection()</code>. 5 dense + 2 sparse + 1 multivector slot. Single round-trip create.</td></tr>
+    <tr><td>Multivector config with <code>MultiVectorComparator::MaxSim</code></td><td class="s-on">✅ default-on</td><td><code>content_late</code> slot uses <code>MultiVectorConfigBuilder::new(MaxSim)</code> with HNSW <code>m=0</code> (rerank only).</td></tr>
+    <tr><td>Strict mode (<code>max_resident_memory_percent: 85</code> + <code>max_query_limit: 100</code>)</td><td class="s-on">✅ default-on</td><td><code>schema::StrictModeConfig</code>. Embedded Qdrant can't OOM the laptop, even on a runaway prefetch.</td></tr>
+    <tr><td>WAL config</td><td class="s-on">✅ default-on</td><td>Small <code>wal_capacity_mb</code> — fine for single-machine indexer.</td></tr>
+    <tr><td><code>is_tenant: true</code> on <code>project_name</code></td><td class="s-on">✅ default-on</td><td>See §4. Provides the structural half of ACORN filterable HNSW.</td></tr>
+    <tr><td><code>MEMEX_QUANT_MODE</code> runtime env var <span class="new">NEW</span></td><td class="s-on">✅ default-on</td><td><b>PR #18 #13</b>: <code>schema::QuantMode::from_env()</code> reads the env at collection-create time. Default <code>tq-bits2</code> matches the pre-#13 production setting — no behaviour change for existing deployments.</td></tr>
+    <tr><td>Collection aliases (blue-green migration)</td><td class="s-def">⏸️ deferred</td><td>Hackathon scale: a single collection drop+rebuild is acceptable. At 100k+ session corpora when v3→v4 ships, aliases would let us flip without dual-write.</td></tr>
+    <tr><td>Multi-collection (one per macro-topic)</td><td class="s-def">⏸️ deferred</td><td>One <code>memex_sessions_v3</code> collection has been enough. Cross-collection search lands in Qdrant 1.19. Revisit then.</td></tr>
+    <tr><td><code>UpdateVectors</code> (swap a vector in place)</td><td class="s-def">⏸️ deferred</td><td>Right now <code>index_session</code> rebuilds the point. If we add a 1024-d model alongside BGE-small-384, this becomes the rolling-upgrade path.</td></tr>
+  </tbody>
+</table>
+
+<!-- ════════════════════ 7. Persistence ════════════════════ -->
+<h2><span class="cat-num">07</span>Persistence <span class="cat-count">2 rows · 2 default-on</span></h2>
+<table>
+  <thead><tr><th>Feature</th><th>Status</th><th>Reason / Code path</th></tr></thead>
+  <tbody>
+    <tr><td>Snapshot HTTP endpoints (POST/GET/upload)</td><td class="s-on">✅ default-on</td><td><code>indexer::snapshot_*</code> via <code>reqwest</code>. PR #12 REV-14 added <code>POST /api/snapshot/export</code> on the web variant + <code>memex_snapshot_bytes</code> gauge.</td></tr>
+    <tr><td><code>SetPayload</code> (payload-only updates)</td><td class="s-on">✅ default-on</td><td><code>indexer::enrich</code> — updates intent/outcome/source_agent without re-embedding.</td></tr>
+  </tbody>
+</table>
+
+<!-- ════════════════════ 8. Tokenization ════════════════════ -->
+<h2><span class="cat-num">08</span>Tokenization (Text-index built-ins) <span class="cat-count">5 rows · 1 on · 3 deferred · 1 blocked</span></h2>
+<table>
+  <thead><tr><th>Feature</th><th>Status</th><th>Reason / Code path</th></tr></thead>
+  <tbody>
+    <tr><td><code>TokenizerType::Word</code> (default)</td><td class="s-on">✅ default-on</td><td>Used on both <code>ai_title</code> and <code>ai_title_tokens</code>. After client-side identifier expansion, the Word tokenizer correctly indexes each element.</td></tr>
+    <tr><td><code>TokenizerType::Whitespace</code></td><td class="s-def">⏸️ deferred</td><td>No use case in our corpus — Word handles punctuation better for natural-language titles.</td></tr>
+    <tr><td><code>TokenizerType::Prefix</code></td><td class="s-def">⏸️ deferred</td><td>Prefix-search use case (typeahead etc.) is not in the current UX. Revisit if a search-as-you-type surface lands.</td></tr>
+    <tr><td><code>TokenizerType::Multilingual</code> (charabia + vaporetto)</td><td class="s-def">⏸️ deferred</td><td>Our corpus is English session titles + identifiers. Multilingual carries overhead for the non-Latin tokenizers we don't need. BGE embedding handles language semantics on the vector side anyway.</td></tr>
+    <tr><td><b>Custom tokenizer</b> (regex / camelCase / snake_case)</td><td class="s-blk">🔒 blocked</td><td>Qdrant 1.18 SDK exposes only the 4 builtins above — no custom-tokenizer registration API (verified against <a href="https://qdrant.tech/documentation/manage-data/indexing/#tokenizers">official docs</a>). <b>PR #17 #14</b> works around this client-side via <code>schema::identifier_tokens()</code> + multi-value payload (see §4). No upstream feature request filed — client-side gives identical retrieval at zero external dependency.</td></tr>
+  </tbody>
+</table>
+
+<!-- ════════════════════ 9. Metrics / MCP ════════════════════ -->
+<h2><span class="cat-num">09</span>Metrics / MCP <span class="cat-count">3 rows · 2 on · 1 deferred</span></h2>
+<table>
+  <thead><tr><th>Feature</th><th>Status</th><th>Reason / Code path</th></tr></thead>
+  <tbody>
+    <tr><td><code>/metrics</code> Prometheus endpoint (8 metric families)</td><td class="s-on">✅ default-on</td><td><code>web::WebMetrics</code> from PR #12. Emits <code>memex_queries_total</code>, <code>memex_recall_polls_total</code>, <code>memex_errors_recalled_total</code>, <code>memex_points_indexed_total</code>, <code>memex_snapshot_bytes</code>, <code>memex_embedder_call_seconds</code>, <code>memex_mcp_calls_total</code>, <code>memex_process_uptime_seconds</code>.</td></tr>
+    <tr><td>MCP read-only tool surface (11 tools)</td><td class="s-on">✅ default-on</td><td><code>mcp.rs::tools_catalog</code>. <code>find_similar_sessions</code>, <code>find_similar_error</code>, <code>predict_next_action</code>, <code>mix_similar_sessions</code>, <code>get_session_summary</code>, <code>get_session_turn</code>, <code>list_recent_sessions</code>, <code>analyze_corpus_topology</code>, <code>snapshot_export</code>, <code>get_project_memory</code>, <code>wrapped</code>. Read-only by design (<code>mcp.rs:3</code>).</td></tr>
+    <tr><td>MCP write tools + <code>memex_points_indexed_total</code> MCP-side increment</td><td class="s-def">⏸️ deferred</td><td><b>PR #17 #16 Stage 1</b>: TODO marker + Prometheus best-practice citation at the natural increment site in <code>mcp.rs</code>. Stage 2 activates only when a future product PR adds an MCP write tool (auth, schema, idempotency are separate design questions). Always-zero counter is a valid Prometheus measurement, not a bug.</td></tr>
+  </tbody>
+</table>
+
+<!-- ════════════════════ 10. Security ════════════════════ -->
+<h2><span class="cat-num">10</span>Security <span class="cat-count">2 rows · 1 on · 1 deferred</span></h2>
+<table>
+  <thead><tr><th>Feature</th><th>Status</th><th>Reason / Code path</th></tr></thead>
+  <tbody>
+    <tr><td>Strict-mode resource caps (defence-in-depth)</td><td class="s-on">✅ default-on</td><td>See §6. Caps RAM + per-query point count so a runaway prefetch can't OOM.</td></tr>
+    <tr><td>API key / JWT / TLS auth on the embedded Qdrant</td><td class="s-def">⏸️ deferred</td><td>We loopback-bind to 127.0.0.1 in <code>docker-compose.yml</code> (THR-06). Caddy reverse proxy handles TLS for the all-in-one server variant. Auth would be defence-in-depth rather than required for the current architecture.</td></tr>
+  </tbody>
+</table>
+
+<!-- ════════════════════ Final counts ════════════════════ -->
+<h2>Final counts</h2>
+<table>
+  <thead><tr><th>Status</th><th>Count</th><th>What it means</th></tr></thead>
+  <tbody>
+    <tr><td><span class="s-on">✅ default-on</span></td><td><b>33</b></td><td>Active on every query / upsert; no caller action needed</td></tr>
+    <tr><td><span class="s-opt">🟡 opt-in</span></td><td><b>4</b></td><td>RRF fusion · MMR diversity · TQ-bits1 · f32-baseline</td></tr>
+    <tr><td><span class="s-def">⏸️ deferred</span></td><td><b>13</b></td><td>Scalar/Binary quant · Geo · Recommend · aliases · multi-collection · UpdateVectors · 3 alt tokenizers · MCP write · Auth</td></tr>
+    <tr><td><span class="s-blk">🔒 blocked</span></td><td><b>1</b></td><td>Custom tokenizer (Qdrant 1.18 doesn't expose; client-side <code>identifier_tokens()</code> covers the use case)</td></tr>
+    <tr><td><b>Total</b></td><td><b>51</b></td><td>Across 10 categories</td></tr>
+  </tbody>
+</table>
+
+<p style="margin-top: 22px; font-size: 13px; color: var(--fg-mute)">
+  Post-PR #19, <code>docs/wired-but-dormant.md</code> §B ("wired:off — built into the schema, gated off by default") is empty: every previously-gated capability was either promoted to §A (PR #17 #15) or has its activation surface documented (PR #18 #13, PR #17 #14). The split that mattered for the hackathon — "what's real vs what's landing copy" — is now a clean line at §A / §C, with §B reserved for future drift.
+</p>
+
+<footer class="page">
+  Generated: 2026-05-28 · branch <code>feat/qdrant-followup-landing</code><br>
+  Sources: <code>src-tauri/src/schema.rs</code> · <code>src-tauri/src/lens.rs</code> · <code>src-tauri/src/retrieval.rs</code> · <code>src-tauri/src/indexer.rs</code> · <code>src-tauri/src/mcp.rs</code> · <code>src-tauri/src/web.rs</code> · <code>docs/wired-but-dormant.md</code> · <code>docs/qdrant-features.md</code><br>
+  Companion reports: <a href="./follow-up-deep-dive.html">follow-up-deep-dive.html</a> · <a href="./follow-up-v2.html">follow-up-v2.html</a>
+</footer>
+
+</div>
+</body>
+</html>
