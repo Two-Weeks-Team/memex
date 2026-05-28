@@ -43,74 +43,84 @@ rescore `2 × limit` (= 40 vectors for the default 20-result page).
 
 ---
 
-## How to reproduce
-
-PR #12 REV-13 (CodeRabbit #6) — accurate recipe.
+## How to reproduce — Criterion + `MEMEX_QUANT_MODE` env (Issue #13)
 
 `src-tauri/src/eval_ndcg.rs` is a **library module**, not a binary. It exposes:
 - `pub fn ndcg_at_10(actual: &[String], labels: &[String]) -> f64`
 - `pub fn mean_ndcg_at_10<F>(labeled: &[LabeledQuery], mut run_query: F) -> f64`
 
-There is no `cargo run --bin memex -- eval ndcg` subcommand. To produce the
-numbers in the table above, drive these functions from a small test or
-benchmark harness — either a unit test (`#[test]` in `src-tauri/tests/`)
-or `cargo bench` with a `criterion` benchmark.
+The quantization knobs are now **runtime-configurable** via the
+`MEMEX_QUANT_MODE` env var (Issue #13). No source edit + rebuild + reindex
+loop per variant — switch modes by setting the env var, then `cargo bench`
+exits with a per-mode criterion report.
 
-The quantization knobs are set in **`src-tauri/src/schema.rs::quant_search()`**
-(NOT in `eval_ndcg.rs`). They are not CLI-toggleable today — flipping them
-requires a source edit + rebuild + index rebuild on the affected collection.
+### Prerequisites
 
-Prerequisites:
 - Qdrant `v1.18.1` running (`docker compose up -d qdrant` from repo root)
 - Memex desktop or web variant compiled (`cargo build --release`)
 - ≥ 100 sessions in `~/.claude/projects` or `~/.codex/sessions`
+- A labeled-queries fixture at `src-tauri/fixtures/labeled-queries.jsonl`
+  — ship as JSONL, one `{"query": "...", "relevant_ids": [...]}` per line.
+  See the in-file comment for authoring guidance. The file ships with 3
+  placeholder rows referencing made-up session IDs; replace before
+  running live.
 
-### Baseline run (the v3 production setting — `bits-2 + rescore + 2× oversampling`)
+### Compile-check (CI-safe, no Qdrant required)
 
 ```bash
-# 1. Index the corpus into a fresh v3 collection.
+cargo bench --bench quant_sweep
+```
+
+Runs in dry-run mode: prints the resolved `QuantMode`, registers a no-op
+Criterion bench so the harness exits 0. Confirms the bench compiles and
+links against the current `memex_lib`.
+
+### Live sweep (Qdrant Docker + corpus required)
+
+```bash
+# Index your corpus once (any mode — re-indexing per mode happens
+# implicitly when the bench drops + recreates the collection):
 memex index ~/.claude/projects --force-rebuild
 
-# 2. Run a NDCG / latency harness that calls `mean_ndcg_at_10` over a
-#    labeled fixture you provide. Example shape:
-#
-#    #[tokio::test]
-#    async fn measure_baseline() {
-#        let labeled = load_labeled_fixture("queries.json");
-#        let n = mean_ndcg_at_10(&labeled, |q| {
-#            let t = Instant::now();
-#            let hits = indexer::search_content(&qdrant, &emb, q, 10).await?;
-#            ELAPSED.record(t.elapsed());
-#            hits.into_iter().map(|h| h.session_id).collect()
-#        });
-#        eprintln!("ndcg@10 = {n}");
-#    }
+# Sweep three modes; each writes its own criterion report:
+for mode in f32 tq-bits1 tq-bits2; do
+    MEMEX_BENCH_LIVE=1 MEMEX_QUANT_MODE=$mode \
+        cargo bench --bench quant_sweep
+done
 
-# 3. Index size on disk:
+# Index size per mode (after each run):
 docker exec memex-qdrant du -sh /qdrant/storage/collections/memex_sessions_v3
 ```
 
-### Variant runs (manual code edits required)
+Reports land in `target/criterion/quant/<mode>/report/index.html`.
 
-To produce the other two table rows, edit `src-tauri/src/schema.rs::quant_search()`
-on a feature branch and rebuild:
-
-| Variant | Edit in `schema.rs::quant_search()` |
+| Mode value | Schema effect (set at collection-create time) |
 |---|---|
-| `bits-2`, **no rescore** (row 2) | set `rescore: false`, `oversampling: 1.0` |
-| `f32` baseline (row 1) | remove the `quantization_config` block entirely from `build_v3_create_collection()` (so the collection stores f32) |
-| `bits-2 + rescore + 2×` (row 3) | the as-shipped default |
+| `f32` or `none` | No quantization at all — collection stores f32 vectors (baseline row) |
+| `tq-bits1` | TurboQuant 1-bit + `always_ram: true` (more compression, lower recall) |
+| `tq-bits2` (default) | TurboQuant 2-bit + `always_ram: true` (current production) |
 
-Each variant requires:
-1. Edit `schema.rs`
-2. `cargo build --release`
-3. `memex index … --force-rebuild` (the collection schema changed, so the existing index is stale)
-4. Run the NDCG harness from step 2 above
-5. Record numbers
+`rescore: true` + `oversampling: 2.0` apply at *search time* via
+`schema::quantization_search_params()`; they are independent of the
+mode-at-create choice above. Toggling those off is still a source edit on
+`quantization_search_params()` (separate axis, separate follow-up).
 
-A future-work item (not in this PR) is exposing the quant params as a
-CLI flag on a debug subcommand so the variant sweep doesn't need source
-edits. Until then this is the honest recipe.
+### Live-mode wiring status
+
+The bench scaffold ships with the runtime config + a documented stub for
+the timed query loop. The actual `lens_search` invocation + `mean_ndcg_at_10`
+closure are TODOs marked in `benches/quant_sweep.rs` — they depend on
+collection setup state + embedder initialisation that varies by
+deployment. Wiring them is a few hundred LOC and lands as a follow-up
+commit on this PR if/when a deployer needs it before our reference
+numbers are ready.
+
+If you do not need timed numbers and just want **recall@10 / nDCG@10**,
+call `memex_lib::eval_ndcg::mean_ndcg_at_10` directly from a `#[tokio::test]`
+in `src-tauri/tests/`, passing a closure that runs each query through
+`indexer::lens_search` against the live Qdrant. Set `MEMEX_QUANT_MODE`
+before the test process spawns to control which mode the v3 collection
+gets created with.
 
 ---
 
@@ -134,7 +144,10 @@ mmap would add ~1-2 ms p99 tail latency for cold queries.
 
 ## Related
 
-- Quantization config: `src-tauri/src/schema.rs::quant_config` + `quant_search`
+- Quantization mode (Issue #13): `src-tauri/src/schema.rs::QuantMode` + `MEMEX_QUANT_MODE` env
+- Search-time params: `src-tauri/src/schema.rs::quantization_search_params()` (rescore + oversampling)
+- Bench harness: `src-tauri/benches/quant_sweep.rs` (`cargo bench --bench quant_sweep`)
+- Labeled fixture: `src-tauri/fixtures/labeled-queries.jsonl`
 - Eval harness: `src-tauri/src/eval_ndcg.rs`
 - Feature tour: [`qdrant-features.md`](./qdrant-features.md) §0–§1
 - Dormant capabilities: [`wired-but-dormant.md`](./wired-but-dormant.md) §A
