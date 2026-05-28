@@ -32,8 +32,10 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::Mutex as AsyncMutex;
 
 use crate::companion;
+use crate::enrich;
 use crate::indexer::{self, Embedder, LensWeights};
 use crate::parser;
+use crate::schema::COLLECTION_V3;
 use crate::wrapped;
 
 const SERVER_NAME: &str = "memex";
@@ -72,6 +74,13 @@ struct JsonRpcError {
 pub struct McpState {
     qdrant: AsyncMutex<Option<Arc<qdrant_client::Qdrant>>>,
     embedder: AsyncMutex<Option<Arc<Embedder>>>,
+    /// Issue #16 Stage 2 — optional `WebMetrics` handle. `None` on the
+    /// desktop stdio MCP path (desktop variant has no `/metrics` endpoint);
+    /// `Some(...)` when wired by `web::serve` so the HTTP MCP write tool
+    /// can call `state.mark_indexed(n)` and flip the `points_indexed_total`
+    /// counter off zero.
+    #[cfg(feature = "web")]
+    metrics: Option<Arc<crate::web::WebMetrics>>,
 }
 
 impl McpState {
@@ -79,7 +88,35 @@ impl McpState {
         Self {
             qdrant: AsyncMutex::new(None),
             embedder: AsyncMutex::new(None),
+            #[cfg(feature = "web")]
+            metrics: None,
         }
+    }
+
+    /// Issue #16 Stage 2 — construct an MCP state pre-wired with a metrics
+    /// handle. Used by `web::serve` so the HTTP MCP transport increments
+    /// `points_indexed_total` when a write tool succeeds.
+    #[cfg(feature = "web")]
+    pub fn new_with_metrics(metrics: Arc<crate::web::WebMetrics>) -> Self {
+        Self {
+            qdrant: AsyncMutex::new(None),
+            embedder: AsyncMutex::new(None),
+            metrics: Some(metrics),
+        }
+    }
+
+    /// Issue #16 Stage 2 — single entry point for the write-tool path to
+    /// increment the indexed-points counter. No-op on the desktop variant
+    /// (no `WebMetrics` linked), single atomic add on the web variant.
+    #[cfg(feature = "web")]
+    fn mark_indexed(&self, n: u64) {
+        if let Some(m) = &self.metrics {
+            m.mark_indexed(n);
+        }
+    }
+    #[cfg(not(feature = "web"))]
+    fn mark_indexed(&self, _n: u64) {
+        // Desktop variant: no /metrics endpoint, no-op.
     }
 
     async fn qdrant(&self) -> Result<Arc<qdrant_client::Qdrant>> {
@@ -182,6 +219,15 @@ pub fn new_shared_state() -> SharedMcpState {
     Arc::new(McpState::new())
 }
 
+/// Issue #16 Stage 2 — create a shared MCP state pre-wired with a metrics
+/// handle. Only meaningful on the web variant; used by `web::serve` so
+/// the HTTP MCP transport increments `points_indexed_total` when a write
+/// tool succeeds.
+#[cfg(feature = "web")]
+pub fn new_shared_state_with_metrics(metrics: Arc<crate::web::WebMetrics>) -> SharedMcpState {
+    Arc::new(McpState::new_with_metrics(metrics))
+}
+
 /// Handle one JSON-RPC request value and return the response value, reusing the
 /// exact same `dispatch` as the stdio transport so HTTP MCP exposes identical
 /// tools. Returns `None` for notifications (no `id`), per the JSON-RPC spec.
@@ -246,20 +292,23 @@ async fn dispatch(state: &Arc<McpState>, method: &str, params: Value) -> Result<
     }
 }
 
-// TODO(metric, see Issue #16): if/when an MCP write tool (e.g.
-// `index_session`, `enrich_session`, `upsert_payload`) is added, increment
-// `state.metrics.mark_indexed(n)` in the handler — the counter is already
-// declared and exposed at `/metrics` via `web::WebMetrics`, only the
-// increment call is missing.
+// Issue #16 Stage 2 — SHIPPED.
 //
-// Why the counter is currently zero rather than absent: Prometheus best
-// practice says always-zero counters are valid measurements — they
-// communicate that the dimension exists in the metric set, just isn't
-// active in this deployment. Removing the counter would create cross-
-// deployment metric-set drift (desktop binary increments it via the
-// indexer path; the MCP-only server doesn't because MCP is read-only).
-// See https://prometheus.io/docs/practices/instrumentation/ and the
-// Google SRE Book Ch. 6 "Monitoring Distributed Systems".
+// The `refresh_session_enrich` write tool below now calls
+// `state.mark_indexed(1)` on success. On the HTTP MCP transport (Docker
+// server variant) this finally flips `memex_points_indexed_total` off
+// zero. On the desktop stdio MCP path `state.mark_indexed` is a no-op
+// because the desktop variant has no `/metrics` endpoint anyway, and
+// metric-set uniformity across transports is what Prometheus best
+// practice asks for (always-zero counters communicate that the
+// dimension exists, just isn't active in this deployment —
+// https://prometheus.io/docs/practices/instrumentation/ and the
+// Google SRE Book Ch. 6).
+//
+// Future MCP write tools follow the same pattern: do the work, then
+// call `state.mark_indexed(n)` where `n` is the number of points that
+// changed. The helper is `#[cfg]`-gated so the desktop build stays
+// metrics-free.
 
 fn tools_catalog() -> Value {
     json!({
@@ -416,6 +465,20 @@ fn tools_catalog() -> Value {
                             "description": "Max sessions to deep-mine for repeated-decision detection."
                         }
                     }
+                }
+            },
+            {
+                "name": "refresh_session_enrich",
+                "description": "**[Write tool · Issue #16 Stage 2]** Re-runs the deterministic enrichment pipeline (intent · entities · outcome · arc · topic) for one indexed session and writes the result back to its Qdrant payload via SetPayload. Useful after the heuristics in `crate::enrich` are improved — call on legacy sessions to upgrade their labels in place, without re-embedding. This is the FIRST write tool in the MCP surface; on the HTTP MCP transport (Docker server variant) it flips `memex_points_indexed_total` off zero. Returns the new intent / outcome so the caller can see what changed.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "session_id": {
+                            "type": "string",
+                            "description": "Session id (UUID-ish string) that already exists in the v3 collection. Use `list_recent_sessions` or `find_similar_sessions` to discover ids."
+                        }
+                    },
+                    "required": ["session_id"]
                 }
             }
         ]
@@ -581,6 +644,83 @@ async fn tool_call(state: &Arc<McpState>, params: Value) -> Result<Value> {
             let report =
                 wrapped::compose_wrapped(&qdrant, window_days, limit).await?;
             serde_json::to_value(report)?
+        }
+        // ─────────────────────────────────────────────────────────────────
+        // Issue #16 Stage 2 — first MCP write tool. Re-runs enrich() on one
+        // indexed session and writes the deterministic labels back via
+        // SetPayload. No re-embedding (payload-only update); idempotent
+        // (same input → same output). On the HTTP MCP transport this is
+        // what finally flips `memex_points_indexed_total` off zero.
+        // ─────────────────────────────────────────────────────────────────
+        "refresh_session_enrich" => {
+            let session_id = args
+                .get("session_id")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("refresh_session_enrich: missing 'session_id'"))?;
+            let qdrant = state.qdrant().await?;
+
+            // 1. Confirm the session is already in the v3 collection — and
+            //    pull its `source_path` so we know where to re-parse from.
+            let payload = indexer::get_session_payload(&qdrant, session_id)
+                .await?
+                .ok_or_else(|| anyhow::anyhow!("session not in index: {session_id}"))?;
+            let source_path = indexer::payload_str(&payload, "source_path")
+                .ok_or_else(|| anyhow::anyhow!("payload missing source_path for {session_id}"))?;
+
+            // 2. Re-parse the original JSONL into a Session + Turns. The
+            //    parser already validates that the path is under one of the
+            //    allowed roots (`~/.claude/projects` or `~/.codex/sessions`)
+            //    so we don't need a separate traversal-guard here.
+            let session_path = PathBuf::from(&source_path);
+            let session = parser::parse_session(&session_path)
+                .map_err(|e| anyhow::anyhow!("re-parse failed for {session_id}: {e:#}"))?;
+
+            // 3. Re-run the deterministic enrichment pipeline. Same code
+            //    path the indexer uses on initial upsert.
+            let out = enrich::enrich(&session, &session.turns);
+
+            // 4. Build a payload-only update that touches just the five
+            //    enrich-stage fields. The dense / sparse / multivector
+            //    vectors are untouched — SetPayload doesn't re-embed.
+            let new_payload_json = json!({
+                "intent":   out.intent,
+                "entities": out.entities,
+                "outcome":  out.outcome,
+                "arc":      out.arc,
+                "topic":    out.topic,
+            });
+            let new_payload = qdrant_client::Payload::try_from(new_payload_json)?;
+
+            // 5. SetPayload on exactly this one point. We construct the
+            //    PointId from `indexer::point_id` to match the same UUID v5
+            //    scheme the indexer uses on insert.
+            use qdrant_client::qdrant::{
+                point_id::PointIdOptions, points_selector::PointsSelectorOneOf,
+                PointId, PointsIdsList, SetPayloadPointsBuilder,
+            };
+            let pid = PointId {
+                point_id_options: Some(PointIdOptions::Uuid(indexer::point_id(session_id))),
+            };
+            let req = SetPayloadPointsBuilder::new(COLLECTION_V3, new_payload)
+                .points_selector(PointsSelectorOneOf::Points(PointsIdsList { ids: vec![pid] }))
+                .wait(true);
+            qdrant.set_payload(req).await?;
+
+            // 6. Issue #16 Stage 2 — flip the counter. On the desktop stdio
+            //    MCP path this is a no-op (no /metrics endpoint exists);
+            //    on the HTTP MCP transport it adds 1 to the shared
+            //    `memex_points_indexed_total` family.
+            state.mark_indexed(1);
+
+            json!({
+                "session_id": session_id,
+                "updated":    1,
+                "intent":     out.intent,
+                "outcome":    out.outcome,
+                "arc":        out.arc,
+                "topic":      out.topic,
+                "entities":   out.entities,
+            })
         }
         other => return Err(anyhow::anyhow!("unknown tool: {other}")),
     };
