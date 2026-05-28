@@ -267,3 +267,33 @@ Backend chain confirmed intact:
 - **All other tasks**: proceed as specified in `qdrant-improvement-goal.md` §2.
 
 **P0 GATE PASSED — 10/10 confirmed (8 unchanged, 2 doc-only drift reconciled here).**
+
+---
+
+## §13 · Post-uplift state (PR #12 lands this) — historical baseline preserved above
+
+**This section was added AFTER the §12 baseline confirmation, once PR #12
+(qdrant-uplift) actually applied the changes the goal called for.** Read §1–§12
+as a snapshot of the **pre-PR-#12** code state on 2026-05-28; read §13 as the
+delta this PR introduces. The next round of audit (post-merge) should re-verify
+against §13's targets and append §14.
+
+| Item from §9 | §12 baseline (pre-PR #12) | Post-PR-#12 reality |
+|---|---|---|
+| **C — `LensWeights::default().content_late`** | `0.0` | **`0.25`** in both `lens::LensWeights` (T3.3) and `indexer::LensWeights` (REV-8) |
+| **E — `wrapped.rs::scroll_window`** | scroll-only tally | scroll + parallel Facet API fast path for `project_name`/`intent`/`outcome`/`source_agent` (T3.1); REV-9 reconciles legacy missing `source_agent`; REV-4 skips facet when truncated |
+| **F — `web.rs` routes** | only `/api/health` | adds `/metrics` (8 Prometheus families, T3.2 + REV-1) and `/api/snapshot/export` (REV-14) |
+| **H — Arch SVG STORE band** | "BINARY-QUANTIZED HNSW PER VECTOR" | "TURBOQUANT BITS-2 · 2× OVERSAMPLING · RESCORE" (T1.1) |
+| **I — Q1 card body** | "binary-quantized HNSW index" | "TurboQuant bits-2 (2-bit per dim) with 2× oversampling + rescore" (T1.1) |
+| **Misc — landing surface** | Q1–Q6 cards · 6 qd-bullets | Q1–Q8 cards · 13 qd-bullets · RelevanceFeedback playground · Hybrid lane visualizer · 30-day adoption callout · all chip labels honest about post-T3.3 state |
+| **Misc — docs** | `docs/qdrant-features.md` partially v2-era | v3-synced + `wired-but-dormant.md` + `benchmarks.md` + 3 mermaid sequence diagrams in `architecture.md` |
+
+**Items A · B · D · G · J unchanged** — those describe environment invariants
+(SDK version, server pin, sparse activation gate, frontend relevance feedback
+wiring, SDK Facet builder presence) that PR #12 inherits as-is.
+
+**Audit-of-the-audit**: items in §1–§7 that paragraph-quoted specific code
+snapshots (e.g. §2's `content_late: 0.0` block) are **historical** and
+intentionally NOT updated; the §1 row about the Qdrant pin file path is the
+ONLY pre-existing drift §12 fixed. Treat §1–§12 as immutable; future deltas
+go in numbered sections (§14, §15, …).

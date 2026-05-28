@@ -390,6 +390,15 @@ snapshot includes embeddings + payload metadata, not the raw JSONL.
 **Code pointer.** `src-tauri/src/indexer.rs::snapshot_export` /
 `snapshot_import`.
 
+**Web variant route** (PR #12 REV-14). The all-in-one Docker image
+exposes `POST /api/snapshot/export` as a thin wrapper over
+`indexer::snapshot_export`. Body is `{"dir": "<optional>"}`; if `dir` is
+omitted, the server resolves from `MEMEX_SNAPSHOT_DIR` or `$HOME`. Response
+is `{"name": "...", "path": "...", "bytes": <size>}`. The byte count also
+updates the `memex_snapshot_bytes` gauge in `/metrics`, so Prometheus can
+alert on "last snapshot was N bytes" or "no snapshot has been taken in the
+last D days" (combine with `memex_process_uptime_seconds`).
+
 ---
 
 ## What's *not* shipped here (and why)
