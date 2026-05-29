@@ -1142,14 +1142,22 @@ mod tests {
     {
         let key = "MEMEX_QUANT_MODE";
         let saved = std::env::var(key).ok();
-        match value {
-            Some(v) => std::env::set_var(key, v),
-            None => std::env::remove_var(key),
+        // SAFETY: edition 2024 made env::set_var/remove_var `unsafe` (they are
+        // unsound if another thread reads the environment concurrently). This
+        // test helper mutates a single var and restores it around `f`; the test
+        // harness isn't touching this var from other threads.
+        unsafe {
+            match value {
+                Some(v) => std::env::set_var(key, v),
+                None => std::env::remove_var(key),
+            }
         }
         let result = f();
-        match saved {
-            Some(v) => std::env::set_var(key, v),
-            None => std::env::remove_var(key),
+        unsafe {
+            match saved {
+                Some(v) => std::env::set_var(key, v),
+                None => std::env::remove_var(key),
+            }
         }
         result
     }

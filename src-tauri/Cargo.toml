@@ -1,11 +1,13 @@
 [package]
 name = "memex"
-version = "0.1.0"
+version = "0.1.1"
 description = "Time Machine for AI session JSONL — 5 Qdrant-unique features (lens / mix / topology / replay / proactive recall). Tauri 2 + Rust + Qdrant."
 authors = ["Sangguen Chang (Two-Weeks-Team)"]
 repository = "https://github.com/Two-Weeks-Team/memex"
 license = "Apache-2.0"
-edition = "2021"
+edition = "2024"
+# v0.1.1 — dependency/toolchain/edition maintenance release (no user-facing
+# feature or API change). See claudedocs / the deps-max-upgrade PR.
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -52,7 +54,7 @@ serde_json = "1"
 walkdir = "2.5"
 chrono = { version = "0.4", features = ["serde"] }
 anyhow = "1"
-thiserror = "1"
+thiserror = "2"
 clap = { version = "4", features = ["derive"] }
 qdrant-client = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "io-util", "time", "sync"] }
@@ -61,20 +63,23 @@ indicatif = "0.18"
 uuid = { version = "1", features = ["v4", "v5", "serde"] }
 regex = "1"
 once_cell = "1"
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream", "multipart"] }
+# reqwest 0.13 renamed the `rustls-tls` feature to `rustls` (CHANGELOG v0.13.0);
+# `rustls` pulls the aws-lc-rs crypto provider + rustls-platform-verifier roots,
+# so no separate roots feature is needed.
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls", "stream", "multipart"] }
 futures = "0.3"
-petgraph = "0.6"
-notify = "6"
-notify-debouncer-full = "0.3"
-sha2 = "0.10"
+petgraph = "0.8"
+notify = "8"
+notify-debouncer-full = "0.7"
+sha2 = "0.11"
 # P5 — KC-05 (Semaphore-cap pool sizing) + KG-02 (LRU cache for predict pivot parses).
 num_cpus = "1"
-lru = "0.12"
+lru = "0.18"
 # Cross-platform `~`/data-dir resolution. Already a transitive dep via tauri;
 # named here so the explicit `dirs::home_dir()` / `dirs::data_dir()` calls
 # in sec.rs + snapshot.rs are honest about what they rely on. Gemini review
 # on PR #2.
-dirs = "5"
+dirs = "6"
 # `web` feature only — headless HTTP server (UI + JSON API + HTTP MCP) for the
 # single Docker image. Pure-Rust, no system libs, so it builds on slim Linux.
 axum = { version = "0.8", optional = true }
@@ -86,7 +91,7 @@ tempfile = "3"
 # Issue #13 — Criterion harness for `benches/quant_sweep.rs`. `html_reports`
 # gives the `target/criterion/report/` HTML so deployers can eyeball
 # recall/latency without an external dashboard.
-criterion = { version = "0.5", features = ["html_reports"] }
+criterion = { version = "0.8", features = ["html_reports"] }
 
 # Issue #13 — quantization sweep benchmark. Set `MEMEX_QUANT_MODE` to
 # `f32` | `tq-bits1` | `tq-bits2` (default) and `MEMEX_BENCH_LIVE=1` to

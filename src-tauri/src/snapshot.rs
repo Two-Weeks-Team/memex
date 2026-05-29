@@ -10,6 +10,19 @@ use std::time::SystemTime;
 use anyhow::{anyhow, bail, Context, Result};
 use sha2::{Digest, Sha256};
 
+/// Lowercase hex encoding of a byte slice. sha2 0.11 (digest 0.11) returns a
+/// `hybrid_array::Array` from `finalize()` which — unlike digest 0.10's
+/// `GenericArray` — no longer implements `LowerHex`, so `format!("{:x}", …)`
+/// stopped compiling. Encode the bytes explicitly instead.
+fn to_hex(bytes: &[u8]) -> String {
+    use std::fmt::Write as _;
+    let mut s = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        let _ = write!(s, "{b:02x}");
+    }
+    s
+}
+
 pub const SNAPSHOT_EXT: &str = "snapshot";
 pub const SIG_EXT: &str = "sig"; // → <name>.snapshot.sig
 
@@ -198,7 +211,7 @@ impl SignedEnvelope {
             .with_context(|| format!("read {}", snapshot_path.display()))?;
         let mut hasher = Sha256::new();
         hasher.update(&bytes);
-        let sha256 = format!("{:x}", hasher.finalize());
+        let sha256 = to_hex(&hasher.finalize());
         let issued_at = chrono::DateTime::<chrono::Utc>::from(SystemTime::now())
             .to_rfc3339();
         let sig = Signature {
@@ -236,7 +249,7 @@ impl SignedEnvelope {
             .with_context(|| format!("read {}", snapshot_path.display()))?;
         let mut hasher = Sha256::new();
         hasher.update(&blob);
-        let actual = format!("{:x}", hasher.finalize());
+        let actual = to_hex(&hasher.finalize());
         if actual != sig.sha256 {
             bail!("sha256 mismatch: actual {} != expected {}", actual, sig.sha256);
         }
@@ -433,7 +446,7 @@ mod envelope_tests {
         let bytes = fs::read(&p).unwrap();
         let mut h = Sha256::new();
         h.update(&bytes);
-        let sha = format!("{:x}", h.finalize());
+        let sha = to_hex(&h.finalize());
         sig.sha256 = sha;
         fs::write(&sig_path, serde_json::to_vec(&sig).unwrap()).unwrap();
         let outcome = SignedEnvelope::verify(&p).unwrap();
@@ -453,7 +466,7 @@ mod envelope_tests {
         let bytes = fs::read(&p).unwrap();
         let mut h = Sha256::new();
         h.update(&bytes);
-        sig.sha256 = format!("{:x}", h.finalize());
+        sig.sha256 = to_hex(&h.finalize());
         fs::write(&sig_path, serde_json::to_vec(&sig).unwrap()).unwrap();
         assert!(SignedEnvelope::verify(&p).is_err());
     }
@@ -470,7 +483,7 @@ mod envelope_tests {
         let bytes = fs::read(&p).unwrap();
         let mut h = Sha256::new();
         h.update(&bytes);
-        sig.sha256 = format!("{:x}", h.finalize());
+        sig.sha256 = to_hex(&h.finalize());
         fs::write(&sig_path, serde_json::to_vec(&sig).unwrap()).unwrap();
         let outcome = SignedEnvelope::verify(&p).unwrap();
         assert!(matches!(outcome, VerifyOutcome::WarnQdrantMinor { .. }));
