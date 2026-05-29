@@ -89,7 +89,13 @@ counts and the last local run are recorded in
 ```bash
 npm run tauri build    # local Memex.app (WebKit Inspector ON)
 npm run tauri:dist     # distribution .dmg via --no-default-features (Inspector OFF)
+npm run tauri:release:macos  # Apple Silicon .dmg path used by signed CI release
 ```
+
+For public distribution, build through the signed/notarized release workflow in
+[docs/RELEASE_SIGNING.md](RELEASE_SIGNING.md). A GitHub-verified commit does
+not remove Gatekeeper warnings; the `.app` / `.dmg` artifact itself must be
+Developer ID signed and notarized.
 
 ## Non-arm64 Mac (cross / native)
 
