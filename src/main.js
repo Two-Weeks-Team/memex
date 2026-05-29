@@ -816,7 +816,12 @@ async function pollUntilReady(attempt = 0) {
       const sec = Math.round((attempt * RETRY_MS) / 1000);
       let hint = `Bootstrapping… (${sec}s)`;
       if (msg.includes("could not connect to Qdrant") || msg.includes("connection")) {
-        hint = `Qdrant not reachable on :6334 — start it with \`./.qdrant/qdrant\` then this banner will clear automatically.`;
+        // Qdrant is a required dependency and Memex does NOT auto-start it.
+        // Point at both documented ways to bring it up — Docker (the Quick
+        // Start path, works on a fresh clone) and the prebuilt binary (no
+        // Docker). The poll keeps retrying, so the banner clears itself once
+        // Qdrant answers on :6334.
+        hint = `Qdrant isn't running on :6334. Start it — Docker: \`bash scripts/start-qdrant.sh\` (or \`docker compose up -d qdrant\`); no Docker: \`./.qdrant/qdrant &\` (see README). This banner clears automatically once it's up.`;
       } else if (msg.includes("fastembed") || msg.includes("BGE")) {
         hint = `Loading BGE-small embedder (first launch may take ~30s for model download)…`;
       } else if (msg.includes("state not managed")) {
