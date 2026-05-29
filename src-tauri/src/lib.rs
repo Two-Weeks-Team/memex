@@ -22,16 +22,17 @@ pub mod redact;
 pub mod retrieval;
 pub mod schema;
 pub mod sec;
+pub mod session_roots;
 pub mod snapshot;
 pub mod summary;
 #[cfg(feature = "gui")]
 pub mod watcher;
-pub mod wrapped;
 #[cfg(feature = "web")]
 pub mod web;
+pub mod wrapped;
 
 #[cfg(feature = "gui")]
-use std::{path::PathBuf, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 
 #[cfg(feature = "gui")]
 use tauri::{
@@ -69,7 +70,7 @@ pub fn run() {
             // Background auto-index daemon. Walks ~/.claude/projects every
             // 60 s, re-indexes any session whose mtime advanced. Emits
             // `index-updated` so the frontend can flash a chip.
-            let watch_root = default_projects_root();
+            let watch_root = session_roots::default_projects_root();
             // Floor at 1 s so a misconfigured env var (e.g. =0) can't turn
             // the watcher into a CPU-pegging busy loop.
             const MIN_WATCH_PERIOD_SECS: u64 = 1;
@@ -87,7 +88,8 @@ pub fn run() {
 
             // Tray icon — minimal Open / Snapshot / Quit menu.
             let open_item = MenuItem::with_id(app, "open", "Open Memex", true, None::<&str>)?;
-            let snap_item = MenuItem::with_id(app, "snapshot", "Export Snapshot…", true, None::<&str>)?;
+            let snap_item =
+                MenuItem::with_id(app, "snapshot", "Export Snapshot…", true, None::<&str>)?;
             let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&open_item, &snap_item, &quit_item])?;
             let _tray = TrayIconBuilder::with_id("memex-tray")
@@ -104,9 +106,7 @@ pub fn run() {
                     }
                     "snapshot" => {
                         if let Some(w) = app.get_webview_window("main") {
-                            let _ = w.eval(
-                                "document.getElementById('btn-snapshot')?.click();",
-                            );
+                            let _ = w.eval("document.getElementById('btn-snapshot')?.click();");
                             let _ = w.show();
                             let _ = w.set_focus();
                         }
@@ -150,16 +150,4 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
-}
-
-#[cfg(feature = "gui")]
-fn default_projects_root() -> PathBuf {
-    if let Ok(home) = std::env::var("HOME") {
-        let mut p = PathBuf::from(home);
-        p.push(".claude");
-        p.push("projects");
-        p
-    } else {
-        PathBuf::from(".claude/projects")
-    }
 }

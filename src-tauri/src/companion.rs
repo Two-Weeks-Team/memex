@@ -617,11 +617,7 @@ pub async fn compose_memory_primer_excluding(
             Ok(v) => v,
             Err(_) => continue,
         };
-        let parsed = if agent == "codex" {
-            crate::codex_parser::parse_codex_session(&validated)
-        } else {
-            crate::parser::parse_session(&validated)
-        };
+        let parsed = crate::session_roots::parse_session_routed(&agent, &validated);
         let session = match parsed {
             Ok(s) => s,
             Err(_) => continue,

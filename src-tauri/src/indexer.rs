@@ -1704,11 +1704,7 @@ pub async fn predict_next_actions(
         })
         .unwrap_or_else(|| "claude_code".to_string());
     let validated = crate::sec::validate_session_path(StdPath::new(&source_path))?;
-    let active = if source_agent == "codex" {
-        crate::codex_parser::parse_codex_session(&validated)?
-    } else {
-        crate::parser::parse_session(&validated)?
-    };
+    let active = crate::session_roots::parse_session_routed(&source_agent, &validated)?;
     if active.turns.is_empty() {
         return Ok(PredictionContext {
             source_session_id: session_id.to_string(),
@@ -1801,9 +1797,9 @@ pub async fn predict_next_actions(
         let nb_is_codex = nb_agent == "codex";
         let nb_arc = match PREDICT_PARSE_CACHE.get_or_parse(validated.clone(), mtime, |p| {
             if nb_is_codex {
-                crate::codex_parser::parse_codex_session(p)
+                crate::session_roots::parse_session_routed("codex", p)
             } else {
-                crate::parser::parse_session(p)
+                crate::session_roots::parse_session_routed("claude_code", p)
             }
         }) {
             Ok(s) => s,

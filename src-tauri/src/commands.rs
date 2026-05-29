@@ -18,6 +18,10 @@ use tokio::sync::Mutex as AsyncMutex;
 use crate::indexer::{self, Embedder, LensWeights, SearchHit, Topology};
 use crate::parser;
 use crate::schema::COLLECTION_V3;
+use crate::session_roots::{
+    default_history_path, default_projects_root, default_transcripts_root, parse_session_routed,
+    scan_all_roots, scan_root_routed,
+};
 
 /// AppState holds the heavyweight resources (Qdrant client + fastembed model)
 /// behind lazy slots. `.manage()` is called eagerly in `lib.rs::run()` so the
@@ -232,7 +236,15 @@ pub async fn get_session_turns(
         .ok_or_else(|| "session payload missing source_path".to_string())?;
     let validated =
         crate::sec::validate_session_path(std::path::Path::new(&source)).map_err(stringify)?;
-    let session = parser::parse_session(&validated).map_err(stringify)?;
+    let source_agent = payload
+        .get("source_agent")
+        .and_then(|v| v.kind.as_ref())
+        .and_then(|k| match k {
+            qdrant_client::qdrant::value::Kind::StringValue(s) => Some(s.as_str()),
+            _ => None,
+        })
+        .unwrap_or("claude_code");
+    let session = parse_session_routed(source_agent, &validated).map_err(stringify)?;
     serde_json::to_value(&session).map_err(stringify)
 }
 
@@ -352,9 +364,9 @@ pub async fn snapshot_export(path: PathBuf) -> Result<String, String> {
 /// so the UI can echo where the file landed.
 #[tauri::command]
 pub async fn snapshot_export_default() -> Result<String, String> {
-    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
     let ts = chrono::Utc::now().format("%Y-%m-%dT%H-%M-%S").to_string();
-    let path = PathBuf::from(&home).join(format!("memex-snapshot-{ts}.snapshot"));
+    let path = home.join(format!("memex-snapshot-{ts}.snapshot"));
     let name = indexer::snapshot_export(&path).await.map_err(stringify)?;
     Ok(format!("{name} → {}", path.display()))
 }
@@ -443,7 +455,7 @@ pub async fn refresh_index(
             }
             Ok(s)
         } else {
-            scan_all_roots()
+            scan_all_roots("[memex]")
         }
     })
     .await
@@ -464,124 +476,6 @@ pub async fn refresh_index(
         "errors": report.errors,
         "total_scanned": total,
     }))
-}
-
-/// Scan both `~/.claude/projects` AND `~/.codex/sessions` and return a unified
-/// `Vec<Session>`. Missing roots are tolerated — if only one agent is
-/// installed, we still get a usable corpus.
-fn scan_all_roots() -> anyhow::Result<Vec<parser::Session>> {
-    let mut all: Vec<parser::Session> = Vec::new();
-    let claude_root = default_projects_root();
-    if claude_root.exists() {
-        match parser::scan_dir(&claude_root) {
-            Ok(mut s) => all.append(&mut s),
-            Err(e) => eprintln!("[memex] claude root scan: {e:#}"),
-        }
-    }
-    let codex_root = default_codex_root();
-    if codex_root.exists() {
-        match crate::codex_parser::scan_codex_dir(&codex_root) {
-            Ok(mut s) => all.append(&mut s),
-            Err(e) => eprintln!("[memex] codex root scan: {e:#}"),
-        }
-    }
-    // MERGE NOTE (full-sync): also fold in legacy `~/.claude/transcripts/`
-    // so the upstream migration's older corpus (Anthropic stopped writing
-    // here at v2.1.114) survives the multi-agent merge.
-    let transcripts_root = default_transcripts_root();
-    if transcripts_root.exists() {
-        match parser::scan_transcripts_dir(&transcripts_root) {
-            Ok(mut s) => all.append(&mut s),
-            Err(e) => eprintln!("[memex] legacy transcripts scan: {e:#}"),
-        }
-    }
-    if all.is_empty() {
-        anyhow::bail!(
-            "no sessions found — neither {} nor {} nor {} contained parseable rollouts",
-            claude_root.display(),
-            codex_root.display(),
-            transcripts_root.display(),
-        );
-    }
-    Ok(all)
-}
-
-/// Route a single explicit root to the right parser.
-///
-/// ROBUSTNESS FIX (Codex PR #5 review, commands.rs:383): the previous
-/// implementation matched on the literal substring `/.codex/sessions`,
-/// which silently fell back to the Claude parser whenever the user
-/// pointed Memex at the same data via:
-///   - a symlink (e.g. `~/codex_data -> ~/.codex/sessions`)
-///   - an alternate mount path
-///   - a different letter case (HFS+ case-insensitive volumes)
-///
-/// The Claude parser then accepts Codex JSONL but extracts almost no fields
-/// from the alien schema, so refresh_index/list_sessions silently pollute
-/// the index with empty sessions instead of surfacing a parse error. Fix:
-/// canonicalize first and also peek at the first rollout filename pattern
-/// to detect Codex content regardless of how the user reached the path.
-fn scan_root_routed(root: &std::path::Path) -> anyhow::Result<Vec<parser::Session>> {
-    // 1) Canonical path string — resolves symlinks, normalises case on HFS+.
-    let canonical = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
-    let s_lower = canonical.to_string_lossy().to_lowercase();
-    if s_lower.contains("/.codex/sessions") || s_lower.ends_with(".codex/sessions") {
-        return crate::codex_parser::scan_codex_dir(&canonical);
-    }
-    // 2) Content sniff — look at the first rollout-shaped file. Codex
-    //    sessions follow the `rollout-*.jsonl` convention, while Claude's
-    //    are typically `<uuid>.jsonl`. We only need to check ONE file to
-    //    pick the right parser.
-    let first_rollout = walkdir::WalkDir::new(&canonical)
-        .max_depth(4)
-        .into_iter()
-        .filter_map(|e| e.ok())
-        .find(|e| {
-            let name = e.file_name().to_string_lossy().to_lowercase();
-            name.starts_with("rollout-") && name.ends_with(".jsonl")
-        });
-    if first_rollout.is_some() {
-        return crate::codex_parser::scan_codex_dir(&canonical);
-    }
-    parser::scan_dir(&canonical)
-}
-
-fn default_codex_root() -> PathBuf {
-    if let Ok(home) = std::env::var("HOME") {
-        let mut p = PathBuf::from(home);
-        p.push(".codex");
-        p.push("sessions");
-        p
-    } else {
-        PathBuf::from(".codex/sessions")
-    }
-}
-
-fn default_projects_root() -> PathBuf {
-    if let Ok(home) = std::env::var("HOME") {
-        let mut p = PathBuf::from(home);
-        p.push(".claude");
-        p.push("projects");
-        p
-    } else {
-        PathBuf::from(".claude/projects")
-    }
-}
-
-/// Legacy `~/.claude/transcripts/` directory — flat dir of `ses_*.jsonl`
-/// files written by Claude Code before the silent rollout to
-/// `~/.claude/projects/` around v2.1.114. Returning this alongside the
-/// modern root is how Memex preserves the user's older 2–4 months of
-/// corpus that Anthropic stopped writing into.
-fn default_transcripts_root() -> PathBuf {
-    if let Ok(home) = std::env::var("HOME") {
-        let mut p = PathBuf::from(home);
-        p.push(".claude");
-        p.push("transcripts");
-        p
-    } else {
-        PathBuf::from(".claude/transcripts")
-    }
 }
 
 /// Unified scan over both the modern `projects/` tree and the legacy
@@ -619,17 +513,6 @@ fn scan_all_sources() -> anyhow::Result<Vec<parser::Session>> {
         }
     }
     Ok(out)
-}
-
-fn default_history_path() -> PathBuf {
-    if let Ok(home) = std::env::var("HOME") {
-        let mut p = PathBuf::from(home);
-        p.push(".claude");
-        p.push("history.jsonl");
-        p
-    } else {
-        PathBuf::from(".claude/history.jsonl")
-    }
 }
 
 /// Read `~/.claude/history.jsonl` and return per-day prompt counts plus
@@ -686,7 +569,7 @@ pub async fn list_sessions(
             }
             Ok(s)
         } else {
-            scan_all_roots()
+            scan_all_roots("[memex]")
         }
     })
     .await

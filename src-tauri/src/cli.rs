@@ -436,11 +436,12 @@ fn cmd_reindex(
             // Validate the explicit session path through the sandbox.
             let validated = crate::sec::validate_session_path(&sess_path)
                 .with_context(|| format!("validating --session {}", sess_path.display()))?;
-            let parsed = if validated.to_string_lossy().contains("/.codex/sessions") {
-                codex_parser::parse_codex_session(&validated)?
+            let source_agent = if validated.to_string_lossy().contains("/.codex/sessions") {
+                "codex"
             } else {
-                parser::parse_session(&validated)?
+                "claude_code"
             };
+            let parsed = crate::session_roots::parse_session_routed(source_agent, &validated)?;
             vec![parsed]
         } else {
             // Scan both roots, keep sessions whose project_path == cwd.
@@ -794,7 +795,7 @@ fn cmd_scan(
     }
     let mut sessions: Vec<parser::Session> = if let Some(p) = path {
         eprintln!("scanning {} (single root)", p.display());
-        scan_root_routed(&p)?
+        crate::session_roots::scan_root_routed(&p)?
     } else {
         scan_by_agent(&agent)?
     };
@@ -860,62 +861,19 @@ fn scan_by_agent(agent: &str) -> Result<Vec<parser::Session>> {
     let agent = agent.to_lowercase();
     match agent.as_str() {
         "claude" | "claude_code" => {
-            let root = default_projects_root();
+            let root = crate::session_roots::default_projects_root();
             eprintln!("scanning {} (claude only)", root.display());
             Ok(parser::scan_dir(&root)?)
         }
         "codex" => {
-            let root = default_codex_root();
+            let root = crate::session_roots::default_codex_root();
             eprintln!("scanning {} (codex only)", root.display());
             Ok(codex_parser::scan_codex_dir(&root)?)
         }
         _ => {
-            let claude = default_projects_root();
-            let codex = default_codex_root();
-            eprintln!(
-                "scanning {} + {} (all agents)",
-                claude.display(),
-                codex.display()
-            );
-            let mut all: Vec<parser::Session> = Vec::new();
-            if claude.exists() {
-                match parser::scan_dir(&claude) {
-                    Ok(mut s) => all.append(&mut s),
-                    Err(e) => eprintln!("  claude: {e:#}"),
-                }
-            }
-            if codex.exists() {
-                match codex_parser::scan_codex_dir(&codex) {
-                    Ok(mut s) => all.append(&mut s),
-                    Err(e) => eprintln!("  codex: {e:#}"),
-                }
-            }
-            if all.is_empty() {
-                anyhow::bail!("no sessions parsed under either root");
-            }
-            Ok(all)
+            eprintln!("scanning all session roots");
+            crate::session_roots::scan_all_roots("[memex scan]")
         }
-    }
-}
-
-/// Route a single explicit root by substring match on the path.
-fn scan_root_routed(root: &std::path::Path) -> Result<Vec<parser::Session>> {
-    let s = root.to_string_lossy();
-    if s.contains("/.codex/sessions") {
-        Ok(codex_parser::scan_codex_dir(root)?)
-    } else {
-        Ok(parser::scan_dir(root)?)
-    }
-}
-
-fn default_codex_root() -> PathBuf {
-    if let Ok(home) = std::env::var("HOME") {
-        let mut p = PathBuf::from(home);
-        p.push(".codex");
-        p.push("sessions");
-        p
-    } else {
-        PathBuf::from(".codex/sessions")
     }
 }
 
@@ -1004,7 +962,13 @@ fn cmd_topology(sample: u32, per_point: u32, out: Option<PathBuf>) -> Result<()>
     let rt = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
     rt.block_on(async move {
         let client = indexer::connect().await?;
-        let topo = indexer::topology(&client, sample, per_point, Some(default_projects_root())).await?;
+        let topo = indexer::topology(
+            &client,
+            sample,
+            per_point,
+            Some(crate::session_roots::default_projects_root()),
+        )
+        .await?;
         eprintln!(
             "topology: {} node(s), {} MST edge(s), {} insight(s), {} gap(s)",
             topo.nodes.len(),
@@ -1259,16 +1223,5 @@ fn truncate(s: &str, n: usize) -> String {
         let mut out: String = s.chars().take(n.saturating_sub(1)).collect();
         out.push('…');
         out
-    }
-}
-
-fn default_projects_root() -> PathBuf {
-    if let Ok(home) = std::env::var("HOME") {
-        let mut p = PathBuf::from(home);
-        p.push(".claude");
-        p.push("projects");
-        p
-    } else {
-        PathBuf::from(".claude/projects")
     }
 }

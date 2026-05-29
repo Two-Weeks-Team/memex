@@ -1,6 +1,6 @@
 [package]
 name = "memex"
-version = "0.1.1"
+version = "0.1.2"
 description = "Time Machine for AI session JSONL — 5 Qdrant-unique features (lens / mix / topology / replay / proactive recall). Tauri 2 + Rust + Qdrant."
 authors = ["Sangguen Chang (Two-Weeks-Team)"]
 repository = "https://github.com/Two-Weeks-Team/memex"
@@ -27,9 +27,9 @@ tauri-build = { version = "2", features = [] }
 # Inspector available — no debugging friction.
 #
 # The only place Inspector is OFF is the *distribution build*:
-# `npm run tauri:dist` passes `--no-default-features`, producing a
-# `.dmg` that ships without Inspector. That's how `.dmg`s released to
-# users should be built (production hygiene + notarization-friendly).
+# `npm run tauri:release:macos` passes `--no-default-features --features gui`,
+# producing a desktop `.dmg` that ships without Inspector. That's how `.dmg`s
+# released to users should be built (production hygiene + notarization-friendly).
 [features]
 # `gui` = the macOS Tauri desktop app (default). `web` = the headless
 # server variant (axum HTTP UI/API + HTTP MCP) used by the single Docker
@@ -99,4 +99,3 @@ criterion = { version = "0.8", features = ["html_reports"] }
 [[bench]]
 name = "quant_sweep"
 harness = false
-

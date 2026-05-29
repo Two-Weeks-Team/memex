@@ -160,7 +160,7 @@ pub async fn serve(port: u16, ui_dir: PathBuf) -> Result<()> {
     {
         let root = web_scan_root();
         eprintln!("[memex-web] auto-indexing {} …", root.display());
-        let sessions = parser::scan_dir(&root).unwrap_or_default();
+        let sessions = crate::session_roots::scan_root_routed(&root).unwrap_or_default();
         match indexer::bulk_index_arc(&qdrant, embedder.clone(), &sessions).await {
             Ok(r) => eprintln!("[memex-web] auto-indexed {}/{} session(s)", r.indexed, sessions.len()),
             Err(e) => eprintln!("[memex-web] auto-index skipped: {e:#}"),
@@ -451,7 +451,7 @@ async fn mix(State(s): State<WebState>, Json(body): Json<MixReq>) -> ApiResult {
 
 #[derive(Deserialize)]
 struct IndexReq {
-    /// Directory of Claude-format `*.jsonl` sessions (e.g. examples/sample-corpus).
+    /// Directory of Claude, Codex, or legacy transcript `*.jsonl` sessions.
     path: String,
 }
 
@@ -463,7 +463,7 @@ async fn index_path(State(s): State<WebState>, Json(body): Json<IndexReq>) -> Ap
     // thereby exfiltrate via search) arbitrary directories.
     let path = sec::validate_session_path(std::path::Path::new(&body.path))
         .map_err(|e| (StatusCode::FORBIDDEN, format!("path rejected: {e:#}")))?;
-    let sessions = tokio::task::spawn_blocking(move || parser::scan_dir(&path))
+    let sessions = tokio::task::spawn_blocking(move || crate::session_roots::scan_root_routed(&path))
         .await
         .map_err(|e| err500(format!("scan task panicked: {e}")))?
         .map_err(err500)?;
@@ -680,9 +680,18 @@ async fn dispatch_invoke(s: &WebState, cmd: &str, args: Value) -> ApiResult {
                     qdrant_client::qdrant::value::Kind::StringValue(s) => Some(s.clone()),
                     _ => None,
                 })
-                .ok_or((StatusCode::BAD_REQUEST, "session payload missing source_path".to_string()))?;
-            let validated = sec::validate_session_path(std::path::Path::new(&source)).map_err(err500)?;
-            ok_json(parser::parse_session(&validated).map_err(err500)?)
+                .ok_or((
+                    StatusCode::BAD_REQUEST,
+                    "session payload missing source_path".to_string(),
+                ))?;
+            let validated =
+                sec::validate_session_path(std::path::Path::new(&source)).map_err(err500)?;
+            let source_agent = indexer::payload_str(&payload, "source_agent")
+                .unwrap_or_else(|| "claude_code".to_string());
+            ok_json(
+                crate::session_roots::parse_session_routed(&source_agent, &validated)
+                    .map_err(err500)?,
+            )
         }
         "list_sessions" => {
             // PR6-C: a user-supplied `path` is sandbox-validated (403 on
@@ -694,10 +703,11 @@ async fn dispatch_invoke(s: &WebState, cmd: &str, args: Value) -> ApiResult {
                 None => web_scan_root(),
             };
             let limit = a_usize(&args, "limit").unwrap_or(60);
-            let mut sessions = tokio::task::spawn_blocking(move || parser::scan_dir(&root))
-                .await
-                .map_err(|e| err500(format!("scan panicked: {e}")))?
-                .map_err(err500)?;
+            let mut sessions =
+                tokio::task::spawn_blocking(move || crate::session_roots::scan_root_routed(&root))
+                    .await
+                    .map_err(|e| err500(format!("scan panicked: {e}")))?
+                    .map_err(err500)?;
             sessions.sort_by(|a, b| b.start_time.cmp(&a.start_time));
             let out: Vec<crate::summary::SessionSummary> = sessions.into_iter().take(limit).map(Into::into).collect();
             ok_json(out)
@@ -726,10 +736,11 @@ async fn dispatch_invoke(s: &WebState, cmd: &str, args: Value) -> ApiResult {
                     .map_err(|e| (StatusCode::FORBIDDEN, format!("path rejected: {e:#}")))?,
                 None => web_scan_root(),
             };
-            let sessions = tokio::task::spawn_blocking(move || parser::scan_dir(&root))
-                .await
-                .map_err(|e| err500(format!("scan panicked: {e}")))?
-                .map_err(err500)?;
+            let sessions =
+                tokio::task::spawn_blocking(move || crate::session_roots::scan_root_routed(&root))
+                    .await
+                    .map_err(|e| err500(format!("scan panicked: {e}")))?
+                    .map_err(err500)?;
             let total = sessions.len();
             crud::ensure_collection_v3(q).await.map_err(err500)?;
             indexer::ensure_collection(q).await.map_err(err500)?;
