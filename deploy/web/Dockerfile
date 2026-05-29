@@ -25,6 +25,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends pkg-config libs
 COPY src-tauri/Cargo.toml src-tauri/Cargo.lock ./src-tauri/
 COPY src-tauri/build.rs ./src-tauri/build.rs
 COPY src-tauri/src ./src-tauri/src
+# Bench source is required even for `cargo build --features web` because the
+# `[[bench]] name = "quant_sweep"` entry in Cargo.toml makes cargo verify the
+# path during manifest parsing — PR #18 added the bench, but this COPY was
+# missed, so any `docker build` after that PR fails with "can't find
+# `quant_sweep` bench at `benches/quant_sweep.rs`". Bench code is not actually
+# compiled into the runtime image; the copy is ~50KB and avoids a manifest
+# error before the build can start.
+COPY src-tauri/benches ./src-tauri/benches
+COPY src-tauri/fixtures ./src-tauri/fixtures
 
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/build/src-tauri/target \
