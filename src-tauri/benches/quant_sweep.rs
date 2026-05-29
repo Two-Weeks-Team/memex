@@ -141,7 +141,20 @@ fn quant_sweep(c: &mut Criterion) {
         }
         None => sample_corpus.clone(),
     };
-    let corpus_is_sample = corpus_path == sample_corpus;
+    // Robust path comparison — bare `PathBuf` equality fails on perfectly
+    // valid `MEMEX_CORPUS_DIR` forms that semantically point at the
+    // sample-corpus (Gemini PR #27 review):
+    //   - relative paths: `./examples/sample-corpus`
+    //   - redundant components: `/abs/./examples/sample-corpus`
+    //   - symlinks pointing back at the sample-corpus
+    // Canonicalize both sides; fall back to raw PathBuf equality if either
+    // side fails to resolve (e.g. the user-supplied path doesn't exist —
+    // in which case bench errors out on `parser::scan_dir` a few lines
+    // below anyway, so getting nDCG suppression "wrong" here is moot).
+    let corpus_is_sample = match (corpus_path.canonicalize(), sample_corpus.canonicalize()) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => corpus_path == sample_corpus,
+    };
     let (qdrant, embedder) = rt.block_on(async {
         eprintln!("[quant_sweep] connecting to Qdrant…");
         let q = Arc::new(indexer::connect().await.expect("Qdrant connect"));
