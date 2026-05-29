@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VSD 2026 — Memex Submission (preview)</title>
+<style>
+  :root{
+    --gf-purple:#7248b9;       /* Qdrant/VSD-ish purple header */
+    --gf-purple-deep:#5b3a93;
+    --gf-accent:#673ab7;
+    --gf-red:#d93025;
+    --gf-text:#202124;
+    --gf-sub:#5f6368;
+    --gf-border:#dadce0;
+    --gf-bg:#f0ebf8;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    font-family:"Google Sans",Roboto,-apple-system,"Helvetica Neue",Arial,"Apple SD Gothic Neo",sans-serif;
+    background:var(--gf-bg);
+    color:var(--gf-text);
+    padding:24px 12px 64px;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:680px;margin:0 auto;}
+
+  /* preview banner */
+  .preview-flag{
+    max-width:680px;margin:0 auto 14px;background:#fff8e1;border:1px solid #f0c36d;
+    border-radius:8px;padding:10px 16px;font-size:13px;color:#7a5b00;line-height:1.5;
+  }
+  .preview-flag b{color:#5c4400;}
+
+  /* card */
+  .card{
+    background:#fff;border:1px solid var(--gf-border);border-radius:8px;
+    padding:24px;margin-bottom:12px;
+  }
+  /* header card */
+  .header-card{border-top:10px solid var(--gf-purple);padding:0;overflow:hidden;}
+  .header-band{background:var(--gf-purple);color:#fff;padding:20px 24px;}
+  .header-band .kicker{font-size:12px;letter-spacing:.06em;text-transform:uppercase;opacity:.85;}
+  .header-inner{padding:22px 24px 24px;}
+  .header-inner h1{font-size:30px;font-weight:500;margin:0 0 8px;line-height:1.25;}
+  .header-inner .desc{font-size:14px;color:var(--gf-sub);line-height:1.6;margin:0;}
+  .header-inner .desc a{color:var(--gf-accent);}
+  .meta-row{display:flex;flex-wrap:wrap;gap:8px 18px;margin-top:16px;font-size:13px;color:var(--gf-sub);}
+  .meta-row .pill{background:var(--gf-bg);border-radius:14px;padding:4px 12px;}
+  .reqline{border-top:1px solid var(--gf-border);margin-top:18px;padding-top:14px;font-size:12px;color:var(--gf-red);}
+
+  .q-title{font-size:16px;font-weight:500;line-height:1.5;margin:0 0 4px;}
+  .req{color:var(--gf-red);margin-left:3px;}
+  .q-help{font-size:13px;color:var(--gf-sub);margin:0 0 16px;line-height:1.5;}
+
+  /* text answer (underline input look) */
+  .answer-line{
+    border-bottom:1px solid var(--gf-border);padding:6px 2px 9px;font-size:15px;color:var(--gf-text);
+    min-height:34px;white-space:pre-wrap;word-break:break-word;
+  }
+  .answer-line.filled{color:var(--gf-text);}
+  .answer-line.pending{color:var(--gf-red);font-style:italic;}
+  .answer-line a{color:var(--gf-accent);text-decoration:none;}
+
+  /* paragraph box look */
+  .answer-para{
+    border:1px solid var(--gf-border);border-radius:4px;padding:12px 14px;font-size:14px;
+    line-height:1.7;white-space:pre-wrap;color:var(--gf-text);background:#fafafa;
+  }
+  .answer-para b{font-weight:600;}
+
+  /* radio / checkbox rows */
+  .opt{display:flex;align-items:flex-start;gap:12px;padding:8px 2px;font-size:15px;color:var(--gf-text);}
+  .dot{width:20px;height:20px;border:2px solid #9aa0a6;border-radius:50%;flex:0 0 auto;margin-top:1px;position:relative;}
+  .sq{width:20px;height:20px;border:2px solid #9aa0a6;border-radius:3px;flex:0 0 auto;margin-top:1px;position:relative;}
+  .opt.sel .dot{border-color:var(--gf-accent);}
+  .opt.sel .dot::after{content:"";position:absolute;inset:3px;border-radius:50%;background:var(--gf-accent);}
+  .opt.sel .sq{border-color:var(--gf-accent);background:var(--gf-accent);}
+  .opt.sel .sq::after{content:"";position:absolute;left:5px;top:1px;width:6px;height:11px;border:solid #fff;border-width:0 2px 2px 0;transform:rotate(45deg);}
+  .opt.sel{font-weight:500;}
+  .opt.pending .sq{border-style:dashed;border-color:var(--gf-red);}
+  .opt-note{font-size:12px;color:var(--gf-sub);margin-left:6px;font-weight:400;font-style:italic;}
+
+  /* scale */
+  .scale-labels{display:flex;justify-content:space-between;font-size:13px;color:var(--gf-sub);margin-bottom:12px;}
+  .scale{display:flex;gap:4px;justify-content:space-between;flex-wrap:wrap;}
+  .scale .n{display:flex;flex-direction:column;align-items:center;gap:6px;font-size:13px;color:var(--gf-sub);flex:1;min-width:30px;}
+  .scale .n .dot{margin:0;}
+  .scale .n.sel{color:var(--gf-accent);font-weight:600;}
+
+  .qnum{display:inline-block;font-size:12px;font-weight:600;color:var(--gf-accent);
+        background:var(--gf-bg);border-radius:10px;padding:1px 9px;margin-bottom:10px;}
+
+  /* footer / actions (visual only) */
+  .actions{display:flex;justify-content:space-between;align-items:center;margin-top:6px;}
+  .submit-btn{background:var(--gf-accent);color:#fff;border:none;border-radius:4px;
+              padding:10px 26px;font-size:15px;font-weight:500;cursor:default;}
+  .clearform{color:var(--gf-accent);font-size:14px;}
+  .legend{max-width:680px;margin:18px auto 0;font-size:12px;color:var(--gf-sub);line-height:1.6;}
+  .legend code{background:#fff;border:1px solid var(--gf-border);border-radius:3px;padding:1px 5px;}
+  .footnote{max-width:680px;margin:8px auto 0;font-size:11px;color:#9aa0a6;text-align:center;}
+</style>
+</head>
+<body>
+
+<div class="preview-flag">
+  <b>미리보기 (제출 아님)</b> — 실제 Google Form과 동일한 레이아웃에 준비된 답안을 채워 넣은 정적 페이지입니다.
+  실제 제출은 <b>forms.gle/YDQ2TDUi8MqS9Vx28</b> 에서 진행하세요. 마감 <b>2026-06-01 23:59 PT (D-3)</b>.
+</div>
+
+<div class="wrap">
+
+  <!-- HEADER -->
+  <div class="card header-card">
+    <div class="header-band">
+      <div class="kicker">Qdrant · Vector Space Day 2026</div>
+    </div>
+    <div class="header-inner">
+      <h1>Think Outside the Bot — Project Submission</h1>
+      <p class="desc">
+        Reimagine what's possible with vector search — beyond the classical RAG chatbot.
+        Submissions close <b>11:59 PM Pacific · Monday, June 1, 2026</b>. Winners announced June 11 at
+        Vector Space Day, San Francisco. Prizes: 1st $5,000 · 2nd $3,000 · 3rd $2,000.
+      </p>
+      <div class="meta-row">
+        <span class="pill">Project: Memex</span>
+        <span class="pill">Team: Two-Weeks-Team</span>
+        <span class="pill">Qdrant 1.18 · zero LLM at runtime</span>
+      </div>
+      <div class="reqline">* Required</div>
+    </div>
+  </div>
+
+  <!-- Q1 -->
+  <div class="card">
+    <span class="qnum">1</span>
+    <p class="q-title">Email<span class="req">*</span></p>
+    <div class="answer-line filled">app.2weeks@gmail.com</div>
+    <p class="q-help" style="margin:10px 0 0;">계정 이메일 — 다른 연락처를 원하면 교체하세요.</p>
+  </div>
+
+  <!-- Q2 -->
+  <div class="card">
+    <span class="qnum">2</span>
+    <p class="q-title">Team Name (or Individual Submitter Name)<span class="req">*</span></p>
+    <div class="answer-line filled">Two-Weeks-Team</div>
+  </div>
+
+  <!-- Q3 -->
+  <div class="card">
+    <span class="qnum">3</span>
+    <p class="q-title">Project Title<span class="req">*</span></p>
+    <div class="answer-line filled">Memex — your AI session history as a navigable spatial memory</div>
+  </div>
+
+  <!-- Q4 -->
+  <div class="card">
+    <span class="qnum">4</span>
+    <p class="q-title">GitHub Repository Link<span class="req">*</span></p>
+    <div class="answer-line filled"><a href="https://github.com/Two-Weeks-Team/memex">https://github.com/Two-Weeks-Team/memex</a></div>
+    <p class="q-help" style="margin:10px 0 0;">저장소 visibility = <b>PUBLIC</b> 확인됨 (<code>gh repo view</code>).</p>
+  </div>
+
+  <!-- Q5 -->
+  <div class="card">
+    <span class="qnum">5</span>
+    <p class="q-title">Have you ensured the GitHub repository is shared with the organizer (@kanungle)?<span class="req">*</span></p>
+    <div class="opt"><span class="dot"></span><span>Yes, I have added @kanungle as a collaborator.</span></div>
+    <div class="opt sel"><span class="dot"></span><span>Yes, the repository is public.</span></div>
+  </div>
+
+  <!-- Q6 -->
+  <div class="card">
+    <span class="qnum">6</span>
+    <p class="q-title">Demo Video Link (Max 3 minutes, hosted on Loom, YouTube, Dropbox, etc.)<span class="req">*</span></p>
+    <div class="answer-line pending">⚠ PENDING — 녹화 중. 호스팅 후 링크를 여기에 붙여넣으세요.</div>
+    <p class="q-help" style="margin:10px 0 0;">유일한 남은 블로커.</p>
+  </div>
+
+  <!-- Q7 -->
+  <div class="card">
+    <span class="qnum">7</span>
+    <p class="q-title">Which category/track does your project primarily align with?<span class="req">*</span></p>
+    <div class="opt"><span class="dot"></span><span>Productivity &amp; Automation</span></div>
+    <div class="opt"><span class="dot"></span><span>Community &amp; Social Impact</span></div>
+    <div class="opt"><span class="dot"></span><span>Gaming &amp; Entertainment</span></div>
+    <div class="opt"><span class="dot"></span><span>Data Visualization &amp; Analytics<span class="opt-note">(차선책 — 비주얼 위주로 갈 경우)</span></span></div>
+    <div class="opt sel"><span class="dot"></span><span>Infrastructure &amp; Developer Tools<span class="opt-note">권장</span></span></div>
+    <div class="opt"><span class="dot"></span><span>Other (Please specify in the next question)</span></div>
+  </div>
+
+  <!-- Q8 -->
+  <div class="card">
+    <span class="qnum">8</span>
+    <p class="q-title">Brief Abstract/Summary of the Project (What problem does it solve and how?)<span class="req">*</span></p>
+    <div class="answer-para"><b>Past-you already solved this.</b> The moment your coding agent loops on a problem, Memex resurfaces the past session that fixed it — no chat, no search box. Memex is a <b>local memory layer for Claude Code and Codex</b>: it indexes every past session into <b>Qdrant 1.18</b> and turns your history into <b>eight surfaces, zero chat windows</b> — a 3D <b>Time Machine</b> card deck, a force-directed <b>Topology galaxy</b> (Distance-Matrix API) with cross-project bridge + gap insights, <b>Mix &amp; Match</b> recommendations (Discovery API), <b>proactive error recall</b> (dedicated <b>error</b> named vector + <b>has_errors</b> filter), <b>next-action prediction</b> (neighbor pivot-walk + tool-call aggregation), turn-by-turn <b>Replay</b>, a weighted <b>multi-named-vector Lens</b>, and — through a <b>12-tool MCP server</b> — an agent-memory surface that drops the right past session into the model's own turn. It matters because Claude Code silently rewrites its storage and auto-updates delete old transcripts (dozens of OPEN data-loss reports, none acknowledged in the changelog); a portable Qdrant snapshot puts that corpus permanently in your hands. Five distinct Qdrant primitives are load-bearing, not a sidecar, and the AI only embeds — <b>zero LLM at runtime, zero network calls, 100% local</b>, in Rust + Tauri 2 + Qdrant. Vannevar Bush's 1945 memex ran on associative trails, not search boxes; a vector database finally makes that literal.</div>
+  </div>
+
+  <!-- Q9 -->
+  <div class="card">
+    <span class="qnum">9</span>
+    <p class="q-title">Which submission requirements have you included in your repository?<span class="req">*</span></p>
+    <div class="opt sel"><span class="sq"></span><span>README.md file is present</span></div>
+    <div class="opt sel"><span class="sq"></span><span>Code has basic comments for documentation</span></div>
+    <div class="opt pending"><span class="sq"></span><span>Demo Video is linked above<span class="opt-note">field 6에 링크를 넣은 뒤 체크</span></span></div>
+  </div>
+
+  <!-- Q10 -->
+  <div class="card">
+    <span class="qnum">10</span>
+    <p class="q-title">Technical Difficulty Rating<span class="req">*</span></p>
+    <div class="scale-labels"><span>Very Low Difficulty</span><span>Extremely High Difficulty</span></div>
+    <div class="scale">
+      <div class="n"><span>1</span><span class="dot"></span></div>
+      <div class="n"><span>2</span><span class="dot"></span></div>
+      <div class="n"><span>3</span><span class="dot"></span></div>
+      <div class="n"><span>4</span><span class="dot"></span></div>
+      <div class="n"><span>5</span><span class="dot"></span></div>
+      <div class="n"><span>6</span><span class="dot"></span></div>
+      <div class="n"><span>7</span><span class="dot"></span></div>
+      <div class="n sel"><span>8</span><span class="dot"></span></div>
+      <div class="n"><span>9</span><span class="dot"></span></div>
+      <div class="n"><span>10</span><span class="dot"></span></div>
+    </div>
+    <p class="q-help" style="margin:14px 0 0;">Rust + Tauri 2 · 5 Qdrant primitives · client-side ONNX embeddings · WebGL topology · zero-LLM recommendation · hand-rolled MCP server + headless Docker/Prometheus.</p>
+  </div>
+
+  <!-- actions (visual only) -->
+  <div class="actions">
+    <button class="submit-btn" type="button" title="미리보기 — 실제 제출은 Google Form에서">Submit</button>
+    <span class="clearform">Clear form</span>
+  </div>
+
+</div>
+
+<div class="legend">
+  <b>범례</b> — ● 선택된 라디오 · ■ 체크된 체크박스 · <span style="color:#d93025;">빨강</span> = 미완(영상 링크) ·
+  난이도 <b>8/10</b> 선택. 출처: 라이브 Google Form(필드/옵션 verbatim) · <code>try.qdrant.tech/hackathon-vsd</code>.
+</div>
+<div class="footnote">Generated 2026-05-29 · paste-ready source: claudedocs/2026-05-29-vsd-2026-submission-FINAL.md</div>
+
+</body>
+</html>
