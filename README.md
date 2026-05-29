@@ -715,6 +715,11 @@ MEMEX_QUANT_MODE=tq-bits2 cargo bench --bench quant_sweep --manifest-path src-ta
 # → Embedder::new → bulk_index_arc → labeled-queries sweep → nDCG@10 + p95 latency.
 # `MEMEX_BENCH_LIVE=1` flips on the live runner; measured rows shipped in
 # `docs/benchmarks.md` (2026-05-28, 12-session synthetic corpus, 30 samples × 3 modes).
+# `MEMEX_CORPUS_DIR=~/.claude/projects` swaps in your real corpus instead of the
+# synthetic; one tq-bits2 row measured at 108 sessions on 2026-05-29 (see
+# `docs/benchmarks.md` §"One measured row on a real laptop corpus"). Always
+# point `MEMEX_QDRANT_URL` at an ISOLATED Qdrant — the bench drops the
+# collection per iteration.
 ```
 
 Run `memex --help` for the full surface; each subcommand has `--help` too.
