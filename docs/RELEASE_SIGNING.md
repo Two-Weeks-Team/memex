@@ -48,9 +48,11 @@ but does not include the WebKit Inspector devtools feature.
 The workflow then verifies:
 
 ```bash
-codesign --verify --verbose=2 Memex_*.dmg
-spctl --assess --type open --context context:primary-signature --verbose=4 Memex_*.dmg
-xcrun stapler validate Memex_*.dmg
+DMG_PATH="$(find src-tauri/target -path '*/release/bundle/dmg/Memex_*.dmg' -print -quit)"
+test -n "$DMG_PATH"
+codesign --verify --verbose=2 "$DMG_PATH"
+spctl --assess --type open --context context:primary-signature --verbose=4 "$DMG_PATH"
+xcrun stapler validate "$DMG_PATH"
 ```
 
 If those checks pass, the uploaded DMG should not show the "damaged because it

@@ -11,7 +11,8 @@ use anyhow::Result;
 use crate::parser;
 
 fn home_relative(parts: &[&str]) -> PathBuf {
-    let mut path = dirs::home_dir().unwrap_or_else(PathBuf::new);
+    let mut path =
+        dirs::home_dir().expect("could not resolve home directory for Memex session roots");
     for part in parts {
         path.push(part);
     }
