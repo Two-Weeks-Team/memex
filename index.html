@@ -2464,8 +2464,12 @@ VectorsConfig { multivectors: { <span class="s">"content_late"</span>: MultiVect
         <span class="new">NEW</span>
         <div class="head"><span class="ic" aria-hidden="true">🐳</span><h3>Server · one Docker image</h3></div>
         <p class="sub">Qdrant + web UI + JSON API + MCP in <em>one</em> container. The embedder is pre-baked; the corpus auto-indexes on boot — fully offline.</p>
-<pre><span class="c"># one command — Qdrant boots inside the image</span>
-<span class="p">$</span> docker run -p 8765:8765 memex-allinone
+<pre><span class="c"># build once (image is local — not on Docker Hub yet)</span>
+<span class="p">$</span> docker build -t memex-allinone -f deploy/web/Dockerfile .
+
+<span class="c"># run — Qdrant boots inside the image. --name lets the stdio MCP recipe</span>
+<span class="c"># below address the container by name.</span>
+<span class="p">$</span> docker run --name memex-allinone -p 8765:8765 memex-allinone
 <span class="c"># browser UI · JSON API · MCP — all on :8765</span></pre>
         <div class="chiprow"><span class="chip on">any OS (browser)</span><span class="chip on">JSON API</span><span class="chip on">MCP over HTTP</span><span class="chip on">offline</span><span class="chip on">non-root</span></div>
       </div>
