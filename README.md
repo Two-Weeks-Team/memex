@@ -44,7 +44,7 @@
 | **License** | [Apache-2.0](LICENSE) |
 | **Built for** | [Qdrant Vector Space Day 2026](https://qdrant.tech) — *"Think Outside the Bot."* All code authored during the hackathon build period (May 2026). |
 | **Qdrant role** | **Load-bearing, not a sidecar** — five distinct Qdrant primitives *are* the product. **No chatbot, no LLM at runtime.** |
-| **Landing page** | [two-weeks-team.github.io/memex](https://two-weeks-team.github.io/memex/) (static single-file, no JS) |
+| **Landing page** | [two-weeks-team.github.io/memex](https://two-weeks-team.github.io/memex/) (interactive single-page — live Qdrant primitive demos) |
 | **Server variant** | Run Memex headless as a **single Docker image** — Qdrant + web UI/API + MCP + Prometheus `/metrics` in one container, usable from the Claude CLI → [deploy/web/README.md](deploy/web/README.md) |
 
 ### 🧑‍⚖️ Judge path in 5 steps
@@ -848,7 +848,7 @@ This is a **hackathon MVP** built for [Qdrant Vector Space Day 2026](https://qdr
 - ✅ 🎛 **Runtime quantization knob + measured sweep** (PR #18 + PR #23 close #13) — `MEMEX_QUANT_MODE` env var (`f32` / `tq-bits1` / `tq-bits2`) swaps Qdrant collection quantization config without source edits or rebuilds. Default unchanged (`TqBits2`, matches PR #12's hardcoded production value). Companion `cargo bench --bench quant_sweep` Criterion harness is now **wired end-to-end** (PR #23): per-mode collection drop → `ensure_collection_v3` → `Embedder::new` → `bulk_index_arc` → labeled-queries sweep → nDCG@10 + p95 latency. Measured numbers on a 12-session synthetic corpus shipped in [`docs/benchmarks.md`](docs/benchmarks.md) — all 3 modes hit identical nDCG (corpus too small for quant to drop relevant points) with honest production-scale citation alongside.
 - ✅ 🪪 **First MCP write tool** (PR #22 closes #16 Stage 2) — `refresh_session_enrich(session_id)` re-runs the deterministic `enrich` pipeline and `SetPayload`-overwrites the result. Idempotent, no re-embed, no schema change. Wires `McpState.mark_indexed()` so the `memex_points_indexed_total` Prometheus counter finally increments above zero on HTTP MCP. Transport-uniform pattern: desktop stdio MCP is a no-op (no `/metrics` endpoint), HTTP MCP increments. Future write tools follow the same wiring.
 - ✅ 📦 Snapshot export/import via Qdrant HTTP API — `POST /api/snapshot/export` on the web variant (PR #12 REV-14 — `memex_snapshot_bytes` metric now live-tracked)
-- ✅ 🌐 Public landing page at [two-weeks-team.github.io/memex](https://two-weeks-team.github.io/memex/) (single-file `index.html`, no JS)
+- ✅ 🌐 Public landing page at [two-weeks-team.github.io/memex](https://two-weeks-team.github.io/memex/) (interactive `index.html` + `assets/` — constellation hero, live Lens/Topology/Discovery demos)
 - ✅ Lazy AppState init — self-heals if Qdrant is started after Memex
 - ✅ Bounded gRPC connect / request timeouts (800 ms) — dead Qdrant fails p95 < 1.5 s instead of hanging the agent hook
 - ✅ Web handler input clamps (`MAX_LIMIT=200`, `MAX_SAMPLE=500`, `MAX_PER_POINT=20`) — cheap DoS prevention at the HTTP boundary
