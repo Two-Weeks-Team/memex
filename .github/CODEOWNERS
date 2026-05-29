@@ -1,0 +1,8 @@
+# Code owners — GitHub auto-requests review from the listed owner on any PR
+# that touches the matched paths. Pair with a `main` branch-protection rule
+# ("Require review from Code Owners") to make the gate enforcing.
+
+# Landing page is the public face of the hackathon submission — changes to it
+# (or its assets) require sign-off so the adopted v11 landing doesn't drift.
+/index.html      @sgwannabe
+/assets/         @sgwannabe
