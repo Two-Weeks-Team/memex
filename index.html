@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>memex — Sense It, Spark Memory</title>
-<meta name="description" content="Turn every moment into living trails of meaning, connection, and intelligence. Memex indexes your Claude Code &amp; Codex session history into a navigable, associative memory backed by Qdrant — five named-vector lenses, MST topology, proactive recall, and 11 MCP tools for any agent. 100% local. No LLM at runtime." />
+<meta name="description" content="Turn every moment into living trails of meaning, connection, and intelligence. Memex indexes your Claude Code &amp; Codex session history into a navigable, associative memory backed by Qdrant — five named-vector lenses, MST topology, proactive recall, and 12 MCP tools (11 read + 1 write) for any agent. 100% local. No LLM at runtime." />
 <meta name="theme-color" content="#050507" />
 <meta property="og:type" content="website" />
 <meta property="og:url" content="https://two-weeks-team.github.io/memex/" />
@@ -427,6 +427,7 @@ footer .fine{ margin-top:42px; padding-top:22px; border-top:1px solid var(--line
 .mcp-chip.inspect.active{ background:#b5e48c; color:#152007; }
 .mcp-chip.snapshot.active{ background:#c792ea; color:#1b1226; }
 .mcp-chip.wrapped.active{ background:#ffd60a; color:#0a0a10; }
+.mcp-chip.write.active{ background:#7aa2f7; color:#0a0a10; }
 .tool{ transition:transform .25s ease, opacity .3s ease, box-shadow .25s ease, border-color .25s ease; }
 .tools.is-filtered .tool.dim{ opacity:.18; transform:scale(.985); }
 .tool .cat-tag{ display:inline-block; font:700 9px ui-sans-serif,system-ui,sans-serif; letter-spacing:.14em; text-transform:uppercase; padding:2px 8px; border-radius:999px; margin-left:auto; }
@@ -436,6 +437,7 @@ footer .fine{ margin-top:42px; padding-top:22px; border-top:1px solid var(--line
 .tool .cat-tag.inspect { background:rgba(181,228,140,.10); color:#b5e48c; border:1px solid rgba(181,228,140,.30); }
 .tool .cat-tag.snapshot{ background:rgba(199,146,234,.10); color:#c792ea; border:1px solid rgba(199,146,234,.30); }
 .tool .cat-tag.wrapped { background:rgba(255,214,10,.10); color:#ffd60a; border:1px solid rgba(255,214,10,.30); }
+.tool .cat-tag.write   { background:rgba(122,162,247,.10); color:#7aa2f7; border:1px solid rgba(122,162,247,.30); }
 .tool{ display:grid; grid-template-columns:24px 1fr auto; gap:14px; align-items:start; }
 .tool > div:first-of-type{ grid-column:2; }
 
@@ -727,7 +729,7 @@ footer .fine{ margin-top:42px; padding-top:22px; border-top:1px solid var(--line
       <a href="#topology">Topology</a>
       <a href="#recall">Recall</a>
       <a href="#agents">Agents</a>
-      <a href="#mcp">11 MCP tools</a>
+      <a href="#mcp">12 MCP tools</a>
       <a href="#run">Run</a>
     </nav>
     <a class="cta" href="https://github.com/Two-Weeks-Team/memex" target="_blank" rel="noopener">GitHub ↗</a>
@@ -2407,21 +2409,22 @@ VectorsConfig { multivectors: { <span class="s">"content_late"</span>: MultiVect
   </div>
 </section>
 
-<!-- ════════════════════ 11 MCP TOOLS ════════════════════ -->
+<!-- ════════════════════ 12 MCP TOOLS ════════════════════ -->
 <section id="mcp" aria-labelledby="mcp-h">
   <div class="wrap">
     <p class="eyebrow-2">The surface for agents</p>
-    <h2 id="mcp-h">11 MCP tools — the same on stdio and HTTP.</h2>
-    <p class="lead">Every Memex capability is a typed tool an agent can call. Wire <code>/.mcp.json</code> (stdio) for the desktop binary, or point <code>claude mcp add --transport http</code> at the all-in-one server. The tool surface is the same; the transport changes.</p>
+    <h2 id="mcp-h">12 MCP tools — the same on stdio and HTTP.</h2>
+    <p class="lead">Every Memex capability is a typed tool an agent can call. Wire <code>/.mcp.json</code> (stdio) for the desktop binary, or point <code>claude mcp add --transport http</code> at the all-in-one server. The tool surface is the same; the transport changes. 11 read tools + 1 write tool (PR #22 — the first MCP write tool, idempotent, no re-embed).</p>
         <div class="mcp-filter" role="tablist" aria-label="MCP tool category filter">
       <span class="mcp-filter-label">filter</span>
-      <button type="button" class="mcp-chip active" data-cat="all" aria-pressed="true">All 11</button>
+      <button type="button" class="mcp-chip active" data-cat="all" aria-pressed="true">All 12</button>
       <button type="button" class="mcp-chip discover" data-cat="discover">Discover 4</button>
       <button type="button" class="mcp-chip recall" data-cat="recall">Recall 1</button>
       <button type="button" class="mcp-chip predict" data-cat="predict">Predict 1</button>
       <button type="button" class="mcp-chip inspect" data-cat="inspect">Inspect 3</button>
       <button type="button" class="mcp-chip snapshot" data-cat="snapshot">Snapshot 1</button>
       <button type="button" class="mcp-chip wrapped" data-cat="wrapped">Wrapped 1</button>
+      <button type="button" class="mcp-chip write" data-cat="write">Write 1</button>
     </div>
     <div class="tools" role="list" data-stagger id="mcp-tools">
       <div class="tool" data-cat="discover" role="listitem"><span class="n">01</span><div><span class="nm">find_similar_sessions</span><span class="ds">Lens-weighted nearest neighbors of a query string. The slider surface in one call.</span><span class="cat-tag discover">discover</span></div></div>
@@ -2435,6 +2438,7 @@ VectorsConfig { multivectors: { <span class="s">"content_late"</span>: MultiVect
       <div class="tool" data-cat="snapshot" role="listitem"><span class="n">09</span><div><span class="nm">snapshot_export</span><span class="ds">Qdrant snapshot to disk — portable, reproducible, replayable.</span><span class="cat-tag snapshot">snapshot</span></div></div>
       <div class="tool" data-cat="discover" role="listitem"><span class="n">10</span><div><span class="nm">get_project_memory</span><span class="ds">A cwd-scoped Companion primer — past intents, decisions, pitfalls — composed deterministically, ~200–500 tokens.</span><span class="cat-tag discover">discover</span></div></div>
       <div class="tool" data-cat="wrapped" role="listitem"><span class="n">11</span><div><span class="nm">generate_wrapped_report</span><span class="ds">A one-page corpus digest — top tools, repeated decisions, debugging fingerprint, cross-agent split — pure payload aggregation, no LLM.</span><span class="cat-tag wrapped">wrapped</span></div></div>
+      <div class="tool" data-cat="write" role="listitem"><span class="n">12</span><div><span class="nm">refresh_session_enrich</span><span class="ds">The first MCP <em>write</em> tool (PR #22). Re-runs the deterministic enrich pipeline (intent / outcome / arc / topic / entities) on a session and <code>SetPayload</code>-overwrites the result. Idempotent · no re-embed · no schema change. On HTTP MCP, also what finally flips the <code>memex_points_indexed_total</code> Prometheus counter off zero.</span><span class="cat-tag write">write</span></div></div>
     </div>
     <p class="muted" style="margin-top:18px;font-size:14px">Tool registry source: <a href="https://github.com/Two-Weeks-Team/memex/blob/main/src-tauri/src/mcp.rs" target="_blank" rel="noopener">src-tauri/src/mcp.rs</a>. Wiring guide: <a href="https://github.com/Two-Weeks-Team/memex/blob/main/docs/agent-integration.md" target="_blank" rel="noopener">docs/agent-integration.md</a>.</p>
   </div>
@@ -2468,7 +2472,7 @@ VectorsConfig { multivectors: { <span class="s">"content_late"</span>: MultiVect
     </div>
 
     <div style="margin-top:24px;background:var(--card);border:1px solid var(--line);border-radius:var(--r-md);padding:18px 20px">
-      <h3 style="margin:0 0 8px">Wire any agent over MCP — two transports, same 11 tools</h3>
+      <h3 style="margin:0 0 8px">Wire any agent over MCP — two transports, same 12 tools</h3>
 <pre><span class="c"># remote MCP over HTTP (recommended for the server)</span>
 <span class="p">$</span> claude mcp add --transport http memex-web http://localhost:8765/mcp
 
