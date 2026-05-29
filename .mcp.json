@@ -5,7 +5,7 @@
       "command": "memex",
       "args": ["mcp"],
       "env": {
-        "MEMEX_PROJECT_DIR": "${CLAUDE_PROJECT_DIR}"
+        "MEMEX_PROJECT_DIR": "${CLAUDE_PROJECT_DIR:-${PWD}}"
       }
     }
   }
