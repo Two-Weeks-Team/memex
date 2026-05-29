@@ -21,15 +21,37 @@ use walkdir::WalkDir;
 /// Max chars for a title synthesized from the first user message.
 const SYNTH_TITLE_CHARS: usize = 60;
 
+/// A user "turn" beginning with one of these tags isn't real user input — it's
+/// harness/system noise injected into the conversation (background task
+/// events, system reminders, local command echoes). Skip such turns when
+/// picking a message to title the session from, otherwise the title becomes
+/// e.g. "<task-notification> <task-id>…".
+const NOISE_PREFIXES: &[&str] = &[
+    "<task-notification",
+    "<system-reminder",
+    "<local-command-caveat",
+    "<local-command-stdout",
+    "<bash-input",
+    "<bash-stdout",
+    "<bash-stderr",
+];
+
+/// True if a user message is harness-injected noise rather than real input.
+fn is_noise_turn(text: &str) -> bool {
+    let t = text.trim_start();
+    NOISE_PREFIXES.iter().any(|p| t.starts_with(p))
+}
+
 /// Build a fallback session title from a user message, for sessions where
 /// Claude never wrote an `ai-title` record. Prefers a slash-command's
-/// `<command-args>` (the actual instruction), otherwise strips the
-/// `<command-…>` wrappers Claude Code injects, then collapses whitespace and
-/// truncates to [`SYNTH_TITLE_CHARS`].
+/// `<command-args>` (the actual instruction); otherwise strips ALL injected
+/// wrapper tags (`<command-…>`, `<task-id>`, `<output-file>`, …), then
+/// collapses whitespace and truncates to [`SYNTH_TITLE_CHARS`].
 fn synthesize_title(text: &str) -> String {
     static ARGS: Lazy<Regex> =
         Lazy::new(|| Regex::new(r"(?s)<command-args>(.*?)</command-args>").unwrap());
-    static TAGS: Lazy<Regex> = Lazy::new(|| Regex::new(r"</?command-[a-z-]+>").unwrap());
+    // Any XML-ish wrapper tag the harness injects (open or close form).
+    static TAGS: Lazy<Regex> = Lazy::new(|| Regex::new(r"</?[a-z][a-z0-9-]*[^>]*>").unwrap());
     let base = match ARGS.captures(text).and_then(|c| c.get(1)) {
         Some(m) if !m.as_str().trim().is_empty() => m.as_str().to_string(),
         _ => TAGS.replace_all(text, " ").into_owned(),
@@ -224,13 +246,24 @@ pub fn parse_session(path: &Path) -> Result<Session> {
 
     // Fallback: Claude doesn't write an `ai-title` record for every session
     // (short or still-in-progress ones often lack one), so synthesize a title
-    // from the first non-empty user message instead of showing "(untitled)".
+    // from the first *real* user message. Skip harness-injected noise turns
+    // (task notifications, system reminders, command echoes) — otherwise the
+    // title becomes "<task-notification> <task-id>…". If every user turn is
+    // noise, fall back to the first non-empty one so we still beat "(untitled)".
     if session.ai_title.as_deref().map(str::trim).unwrap_or("").is_empty() {
-        if let Some(turn) = session
+        let pick = session
             .turns
             .iter()
-            .find(|t| t.role == TurnRole::User && !t.text.trim().is_empty())
-        {
+            .find(|t| {
+                t.role == TurnRole::User && !t.text.trim().is_empty() && !is_noise_turn(&t.text)
+            })
+            .or_else(|| {
+                session
+                    .turns
+                    .iter()
+                    .find(|t| t.role == TurnRole::User && !t.text.trim().is_empty())
+            });
+        if let Some(turn) = pick {
             let title = synthesize_title(&turn.text);
             if !title.is_empty() {
                 session.ai_title = Some(title);
@@ -768,6 +801,28 @@ mod title_tests {
         ]);
         let s = parse_session(f.path()).unwrap();
         assert_eq!(s.ai_title.as_deref(), Some("fix the auth bug in login.rs"));
+    }
+
+    #[test]
+    fn fallback_skips_task_notification_noise_turns() {
+        // Regression for the "<task-notification> <task-id>…" title: the first
+        // user turn is harness noise, so the title must come from the next
+        // real user message.
+        let f = jsonl(&[
+            r#"{"type":"user","uuid":"u1","message":{"role":"user","content":"<task-notification> <task-id>bkm0e3i1e</task-id> <output-file>/tmp/x</output-file>"}}"#,
+            r#"{"type":"user","uuid":"u2","message":{"role":"user","content":"add a loading spinner to the session list"}}"#,
+        ]);
+        let s = parse_session(f.path()).unwrap();
+        assert_eq!(
+            s.ai_title.as_deref(),
+            Some("add a loading spinner to the session list")
+        );
+    }
+
+    #[test]
+    fn synthesize_title_strips_all_wrapper_tags() {
+        let t = "<task-notification> <task-id>abc</task-id> hello world";
+        assert_eq!(synthesize_title(t), "abc hello world");
     }
 
     #[test]
