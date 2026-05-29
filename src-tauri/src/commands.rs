@@ -15,10 +15,9 @@ use qdrant_client::Qdrant;
 use tauri::State;
 use tokio::sync::Mutex as AsyncMutex;
 
-use crate::indexer::{
-    self, Embedder, LensWeights, SearchHit, Topology, COLLECTION,
-};
+use crate::indexer::{self, Embedder, LensWeights, SearchHit, Topology};
 use crate::parser;
+use crate::schema::COLLECTION_V3;
 
 /// AppState holds the heavyweight resources (Qdrant client + fastembed model)
 /// behind lazy slots. `.manage()` is called eagerly in `lib.rs::run()` so the
@@ -77,7 +76,10 @@ impl AppState {
                 Ok(Some(report)) => {
                     eprintln!(
                         "[memex] v2→v3 migration done: {} new points (v2 had {}, v3 was empty), {} skipped, took {}ms",
-                        report.migrated, report.v2_count, report.v2_count.saturating_sub(report.migrated), report.elapsed_ms,
+                        report.migrated,
+                        report.v2_count,
+                        report.v2_count.saturating_sub(report.migrated),
+                        report.elapsed_ms,
                     );
                 }
                 Ok(None) => {
@@ -228,8 +230,8 @@ pub async fn get_session_turns(
             _ => None,
         })
         .ok_or_else(|| "session payload missing source_path".to_string())?;
-    let validated = crate::sec::validate_session_path(std::path::Path::new(&source))
-        .map_err(stringify)?;
+    let validated =
+        crate::sec::validate_session_path(std::path::Path::new(&source)).map_err(stringify)?;
     let session = parser::parse_session(&validated).map_err(stringify)?;
     serde_json::to_value(&session).map_err(stringify)
 }
@@ -290,13 +292,9 @@ pub async fn compose_wrapped(
     limit: Option<usize>,
 ) -> Result<crate::wrapped::WrappedReport, String> {
     let qdrant = state.qdrant().await.map_err(stringify)?;
-    crate::wrapped::compose_wrapped(
-        &qdrant,
-        window_days.unwrap_or(30),
-        limit.unwrap_or(32),
-    )
-    .await
-    .map_err(stringify)
+    crate::wrapped::compose_wrapped(&qdrant, window_days.unwrap_or(30), limit.unwrap_or(32))
+        .await
+        .map_err(stringify)
 }
 
 /// **Cold Start Killer (GUI surface).** Compose a memory primer for the
@@ -326,7 +324,9 @@ pub async fn snapshot_export(path: PathBuf) -> Result<String, String> {
     let canonical = sb
         .validate_path(&path, crate::snapshot::SnapshotOp::Export)
         .map_err(stringify)?;
-    let name = indexer::snapshot_export(&canonical).await.map_err(stringify)?;
+    let name = indexer::snapshot_export(&canonical)
+        .await
+        .map_err(stringify)?;
     // ATOMICITY FIX (CodeRabbit PR #2 review, commands.rs:254): if signing
     // fails we'd leave an unsigned snapshot in the sandbox that subsequent
     // exports refuse to overwrite (sandbox `Export` op rejects existing
@@ -378,33 +378,35 @@ pub async fn snapshot_import(path: PathBuf) -> Result<String, String> {
             msg
         }
         crate::snapshot::VerifyOutcome::WarnSchemaMismatch { expected, found } => {
-            let msg = format!("snapshot schema {found} differs from current {expected} — proceeding");
+            let msg =
+                format!("snapshot schema {found} differs from current {expected} — proceeding");
             eprintln!("[memex] {msg}");
             msg
         }
         crate::snapshot::VerifyOutcome::WarnQdrantMinor { expected, found } => {
-            let msg = format!("snapshot qdrant {found} differs from current {expected} — proceeding");
+            let msg =
+                format!("snapshot qdrant {found} differs from current {expected} — proceeding");
             eprintln!("[memex] {msg}");
             msg
         }
     };
-    indexer::snapshot_import(&canonical).await.map_err(stringify)?;
+    indexer::snapshot_import(&canonical)
+        .await
+        .map_err(stringify)?;
     Ok(warning)
 }
 
 /// Returns a quick collection-level health summary for the splash screen.
 #[tauri::command]
-pub async fn collection_info(
-    state: State<'_, AppStateArc>,
-) -> Result<serde_json::Value, String> {
+pub async fn collection_info(state: State<'_, AppStateArc>) -> Result<serde_json::Value, String> {
     let qdrant = state.qdrant().await.map_err(stringify)?;
     let info = qdrant
-        .collection_info(COLLECTION)
+        .collection_info(COLLECTION_V3)
         .await
         .map_err(stringify)?;
     let r = info.result.unwrap_or_default();
     Ok(serde_json::json!({
-        "collection": COLLECTION,
+        "collection": COLLECTION_V3,
         "points_count": r.points_count.unwrap_or(0),
         "indexed_vectors_count": r.indexed_vectors_count.unwrap_or(0),
         "status": r.status,
@@ -450,7 +452,9 @@ pub async fn refresh_index(
     let total = sessions.len();
     let qdrant = state.qdrant().await.map_err(stringify)?;
     let embedder = state.embedder().await.map_err(stringify)?;
-    indexer::ensure_collection(&qdrant).await.map_err(stringify)?;
+    indexer::ensure_collection(&qdrant)
+        .await
+        .map_err(stringify)?;
     let report = indexer::bulk_index_arc(&qdrant, embedder, &sessions)
         .await
         .map_err(stringify)?;
@@ -753,7 +757,9 @@ pub async fn tail_recent_errors(
             continue;
         }
         let Ok(meta) = entry.metadata() else { continue };
-        let Ok(modified) = meta.modified() else { continue };
+        let Ok(modified) = meta.modified() else {
+            continue;
+        };
         if modified < cutoff {
             continue;
         }
@@ -779,7 +785,9 @@ pub async fn tail_recent_errors(
             continue;
         }
 
-        let Ok(session) = parser::parse_session(p) else { continue };
+        let Ok(session) = parser::parse_session(p) else {
+            continue;
+        };
         let mut latest_err: Option<String> = None;
         for turn in session.turns.iter().rev().take(6) {
             if latest_err.is_some() {
@@ -863,14 +871,9 @@ pub async fn mix_match_with_pairs(
     limit: Option<u64>,
 ) -> Result<Vec<crate::indexer::SearchHit>, String> {
     let qdrant = state.qdrant().await.map_err(stringify)?;
-    crate::retrieval::mix_match_with_pairs(
-        &qdrant,
-        &target_session_id,
-        &pairs,
-        limit.unwrap_or(20),
-    )
-    .await
-    .map_err(stringify)
+    crate::retrieval::mix_match_with_pairs(&qdrant, &target_session_id, &pairs, limit.unwrap_or(20))
+        .await
+        .map_err(stringify)
 }
 
 /// KB-05 — Scroll v3 with order_by. Backward-compat: when `order_by` is
@@ -900,15 +903,9 @@ pub async fn lens_search_grouped(
 ) -> Result<crate::retrieval::LensSearchResponse, String> {
     let qdrant = state.qdrant().await.map_err(stringify)?;
     let embedder = state.embedder().await.map_err(stringify)?;
-    crate::retrieval::lens_search_grouped(
-        &qdrant,
-        &embedder,
-        &query,
-        group_by,
-        limit.unwrap_or(20),
-    )
-    .await
-    .map_err(stringify)
+    crate::retrieval::lens_search_grouped(&qdrant, &embedder, &query, group_by, limit.unwrap_or(20))
+        .await
+        .map_err(stringify)
 }
 
 /// KA-04 — RelevanceFeedback re-ranking. Caller supplies the previous query

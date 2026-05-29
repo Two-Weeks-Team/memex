@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "tauri": "tauri",
-    "tauri:dist": "tauri build -- --no-default-features"
+    "tauri:dist": "tauri build -- --no-default-features",
+    "tauri:release:macos": "tauri build --bundles dmg --target aarch64-apple-darwin -- --no-default-features"
   },
   "devDependencies": {
     "@playwright/test": "^1.60.0",

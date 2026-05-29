@@ -27,7 +27,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::Mutex as AsyncMutex;
 
@@ -126,6 +126,13 @@ impl McpState {
         }
         let c = Arc::new(indexer::connect().await?);
         indexer::ensure_collection(&c).await?;
+        crate::crud::ensure_collection_v3(&c).await?;
+        let c_for_bg = c.clone();
+        tokio::spawn(async move {
+            if let Err(e) = crate::crud::migrate_v2_to_v3_if_needed(&c_for_bg).await {
+                eprintln!("[memex-mcp] v2-to-v3 migration failed: {e:#}");
+            }
+        });
         *g = Some(c.clone());
         Ok(c)
     }
@@ -163,7 +170,10 @@ pub async fn run() -> Result<()> {
         let req: JsonRpcRequest = match serde_json::from_str(line) {
             Ok(r) => r,
             Err(e) => {
-                eprintln!("[memex-mcp] parse error: {e} · line: {}", &line[..line.len().min(160)]);
+                eprintln!(
+                    "[memex-mcp] parse error: {e} · line: {}",
+                    &line[..line.len().min(160)]
+                );
                 continue;
             }
         };
@@ -239,7 +249,7 @@ pub async fn handle_rpc_value(state: &SharedMcpState, body: Value) -> Option<Val
                 "jsonrpc": "2.0",
                 "id": Value::Null,
                 "error": { "code": -32700, "message": format!("parse error: {e}") }
-            }))
+            }));
         }
     };
     if req.jsonrpc != "2.0" {
@@ -315,7 +325,7 @@ fn tools_catalog() -> Value {
         "tools": [
             {
                 "name": "find_similar_sessions",
-                "description": "Find past Claude Code sessions semantically similar to a free-text query. Searches Memex's local Qdrant index across five named vectors (content, tool, path, error, code) and returns ranked sessions with per-vector contribution scores.",
+                "description": "Find past Claude Code and Codex sessions semantically similar to a free-text query. Searches Memex's local Qdrant index across five named vectors (content, tool, path, error, code) and returns ranked sessions with per-vector contribution scores.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -400,7 +410,7 @@ fn tools_catalog() -> Value {
             },
             {
                 "name": "list_recent_sessions",
-                "description": "List sessions in ~/.claude/projects sorted most-recent first, with project name, git branch, turn counts, has_errors. Independent of Qdrant — works even before the index is fully warmed up.",
+                "description": "List sessions across ~/.claude/projects, ~/.codex/sessions, and legacy ~/.claude/transcripts sorted most-recent first. Independent of Qdrant — works even before the index is fully warmed up.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -494,19 +504,27 @@ async fn tool_call(state: &Arc<McpState>, params: Value) -> Result<Value> {
 
     let result_json: Value = match name {
         "find_similar_sessions" => {
-            let query = args.get("query").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let query = args
+                .get("query")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
             let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(10);
-            let weights: LensWeights = serde_json::from_value(
-                args.get("weights").cloned().unwrap_or(Value::Null),
-            )
-            .unwrap_or_default();
+            let weights: LensWeights =
+                serde_json::from_value(args.get("weights").cloned().unwrap_or(Value::Null))
+                    .unwrap_or_default();
             let qdrant = state.qdrant().await?;
             let embedder = state.embedder().await?;
-            let hits = indexer::lens_search(&qdrant, &embedder, &query, &weights, limit, 60).await?;
+            let hits =
+                indexer::lens_search(&qdrant, &embedder, &query, &weights, limit, 60).await?;
             serde_json::to_value(hits)?
         }
         "find_similar_error" => {
-            let text = args.get("error_text").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let text = args
+                .get("error_text")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
             let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(5);
             let qdrant = state.qdrant().await?;
             let embedder = state.embedder().await?;
@@ -514,13 +532,28 @@ async fn tool_call(state: &Arc<McpState>, params: Value) -> Result<Value> {
             serde_json::to_value(hits)?
         }
         "predict_next_action" => {
-            let session_id = args.get("session_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let last_n = args.get("last_n_turns").and_then(|v| v.as_u64()).unwrap_or(3) as usize;
+            let session_id = args
+                .get("session_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let last_n = args
+                .get("last_n_turns")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(3) as usize;
             let horizon = args.get("horizon").and_then(|v| v.as_u64()).unwrap_or(3) as usize;
             let neighbors = args.get("neighbors").and_then(|v| v.as_u64()).unwrap_or(8);
             let qdrant = state.qdrant().await?;
             let embedder = state.embedder().await?;
-            let ctx = indexer::predict_next_actions(&qdrant, &embedder, &session_id, last_n, horizon, neighbors).await?;
+            let ctx = indexer::predict_next_actions(
+                &qdrant,
+                &embedder,
+                &session_id,
+                last_n,
+                horizon,
+                neighbors,
+            )
+            .await?;
             serde_json::to_value(ctx)?
         }
         "mix_similar_sessions" => {
@@ -538,7 +571,10 @@ async fn tool_call(state: &Arc<McpState>, params: Value) -> Result<Value> {
             serde_json::to_value(hits)?
         }
         "get_session_summary" => {
-            let session_id = args.get("session_id").and_then(|v| v.as_str()).unwrap_or("");
+            let session_id = args
+                .get("session_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
             let qdrant = state.qdrant().await?;
             let payload = indexer::get_session_payload(&qdrant, session_id).await?;
             match payload {
@@ -553,7 +589,10 @@ async fn tool_call(state: &Arc<McpState>, params: Value) -> Result<Value> {
             }
         }
         "get_session_turn" => {
-            let session_id = args.get("session_id").and_then(|v| v.as_str()).unwrap_or("");
+            let session_id = args
+                .get("session_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
             let turn_index = args.get("turn_index").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
             let qdrant = state.qdrant().await?;
             let payload = indexer::get_session_payload(&qdrant, session_id)
@@ -567,23 +606,26 @@ async fn tool_call(state: &Arc<McpState>, params: Value) -> Result<Value> {
                     _ => None,
                 })
                 .ok_or_else(|| anyhow::anyhow!("payload missing source_path"))?;
-            let session = parser::parse_session(std::path::Path::new(&source))?;
-            let turn = session
-                .turns
-                .get(turn_index)
-                .ok_or_else(|| anyhow::anyhow!("turn_index {} out of range (max {})", turn_index, session.turns.len().saturating_sub(1)))?;
+            let source_agent = indexer::payload_str(&payload, "source_agent")
+                .unwrap_or_else(|| "claude_code".to_string());
+            let validated = crate::sec::validate_session_path(std::path::Path::new(&source))?;
+            let session = if source_agent == "codex" {
+                crate::codex_parser::parse_codex_session(&validated)?
+            } else {
+                parser::parse_session(&validated)?
+            };
+            let turn = session.turns.get(turn_index).ok_or_else(|| {
+                anyhow::anyhow!(
+                    "turn_index {} out of range (max {})",
+                    turn_index,
+                    session.turns.len().saturating_sub(1)
+                )
+            })?;
             serde_json::to_value(turn)?
         }
         "list_recent_sessions" => {
             let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(30) as usize;
-            // Unify modern projects/ + legacy transcripts/ — same behaviour as
-            // the Tauri command `list_sessions` so any MCP client sees the
-            // same corpus the desktop UI does (pre-v2.1.114 transcripts
-            // included).
-            let mut sessions = parser::scan_dir(&default_projects_root())?;
-            if let Ok(legacy) = parser::scan_transcripts_dir(&default_transcripts_root()) {
-                sessions.extend(legacy);
-            }
+            let mut sessions = scan_all_roots()?;
             sessions.sort_by(|a, b| b.start_time.cmp(&a.start_time));
             let summaries: Vec<crate::summary::SessionSummary> = sessions
                 .into_iter()
@@ -596,7 +638,8 @@ async fn tool_call(state: &Arc<McpState>, params: Value) -> Result<Value> {
             let sample = args.get("sample").and_then(|v| v.as_u64()).unwrap_or(80) as u32;
             let per_point = args.get("per_point").and_then(|v| v.as_u64()).unwrap_or(6) as u32;
             let qdrant = state.qdrant().await?;
-            let topo = indexer::topology(&qdrant, sample, per_point, Some(default_projects_root())).await?;
+            let topo = indexer::topology(&qdrant, sample, per_point, Some(default_projects_root()))
+                .await?;
             serde_json::to_value(topo)?
         }
         "snapshot_export" => {
@@ -626,23 +669,22 @@ async fn tool_call(state: &Arc<McpState>, params: Value) -> Result<Value> {
             // semantic-neighbor pass. PR #8 follow-up #1 — centralized
             // in `companion::compose_memory_primer_lazy_load` so the
             // peek-then-load branch isn't hand-rolled at every caller.
-            let primer = companion::compose_memory_primer_lazy_load(
-                &qdrant,
-                &cwd,
-                limit,
-                || async { state.embedder().await },
-            )
-            .await?;
+            let primer =
+                companion::compose_memory_primer_lazy_load(&qdrant, &cwd, limit, || async {
+                    state.embedder().await
+                })
+                .await?;
             serde_json::to_value(primer)?
         }
         "generate_wrapped_report" => {
-            let window_days =
-                args.get("window_days").and_then(|v| v.as_u64()).unwrap_or(30) as u32;
+            let window_days = args
+                .get("window_days")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(30) as u32;
             let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(32) as usize;
             let qdrant = state.qdrant().await?;
             // Wrapped is payload-only — no embedder needed. (Codex P2-a.)
-            let report =
-                wrapped::compose_wrapped(&qdrant, window_days, limit).await?;
+            let report = wrapped::compose_wrapped(&qdrant, window_days, limit).await?;
             serde_json::to_value(report)?
         }
         // ─────────────────────────────────────────────────────────────────
@@ -713,14 +755,16 @@ async fn tool_call(state: &Arc<McpState>, params: Value) -> Result<Value> {
             //    PointId from `indexer::point_id` to match the same UUID v5
             //    scheme the indexer uses on insert.
             use qdrant_client::qdrant::{
-                point_id::PointIdOptions, points_selector::PointsSelectorOneOf,
-                PointId, PointsIdsList, SetPayloadPointsBuilder,
+                PointId, PointsIdsList, SetPayloadPointsBuilder, point_id::PointIdOptions,
+                points_selector::PointsSelectorOneOf,
             };
             let pid = PointId {
                 point_id_options: Some(PointIdOptions::Uuid(indexer::point_id(session_id))),
             };
             let req = SetPayloadPointsBuilder::new(COLLECTION_V3, new_payload)
-                .points_selector(PointsSelectorOneOf::Points(PointsIdsList { ids: vec![pid] }))
+                .points_selector(PointsSelectorOneOf::Points(PointsIdsList {
+                    ids: vec![pid],
+                }))
                 .wait(true);
             qdrant.set_payload(req).await?;
 
@@ -761,7 +805,9 @@ fn qdrant_value_to_json(v: qdrant_client::qdrant::Value) -> Value {
             .map(Value::Number)
             .unwrap_or(Value::Null),
         Some(Kind::StringValue(s)) => Value::String(s),
-        Some(Kind::ListValue(l)) => Value::Array(l.values.into_iter().map(qdrant_value_to_json).collect()),
+        Some(Kind::ListValue(l)) => {
+            Value::Array(l.values.into_iter().map(qdrant_value_to_json).collect())
+        }
         Some(Kind::StructValue(s)) => {
             let mut m = serde_json::Map::new();
             for (k, vv) in s.fields {
@@ -783,6 +829,15 @@ fn default_projects_root() -> PathBuf {
     }
 }
 
+fn default_codex_root() -> PathBuf {
+    // WIN-01: see default_projects_root() above.
+    if let Some(home) = dirs::home_dir() {
+        home.join(".codex").join("sessions")
+    } else {
+        PathBuf::from(".codex/sessions")
+    }
+}
+
 fn default_transcripts_root() -> PathBuf {
     // WIN-01: see default_projects_root() above.
     if let Some(home) = dirs::home_dir() {
@@ -790,4 +845,41 @@ fn default_transcripts_root() -> PathBuf {
     } else {
         PathBuf::from(".claude/transcripts")
     }
+}
+
+fn scan_all_roots() -> Result<Vec<parser::Session>> {
+    let mut all = Vec::new();
+    let claude_root = default_projects_root();
+    if claude_root.exists() {
+        match parser::scan_dir(&claude_root) {
+            Ok(mut sessions) => all.append(&mut sessions),
+            Err(e) => eprintln!("[memex-mcp] claude root scan: {e:#}"),
+        }
+    }
+
+    let codex_root = default_codex_root();
+    if codex_root.exists() {
+        match crate::codex_parser::scan_codex_dir(&codex_root) {
+            Ok(mut sessions) => all.append(&mut sessions),
+            Err(e) => eprintln!("[memex-mcp] codex root scan: {e:#}"),
+        }
+    }
+
+    let transcripts_root = default_transcripts_root();
+    if transcripts_root.exists() {
+        match parser::scan_transcripts_dir(&transcripts_root) {
+            Ok(mut sessions) => all.append(&mut sessions),
+            Err(e) => eprintln!("[memex-mcp] legacy transcripts scan: {e:#}"),
+        }
+    }
+
+    if all.is_empty() {
+        anyhow::bail!(
+            "no sessions found — neither {} nor {} nor {} contained parseable rollouts",
+            claude_root.display(),
+            codex_root.display(),
+            transcripts_root.display(),
+        );
+    }
+    Ok(all)
 }
