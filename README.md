@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="assets/memex-logo.png" alt="Memex" width="104" height="104" />
+
 # Memex
 
 ### Your AI session history as a navigable spatial memory.
