@@ -129,12 +129,20 @@ const MAX_INDEX_PER_TICK: usize = 30;
 
 /// Resolve the per-tick warm-up cap: `MEMEX_WARMUP_BATCH` if set to a positive
 /// integer, else [`MAX_INDEX_PER_TICK`].
+///
+/// Read once and cached in a `OnceLock` — the watcher calls this every tick,
+/// and reading `std::env::var` repeatedly is both wasteful and unsound if any
+/// thread were to mutate the environment concurrently (Gemini review on PR #31).
+/// The cap is a startup tunable, so resolving it once is the correct semantics.
 fn max_index_per_tick() -> usize {
-    std::env::var("MEMEX_WARMUP_BATCH")
-        .ok()
-        .and_then(|s| s.parse::<usize>().ok())
-        .filter(|&n| n > 0)
-        .unwrap_or(MAX_INDEX_PER_TICK)
+    static CAP: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *CAP.get_or_init(|| {
+        std::env::var("MEMEX_WARMUP_BATCH")
+            .ok()
+            .and_then(|s| s.parse::<usize>().ok())
+            .filter(|&n| n > 0)
+            .unwrap_or(MAX_INDEX_PER_TICK)
+    })
 }
 
 /// First-tick boot delay — wait this long after app start before doing
