@@ -108,10 +108,40 @@ fn quant_sweep(c: &mut Criterion) {
 
     // 1. Connect + 2. drop existing collection so the recreate picks up the
     //    current QuantMode + 3. embedder init + 4. corpus indexing.
-    let corpus_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    //
+    // Corpus path resolution:
+    //   - `MEMEX_CORPUS_DIR` env var (absolute or `~`-prefixed) → use that
+    //   - otherwise fall back to the in-repo synthetic sample-corpus
+    //
+    // The labeled-queries fixture is hard-coupled to sample-corpus session IDs,
+    // so nDCG is only meaningful when the env var is unset (or explicitly
+    // points back at sample-corpus). For production-scale runs the bench still
+    // reports indexing throughput + p95 query latency from Criterion; nDCG is
+    // suppressed with a "N/A" marker so the reader isn't misled.
+    let sample_corpus = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .expect("workspace root")
         .join("examples/sample-corpus");
+    let corpus_path = match std::env::var("MEMEX_CORPUS_DIR").ok().filter(|s| !s.is_empty()) {
+        Some(raw) => {
+            let expanded = if let Some(rest) = raw.strip_prefix("~/") {
+                std::env::var("HOME")
+                    .map(|h| PathBuf::from(h).join(rest))
+                    .unwrap_or_else(|_| PathBuf::from(&raw))
+            } else if raw == "~" {
+                std::env::var("HOME").map(PathBuf::from).unwrap_or_else(|_| PathBuf::from(&raw))
+            } else {
+                PathBuf::from(&raw)
+            };
+            eprintln!(
+                "[quant_sweep] MEMEX_CORPUS_DIR set → using corpus at {} (nDCG suppressed unless this matches the sample-corpus labeled-queries fixture)",
+                expanded.display()
+            );
+            expanded
+        }
+        None => sample_corpus.clone(),
+    };
+    let corpus_is_sample = corpus_path == sample_corpus;
     let (qdrant, embedder) = rt.block_on(async {
         eprintln!("[quant_sweep] connecting to Qdrant…");
         let q = Arc::new(indexer::connect().await.expect("Qdrant connect"));
@@ -176,26 +206,48 @@ fn quant_sweep(c: &mut Criterion) {
     group.finish();
 
     // 6. nDCG measurement — separate pass over every query, not timed.
-    let mut ndcg_sum = 0.0_f64;
-    for q in &queries {
-        let actual: Vec<String> = rt
-            .block_on(async {
-                indexer::lens_search(&qdrant, &embedder, &q.query, &weights, 10, 50).await
-            })
-            .expect("lens_search (ndcg pass)")
-            .into_iter()
-            .map(|h| h.session_id)
-            .collect();
-        ndcg_sum += eval_ndcg::ndcg_at_10(&actual, &q.relevant_ids);
+    //    Only meaningful when the corpus is sample-corpus (labeled queries
+    //    reference its session IDs). For production-scale corpora we still
+    //    run the queries to exercise the search path, but report N/A.
+    if corpus_is_sample {
+        let mut ndcg_sum = 0.0_f64;
+        for q in &queries {
+            let actual: Vec<String> = rt
+                .block_on(async {
+                    indexer::lens_search(&qdrant, &embedder, &q.query, &weights, 10, 50).await
+                })
+                .expect("lens_search (ndcg pass)")
+                .into_iter()
+                .map(|h| h.session_id)
+                .collect();
+            ndcg_sum += eval_ndcg::ndcg_at_10(&actual, &q.relevant_ids);
+        }
+        let mean_ndcg = ndcg_sum / (queries.len() as f64);
+        println!(
+            "[quant_sweep] RESULT  mode={}  nDCG@10={:.4}  corpus={}  queries={}",
+            mode.as_name(),
+            mean_ndcg,
+            corpus_path.display(),
+            queries.len()
+        );
+    } else {
+        // Production-scale path: exercise lens_search once per query (untimed)
+        // so any panics surface, then report N/A. Criterion's `query_p95` group
+        // above already captured the timed measurement.
+        for q in &queries {
+            let _ = rt
+                .block_on(async {
+                    indexer::lens_search(&qdrant, &embedder, &q.query, &weights, 10, 50).await
+                })
+                .expect("lens_search (production-scale shake-out)");
+        }
+        println!(
+            "[quant_sweep] RESULT  mode={}  nDCG@10=N/A (corpus != sample-corpus; labeled-queries fixture not matched)  corpus={}  queries={}",
+            mode.as_name(),
+            corpus_path.display(),
+            queries.len()
+        );
     }
-    let mean_ndcg = ndcg_sum / (queries.len() as f64);
-    println!(
-        "[quant_sweep] RESULT  mode={}  nDCG@10={:.4}  corpus={}  queries={}",
-        mode.as_name(),
-        mean_ndcg,
-        corpus_path.display(),
-        queries.len()
-    );
     println!(
         "[quant_sweep] criterion report: target/criterion/quant/{}/query_p95/report/index.html",
         mode.as_name()

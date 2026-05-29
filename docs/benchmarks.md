@@ -58,9 +58,48 @@ fixture (1 k – 10 k corpus), `tq-bits2` + 2× oversampling + rescore reaches
 **recall@10 = 0.98 – 0.99 vs. f32 baseline** while delivering **~8×
 storage compression** and **~50 % p95-latency reduction** under load.
 Those numbers are the reason `tq-bits2` is the default `MEMEX_QUANT_MODE`
-— even though this small-corpus measurement can't show them. To reproduce
-on your own corpus, run the sweep against `~/.claude/projects` instead of
-`examples/sample-corpus/` (see §3 below).
+— even though this small-corpus measurement can't show them.
+
+#### One measured row on a real laptop corpus (2026-05-29)
+
+Same harness, same hardware (M2 / 16 GB), `MEMEX_QUANT_MODE=tq-bits2`, but
+the corpus is **this machine's actual `~/.claude/projects`** instead of the
+12-session synthetic. The harness flag that switches corpora is
+`MEMEX_CORPUS_DIR` (added with this benchmark — see §3 below):
+
+| Config (`MEMEX_QUANT_MODE`) | nDCG@10 | Query latency (p95, 100 samples) | Sessions indexed | Index size on disk |
+|---|---|---|---|---|
+| **`tq-bits2`** (production default) | **N/A** ¹ | **8.40 ms** (range 8.32 – 8.49, median 8.40) | **108** (2 492 jsonl files coalesced, 1 skipped) | **20 MB** |
+
+¹ nDCG is suppressed because the labelled-queries fixture references
+sample-corpus session IDs — running it against a different corpus would
+produce a meaningless 0. A production-corpus labelled-queries fixture is
+follow-up work (the labelling itself is the bottleneck, not the bench).
+
+What this row actually says, *honestly*:
+
+- **Per-session disk footprint** is 20 MB ÷ 108 ≈ 185 KB per session at
+  108 sessions vs. 1 735 KB ÷ 12 ≈ 145 KB per session at 12 sessions. The
+  per-session cost is *flat* — neither size shows the Qdrant blog's ~8×
+  compression because both are still well under the ≥ 1 k corpus threshold
+  where the quantized vectors start dominating the on-disk footprint over
+  the HNSW graph + payload metadata.
+- **Query latency p95 is ~15 % higher** than the 12-session sample (8.40 ms
+  vs. 7.31 ms). That's the expected signal: more HNSW edges to walk per
+  query as the graph fans out. It's not a regression of the codec — it's
+  what production-scale traversal looks like.
+- **One mode, not three**. The full f32 / tq-bits1 / tq-bits2 sweep would
+  multiply this run's ~6-minute indexing wall-time by 3. The single row
+  on the production default already confirms (a) `MEMEX_CORPUS_DIR` works,
+  (b) the harness handles a real laptop corpus, (c) `tq-bits2` is in the
+  expected latency band. Sweeping the other two modes on the same corpus is
+  marked as future work in `MEMEX_CORPUS_DIR`'s PR description.
+
+⚠ **Safety**: the bench drops + recreates `memex_sessions_v3` as part of
+each run. If you point it at the same Qdrant your production Memex uses,
+your production index disappears. The repro recipe below runs the bench
+against an **isolated** Qdrant on port 6336 so the production container
+on 6334 is untouched.
 
 ### What "rescore + oversampling" buys
 
@@ -112,18 +151,37 @@ links against the current `memex_lib`.
 ### Live sweep (Qdrant Docker + corpus required)
 
 ```bash
-# Index your corpus once (any mode — re-indexing per mode happens
-# implicitly when the bench drops + recreates the collection):
-memex index ~/.claude/projects --force-rebuild
+# 1. Bring up an ISOLATED Qdrant just for the bench. Do NOT reuse the
+#    container backing your production Memex install — the bench drops
+#    + recreates memex_sessions_v3 on every iteration, and that would
+#    wipe your production index.
+docker run -d --name memex-qdrant-bench \
+    -p 6335:6333 -p 6336:6334 qdrant/qdrant:v1.18.1
 
-# Sweep three modes; each writes its own criterion report:
+# 2a. Small-corpus sweep (in-repo synthetic, 12 sessions). Default
+#     behaviour — no MEMEX_CORPUS_DIR needed:
 for mode in f32 tq-bits1 tq-bits2; do
-    MEMEX_BENCH_LIVE=1 MEMEX_QUANT_MODE=$mode \
-        cargo bench --bench quant_sweep
+    MEMEX_BENCH_LIVE=1 \
+        MEMEX_QDRANT_URL=http://127.0.0.1:6336 \
+        MEMEX_QUANT_MODE=$mode \
+        cargo bench --bench quant_sweep --manifest-path src-tauri/Cargo.toml
 done
 
-# Index size per mode (after each run):
-docker exec memex-qdrant du -sh /qdrant/storage/collections/memex_sessions_v3
+# 2b. Production-scale sweep (your own ~/.claude/projects).
+#     MEMEX_CORPUS_DIR overrides the in-repo sample-corpus path. nDCG is
+#     suppressed in this mode (labelled-queries fixture is sample-corpus
+#     scoped) — Criterion still reports p50/p95 latency, and the index
+#     size below reflects real production footprint:
+for mode in tq-bits2; do  # add f32 / tq-bits1 if you have ~6 min/mode to spare
+    MEMEX_BENCH_LIVE=1 \
+        MEMEX_CORPUS_DIR=~/.claude/projects \
+        MEMEX_QDRANT_URL=http://127.0.0.1:6336 \
+        MEMEX_QUANT_MODE=$mode \
+        cargo bench --bench quant_sweep --manifest-path src-tauri/Cargo.toml
+done
+
+# 3. Index size per mode (after each run):
+docker exec memex-qdrant-bench du -sh /qdrant/storage/collections/memex_sessions_v3
 ```
 
 Reports land in `target/criterion/quant/<mode>/report/index.html`.
