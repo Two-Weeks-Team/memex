@@ -19,8 +19,8 @@ use crate::indexer::{self, Embedder, LensWeights, SearchHit, Topology};
 use crate::parser;
 use crate::schema::COLLECTION_V3;
 use crate::session_roots::{
-    default_history_path, default_projects_root, default_transcripts_root, scan_all_roots,
-    scan_root_routed,
+    default_history_path, default_projects_root, default_transcripts_root, parse_session_routed,
+    scan_all_roots, scan_root_routed,
 };
 
 /// AppState holds the heavyweight resources (Qdrant client + fastembed model)
@@ -236,7 +236,15 @@ pub async fn get_session_turns(
         .ok_or_else(|| "session payload missing source_path".to_string())?;
     let validated =
         crate::sec::validate_session_path(std::path::Path::new(&source)).map_err(stringify)?;
-    let session = parser::parse_session(&validated).map_err(stringify)?;
+    let source_agent = payload
+        .get("source_agent")
+        .and_then(|v| v.kind.as_ref())
+        .and_then(|k| match k {
+            qdrant_client::qdrant::value::Kind::StringValue(s) => Some(s.as_str()),
+            _ => None,
+        })
+        .unwrap_or("claude_code");
+    let session = parse_session_routed(source_agent, &validated).map_err(stringify)?;
     serde_json::to_value(&session).map_err(stringify)
 }
 

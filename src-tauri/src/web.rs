@@ -680,9 +680,18 @@ async fn dispatch_invoke(s: &WebState, cmd: &str, args: Value) -> ApiResult {
                     qdrant_client::qdrant::value::Kind::StringValue(s) => Some(s.clone()),
                     _ => None,
                 })
-                .ok_or((StatusCode::BAD_REQUEST, "session payload missing source_path".to_string()))?;
-            let validated = sec::validate_session_path(std::path::Path::new(&source)).map_err(err500)?;
-            ok_json(parser::parse_session(&validated).map_err(err500)?)
+                .ok_or((
+                    StatusCode::BAD_REQUEST,
+                    "session payload missing source_path".to_string(),
+                ))?;
+            let validated =
+                sec::validate_session_path(std::path::Path::new(&source)).map_err(err500)?;
+            let source_agent = indexer::payload_str(&payload, "source_agent")
+                .unwrap_or_else(|| "claude_code".to_string());
+            ok_json(
+                crate::session_roots::parse_session_routed(&source_agent, &validated)
+                    .map_err(err500)?,
+            )
         }
         "list_sessions" => {
             // PR6-C: a user-supplied `path` is sandbox-validated (403 on

@@ -48,6 +48,41 @@ fn has_component_pair(path: &Path, first: &str, second: &str) -> bool {
         .any(|window| window[0] == first && window[1] == second)
 }
 
+fn is_rollout_jsonl_name(name: &str) -> bool {
+    name.get(..8)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("rollout-"))
+        && name
+            .get(name.len().saturating_sub(6)..)
+            .is_some_and(|suffix| suffix.eq_ignore_ascii_case(".jsonl"))
+}
+
+fn is_under_existing_root(path: &Path, root: &Path) -> bool {
+    let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    let Ok(canonical_root) = root.canonicalize() else {
+        return false;
+    };
+    canonical.starts_with(canonical_root)
+}
+
+pub fn is_legacy_transcript_path(path: &Path) -> bool {
+    is_under_existing_root(path, &default_transcripts_root())
+}
+
+/// Route one already-validated session file to the parser for its envelope.
+///
+/// `source_agent` distinguishes Codex from Claude Code, while the legacy
+/// `~/.claude/transcripts/ses_*.jsonl` corpus needs a Claude-specific parser
+/// because those files do not use the modern project JSONL envelope.
+pub fn parse_session_routed(source_agent: &str, path: &Path) -> Result<parser::Session> {
+    if source_agent == "codex" {
+        crate::codex_parser::parse_codex_session(path)
+    } else if is_legacy_transcript_path(path) {
+        parser::parse_transcript_session(path)
+    } else {
+        parser::parse_session(path)
+    }
+}
+
 /// Route a single explicit root to the right parser.
 ///
 /// Codex roots are detected both by canonical path components and by rollout
@@ -55,6 +90,9 @@ fn has_component_pair(path: &Path, first: &str, second: &str) -> bool {
 /// correct envelope.
 pub fn scan_root_routed(root: &Path) -> Result<Vec<parser::Session>> {
     let canonical = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    if is_under_existing_root(&canonical, &default_transcripts_root()) {
+        return parser::scan_transcripts_dir(&canonical);
+    }
     if has_component_pair(&canonical, ".codex", "sessions") {
         return crate::codex_parser::scan_codex_dir(&canonical);
     }
@@ -64,8 +102,8 @@ pub fn scan_root_routed(root: &Path) -> Result<Vec<parser::Session>> {
         .into_iter()
         .filter_map(|entry| entry.ok())
         .find(|entry| {
-            let name = entry.file_name().to_string_lossy().to_lowercase();
-            name.starts_with("rollout-") && name.ends_with(".jsonl")
+            let name = entry.file_name().to_string_lossy();
+            is_rollout_jsonl_name(&name)
         });
     if first_rollout.is_some() {
         return crate::codex_parser::scan_codex_dir(&canonical);
@@ -112,4 +150,29 @@ pub fn scan_all_roots(log_prefix: &str) -> Result<Vec<parser::Session>> {
     }
 
     Ok(all)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[test]
+    fn t_rollout_sniff_is_case_insensitive_without_lowercase_copy() {
+        assert!(is_rollout_jsonl_name("rollout-2026.jsonl"));
+        assert!(is_rollout_jsonl_name("ROLLOUT-2026.JSONL"));
+        assert!(!is_rollout_jsonl_name("session-2026.jsonl"));
+        assert!(!is_rollout_jsonl_name("rollout-2026.txt"));
+    }
+
+    #[test]
+    fn t_under_existing_root_detects_nested_paths() {
+        let td = TempDir::new().expect("tempdir");
+        let root = td.path().join("transcripts");
+        let nested = root.join("ses_demo.jsonl");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(&nested, "{}\n").unwrap();
+        assert!(is_under_existing_root(&nested, &root));
+        assert!(!is_under_existing_root(td.path(), &root));
+    }
 }

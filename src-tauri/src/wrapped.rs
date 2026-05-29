@@ -347,11 +347,7 @@ pub async fn compose_wrapped(
         let Ok(validated) = crate::sec::validate_session_path(Path::new(source_path)) else {
             continue;
         };
-        let parsed = if s.source_agent == "codex" {
-            crate::codex_parser::parse_codex_session(&validated)
-        } else {
-            crate::parser::parse_session(&validated)
-        };
+        let parsed = crate::session_roots::parse_session_routed(&s.source_agent, &validated);
         let Ok(session) = parsed else { continue };
         if session.turns.is_empty() {
             continue;

@@ -33,9 +33,8 @@ use tokio::sync::Mutex as AsyncMutex;
 use crate::companion;
 use crate::enrich;
 use crate::indexer::{self, Embedder, LensWeights};
-use crate::parser;
 use crate::schema::COLLECTION_V3;
-use crate::session_roots::{default_projects_root, scan_all_roots};
+use crate::session_roots::{default_projects_root, parse_session_routed, scan_all_roots};
 use crate::wrapped;
 
 const SERVER_NAME: &str = "memex";
@@ -607,11 +606,7 @@ async fn tool_call(state: &Arc<McpState>, params: Value) -> Result<Value> {
             let source_agent = indexer::payload_str(&payload, "source_agent")
                 .unwrap_or_else(|| "claude_code".to_string());
             let validated = crate::sec::validate_session_path(std::path::Path::new(&source))?;
-            let session = if source_agent == "codex" {
-                crate::codex_parser::parse_codex_session(&validated)?
-            } else {
-                parser::parse_session(&validated)?
-            };
+            let session = parse_session_routed(&source_agent, &validated)?;
             let turn = session.turns.get(turn_index).ok_or_else(|| {
                 anyhow::anyhow!(
                     "turn_index {} out of range (max {})",
@@ -721,23 +716,20 @@ async fn tool_call(state: &Arc<McpState>, params: Value) -> Result<Value> {
             //    its own traversal guard, so we run the same `sec`
             //    validation every other ingress path uses (web.rs · indexer).
             //
-            //    Then route to the matching parser by `source_agent`: Claude
-            //    Code sessions use the default JSONL envelope, Codex
-            //    sessions use `codex_parser` (different envelope shape).
-            //    Default to Claude-Code parsing when the payload is missing
-            //    the field (legacy v2 points lifted to v3 may have no
+            //    Then route to the matching parser by `source_agent` and
+            //    root: modern Claude Code sessions use the default JSONL
+            //    envelope, Codex sessions use `codex_parser`, and legacy
+            //    `~/.claude/transcripts/ses_*.jsonl` files use the transcript
+            //    parser. Default to Claude-Code parsing when the payload is
+            //    missing the field (legacy v2 points lifted to v3 may have no
             //    source_agent).
             let session_path = std::path::PathBuf::from(&source_path);
             let validated_path = crate::sec::validate_session_path(&session_path)
                 .map_err(|e| anyhow::anyhow!("path validation failed for {session_id}: {e:#}"))?;
             let source_agent = indexer::payload_str(&payload, "source_agent")
                 .unwrap_or_else(|| "claude_code".to_string());
-            let session = if source_agent == "codex" {
-                crate::codex_parser::parse_codex_session(&validated_path)
-            } else {
-                parser::parse_session(&validated_path)
-            }
-            .map_err(|e| anyhow::anyhow!("re-parse failed for {session_id}: {e:#}"))?;
+            let session = parse_session_routed(&source_agent, &validated_path)
+                .map_err(|e| anyhow::anyhow!("re-parse failed for {session_id}: {e:#}"))?;
 
             // 3. Re-run the deterministic enrichment pipeline. Same code
             //    path the indexer uses on initial upsert.
