@@ -10,6 +10,29 @@ services:
     image: qdrant/qdrant:v1.18.1
     container_name: memex-qdrant
     restart: unless-stopped
+    # Resource ceilings so Qdrant stays within budget on small machines
+    # (e.g. an 8 GB M1 MacBook Air, where macOS + Memex + the embedder must
+    # also fit). `mem_limit` is a CEILING, not a reservation — Docker does not
+    # pre-allocate it; it only caps how far Qdrant may grow before the kernel
+    # OOM-kills it. So a generous ceiling LOWERS risk (a too-tight cap that
+    # OOM-kills a healthy Qdrant is worse than high RAM), while actual usage
+    # stays small via quantization.
+    #
+    # Sizing per Qdrant's official capacity-planning formula
+    # (qdrant.tech/documentation/guides/capacity-planning/):
+    #   memory_size ≈ num_vectors * dim * 4 bytes * 1.5
+    # For a single user's session corpus (~thousands of sessions, 384-dim,
+    # 5 dense + a multivector, TurboQuant bits2 + always_ram) the in-RAM index
+    # estimates to well under 1 GB. Qdrant's own docs caution these are
+    # "estimates at best ... test your data set in practice", so we set the
+    # ceiling at 4 GB — comfortably above the estimate, still leaving room on
+    # an 8 GB host (the limit is a backstop Qdrant won't actually reach).
+    # Raise it if you index a very large corpus; lower it only after measuring.
+    # `cpus` keeps Qdrant's optimizer from competing with the embedder for
+    # every core during warm-up. Both are honored by `docker compose up`
+    # (non-swarm); override via a compose override file for more headroom.
+    mem_limit: 4g
+    cpus: 4.0
     ports:
       # THR-06: bind to loopback only. Memex (host app, or the all-in-one image
       # where Qdrant + web share one container) reaches Qdrant via localhost, so
