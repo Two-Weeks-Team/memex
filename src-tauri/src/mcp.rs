@@ -22,12 +22,11 @@
 //!     sessions. Drop the returned markdown into the agent's system message
 //!     at session start and the agent stops starting cold.
 
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::Mutex as AsyncMutex;
 
@@ -36,6 +35,7 @@ use crate::enrich;
 use crate::indexer::{self, Embedder, LensWeights};
 use crate::parser;
 use crate::schema::COLLECTION_V3;
+use crate::session_roots::{default_projects_root, scan_all_roots};
 use crate::wrapped;
 
 const SERVER_NAME: &str = "memex";
@@ -170,10 +170,8 @@ pub async fn run() -> Result<()> {
         let req: JsonRpcRequest = match serde_json::from_str(line) {
             Ok(r) => r,
             Err(e) => {
-                eprintln!(
-                    "[memex-mcp] parse error: {e} · line: {}",
-                    &line[..line.len().min(160)]
-                );
+                let preview: String = line.chars().take(160).collect();
+                eprintln!("[memex-mcp] parse error: {e} · line: {preview}");
                 continue;
             }
         };
@@ -625,13 +623,19 @@ async fn tool_call(state: &Arc<McpState>, params: Value) -> Result<Value> {
         }
         "list_recent_sessions" => {
             let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(30) as usize;
-            let mut sessions = scan_all_roots()?;
-            sessions.sort_by(|a, b| b.start_time.cmp(&a.start_time));
-            let summaries: Vec<crate::summary::SessionSummary> = sessions
-                .into_iter()
-                .take(limit)
-                .map(crate::summary::SessionSummary::from)
-                .collect();
+            let summaries = tokio::task::spawn_blocking(
+                move || -> anyhow::Result<Vec<crate::summary::SessionSummary>> {
+                    let mut sessions = scan_all_roots("[memex-mcp]")?;
+                    sessions.sort_by(|a, b| b.start_time.cmp(&a.start_time));
+                    Ok(sessions
+                        .into_iter()
+                        .take(limit)
+                        .map(crate::summary::SessionSummary::from)
+                        .collect())
+                },
+            )
+            .await
+            .map_err(|e| anyhow::anyhow!("list_recent_sessions scan task panicked: {e}"))??;
             serde_json::to_value(summaries)?
         }
         "analyze_corpus_topology" => {
@@ -723,7 +727,7 @@ async fn tool_call(state: &Arc<McpState>, params: Value) -> Result<Value> {
             //    Default to Claude-Code parsing when the payload is missing
             //    the field (legacy v2 points lifted to v3 may have no
             //    source_agent).
-            let session_path = PathBuf::from(&source_path);
+            let session_path = std::path::PathBuf::from(&source_path);
             let validated_path = crate::sec::validate_session_path(&session_path)
                 .map_err(|e| anyhow::anyhow!("path validation failed for {session_id}: {e:#}"))?;
             let source_agent = indexer::payload_str(&payload, "source_agent")
@@ -755,8 +759,8 @@ async fn tool_call(state: &Arc<McpState>, params: Value) -> Result<Value> {
             //    PointId from `indexer::point_id` to match the same UUID v5
             //    scheme the indexer uses on insert.
             use qdrant_client::qdrant::{
-                PointId, PointsIdsList, SetPayloadPointsBuilder, point_id::PointIdOptions,
-                points_selector::PointsSelectorOneOf,
+                point_id::PointIdOptions, points_selector::PointsSelectorOneOf, PointId,
+                PointsIdsList, SetPayloadPointsBuilder,
             };
             let pid = PointId {
                 point_id_options: Some(PointIdOptions::Uuid(indexer::point_id(session_id))),
@@ -816,70 +820,4 @@ fn qdrant_value_to_json(v: qdrant_client::qdrant::Value) -> Value {
             Value::Object(m)
         }
     }
-}
-
-fn default_projects_root() -> PathBuf {
-    // WIN-01: use `dirs::home_dir()` rather than `env::var("HOME")` — Windows
-    // has no HOME (it uses %USERPROFILE%), so the env-var read returned an
-    // empty corpus there. `dirs` resolves the platform-canonical home.
-    if let Some(home) = dirs::home_dir() {
-        home.join(".claude").join("projects")
-    } else {
-        PathBuf::from(".claude/projects")
-    }
-}
-
-fn default_codex_root() -> PathBuf {
-    // WIN-01: see default_projects_root() above.
-    if let Some(home) = dirs::home_dir() {
-        home.join(".codex").join("sessions")
-    } else {
-        PathBuf::from(".codex/sessions")
-    }
-}
-
-fn default_transcripts_root() -> PathBuf {
-    // WIN-01: see default_projects_root() above.
-    if let Some(home) = dirs::home_dir() {
-        home.join(".claude").join("transcripts")
-    } else {
-        PathBuf::from(".claude/transcripts")
-    }
-}
-
-fn scan_all_roots() -> Result<Vec<parser::Session>> {
-    let mut all = Vec::new();
-    let claude_root = default_projects_root();
-    if claude_root.exists() {
-        match parser::scan_dir(&claude_root) {
-            Ok(mut sessions) => all.append(&mut sessions),
-            Err(e) => eprintln!("[memex-mcp] claude root scan: {e:#}"),
-        }
-    }
-
-    let codex_root = default_codex_root();
-    if codex_root.exists() {
-        match crate::codex_parser::scan_codex_dir(&codex_root) {
-            Ok(mut sessions) => all.append(&mut sessions),
-            Err(e) => eprintln!("[memex-mcp] codex root scan: {e:#}"),
-        }
-    }
-
-    let transcripts_root = default_transcripts_root();
-    if transcripts_root.exists() {
-        match parser::scan_transcripts_dir(&transcripts_root) {
-            Ok(mut sessions) => all.append(&mut sessions),
-            Err(e) => eprintln!("[memex-mcp] legacy transcripts scan: {e:#}"),
-        }
-    }
-
-    if all.is_empty() {
-        anyhow::bail!(
-            "no sessions found — neither {} nor {} nor {} contained parseable rollouts",
-            claude_root.display(),
-            codex_root.display(),
-            transcripts_root.display(),
-        );
-    }
-    Ok(all)
 }

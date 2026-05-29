@@ -31,24 +31,25 @@ Paste the contents of `DeveloperIDApplication.p12.base64` into the secret.
 
 ## Release flow
 
-1. Create or choose a tag, for example `v0.1.2`.
-2. Run **Release macOS signed DMG** from GitHub Actions, or push the tag.
-3. The workflow builds with:
+1. Bump `package.json`, `src-tauri/Cargo.toml`, and
+   `src-tauri/tauri.conf.json`.
+2. Create a new patch tag, for example `v0.1.2`.
+3. Run **Release macOS signed DMG** from GitHub Actions, or push the tag.
+4. The workflow builds with:
 
 ```bash
 npm run tauri:release:macos
 ```
 
 That command builds only the Apple Silicon DMG and passes
-`--no-default-features` so the shipped app does not include the WebKit
-Inspector devtools feature.
+`--no-default-features --features gui` so the shipped app keeps the desktop GUI
+but does not include the WebKit Inspector devtools feature.
 
 The workflow then verifies:
 
 ```bash
-codesign --verify --deep --strict --verbose=2 Memex.app
-spctl --assess --type execute --verbose=4 Memex.app
-xcrun stapler validate Memex.app
+codesign --verify --verbose=2 Memex_*.dmg
+spctl --assess --type open --context context:primary-signature --verbose=4 Memex_*.dmg
 xcrun stapler validate Memex_*.dmg
 ```
 
@@ -59,7 +60,9 @@ cannot be checked for malicious software" first-launch failure.
 
 - Prefer a new patch tag over replacing an existing public artifact. Replacing
   `v0.1.1` with a newly signed DMG is technically possible, but a new tag makes
-  provenance clearer.
+  provenance clearer and avoids mutating a version that users may already have
+  downloaded. The workflow intentionally does not use `gh release upload
+  --clobber`.
 - Tauri updater signing is separate from Apple Developer ID signing. If Memex
   later enables `tauri-plugin-updater`, also configure
   `TAURI_SIGNING_PRIVATE_KEY` and the updater public key in `tauri.conf.json`.

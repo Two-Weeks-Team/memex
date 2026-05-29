@@ -1,10 +1,10 @@
 //! Security primitives: sandboxed session-path validation across multi-agent roots.
 //!
-//! Memex indexes sessions from BOTH ~/.claude/projects/ (Claude Code) and
-//! ~/.codex/sessions/ (Codex CLI). Every IPC entry point that resolves a
-//! filesystem path from Qdrant payload MUST canonicalize it and confirm it
-//! lives inside one of these roots — otherwise a tampered payload could read
-//! arbitrary files.
+//! Memex indexes sessions from ~/.claude/projects/ (Claude Code),
+//! ~/.codex/sessions/ (Codex CLI), and legacy ~/.claude/transcripts/. Every
+//! IPC entry point that resolves a filesystem path from Qdrant payload MUST
+//! canonicalize it and confirm it lives inside one of these roots — otherwise
+//! a tampered payload could read arbitrary files.
 
 use std::path::{Path, PathBuf};
 
@@ -42,8 +42,18 @@ impl SandboxRoot {
     pub fn from_env() -> Result<Self> {
         let home = dirs::home_dir().context("could not resolve home directory")?;
         let mut candidates: Vec<(SourceAgent, PathBuf)> = vec![
-            (SourceAgent::ClaudeCode, home.join(".claude/projects")),
-            (SourceAgent::Codex, home.join(".codex/sessions")),
+            (
+                SourceAgent::ClaudeCode,
+                crate::session_roots::default_projects_root(),
+            ),
+            (
+                SourceAgent::Codex,
+                crate::session_roots::default_codex_root(),
+            ),
+            (
+                SourceAgent::ClaudeCode,
+                crate::session_roots::default_transcripts_root(),
+            ),
         ];
         // Demo / CI escape hatch — `MEMEX_EXTRA_SANDBOX_ROOTS` is a
         // colon-separated list of additional directories that should pass
@@ -53,7 +63,7 @@ impl SandboxRoot {
         //
         // Security note: this is intentionally opt-in via env var so the
         // default ship behavior (no env) keeps the sandbox locked to the
-        // two real agent roots. A demo runner has to set this explicitly.
+        // real agent roots. A demo runner has to set this explicitly.
         // We refuse trivially-too-wide entries (root `/`, the user's HOME
         // itself, any path with < 3 components) and log every accepted
         // widening to stderr so an operator can't silently broaden the
@@ -93,7 +103,7 @@ impl SandboxRoot {
             .filter_map(|(a, p)| p.canonicalize().ok().map(|c| (a, c)))
             .collect();
         if canonical_roots.is_empty() {
-            bail!("no valid session root found (neither ~/.claude/projects nor ~/.codex/sessions exists)");
+            bail!("no valid session root found (none of ~/.claude/projects, ~/.codex/sessions, or ~/.claude/transcripts exists)");
         }
         Ok(Self { canonical_roots })
     }
@@ -102,7 +112,9 @@ impl SandboxRoot {
     /// don't want to touch the real $HOME.
     #[cfg(test)]
     pub fn from_roots(roots: Vec<(SourceAgent, PathBuf)>) -> Self {
-        Self { canonical_roots: roots }
+        Self {
+            canonical_roots: roots,
+        }
     }
 
     /// Returns the canonical path if `p` (after canonicalize) lives inside ANY
@@ -146,9 +158,7 @@ impl SandboxRoot {
 
     /// Public read of configured roots — used by the scanner.
     pub fn roots(&self) -> impl Iterator<Item = (SourceAgent, &Path)> {
-        self.canonical_roots
-            .iter()
-            .map(|(a, p)| (*a, p.as_path()))
+        self.canonical_roots.iter().map(|(a, p)| (*a, p.as_path()))
     }
 }
 
@@ -170,11 +180,17 @@ mod tests {
         let td = TempDir::new().expect("tempdir");
         let claude_root = td.path().join("claude_projects");
         let codex_root = td.path().join("codex_sessions");
+        let transcripts_root = td.path().join("claude_transcripts");
         fs::create_dir_all(&claude_root).unwrap();
         fs::create_dir_all(&codex_root).unwrap();
+        fs::create_dir_all(&transcripts_root).unwrap();
         let sb = SandboxRoot::from_roots(vec![
             (SourceAgent::ClaudeCode, claude_root.canonicalize().unwrap()),
             (SourceAgent::Codex, codex_root.canonicalize().unwrap()),
+            (
+                SourceAgent::ClaudeCode,
+                transcripts_root.canonicalize().unwrap(),
+            ),
         ]);
         (td, sb)
     }
@@ -197,6 +213,16 @@ mod tests {
         fs::write(&p, "{}\n").unwrap();
         assert!(sb.contains(&p).is_ok());
         assert_eq!(sb.detect_agent(&p), Some(SourceAgent::Codex));
+    }
+
+    #[test]
+    fn t_valid_legacy_transcript_path() {
+        let (td, sb) = make_sandbox();
+        let p = td.path().join("claude_transcripts/legacy/session.jsonl");
+        fs::create_dir_all(p.parent().unwrap()).unwrap();
+        fs::write(&p, "{}\n").unwrap();
+        assert!(sb.contains(&p).is_ok());
+        assert_eq!(sb.detect_agent(&p), Some(SourceAgent::ClaudeCode));
     }
 
     #[test]
@@ -225,9 +251,7 @@ mod tests {
         let inside = td.path().join("claude_projects/abc/sess.jsonl");
         fs::create_dir_all(inside.parent().unwrap()).unwrap();
         fs::write(&inside, "x").unwrap();
-        let traversal = td
-            .path()
-            .join("claude_projects/abc/../../outside.jsonl");
+        let traversal = td.path().join("claude_projects/abc/../../outside.jsonl");
         // Create the 'outside' file so canonicalize succeeds; the security
         // assertion is that canonical form is outside both roots.
         fs::write(td.path().join("outside.jsonl"), "x").unwrap();
@@ -242,7 +266,10 @@ mod tests {
         fs::write(&outside_file, "secret").unwrap();
         let link = td.path().join("claude_projects/link.jsonl");
         std::os::unix::fs::symlink(&outside_file, &link).unwrap();
-        assert!(sb.contains(&link).is_err(), "symlink escaping sandbox must be rejected");
+        assert!(
+            sb.contains(&link).is_err(),
+            "symlink escaping sandbox must be rejected"
+        );
     }
 
     #[test]
@@ -254,7 +281,10 @@ mod tests {
         let link = td.path().join("claude_projects/abc/link.jsonl");
         fs::create_dir_all(link.parent().unwrap()).unwrap();
         std::os::unix::fs::symlink(&real, &link).unwrap();
-        assert!(sb.contains(&link).is_ok(), "internal symlink should be accepted");
+        assert!(
+            sb.contains(&link).is_ok(),
+            "internal symlink should be accepted"
+        );
     }
 
     #[test]
@@ -316,7 +346,11 @@ mod tests {
     fn t_no_panic_on_arbitrary_bytes() {
         let (_td, sb) = make_sandbox();
         // Random byte sequences that aren't valid paths shouldn't panic.
-        for bytes in [b"\xff\xfe\xff".as_ref(), b"a\nb\rc".as_ref(), b"\x7f".as_ref()] {
+        for bytes in [
+            b"\xff\xfe\xff".as_ref(),
+            b"a\nb\rc".as_ref(),
+            b"\x7f".as_ref(),
+        ] {
             use std::ffi::OsString;
             use std::os::unix::ffi::OsStringExt;
             let p = PathBuf::from(OsString::from_vec(bytes.to_vec()));

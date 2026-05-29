@@ -1,12 +1,12 @@
 {
   "name": "memex",
   "private": true,
-  "version": "0.1.1",
+  "version": "0.1.2",
   "type": "module",
   "scripts": {
     "tauri": "tauri",
     "tauri:dist": "tauri build -- --no-default-features",
-    "tauri:release:macos": "tauri build --bundles dmg --target aarch64-apple-darwin -- --no-default-features"
+    "tauri:release:macos": "tauri build --bundles dmg --target aarch64-apple-darwin -- --no-default-features --features gui"
   },
   "devDependencies": {
     "@playwright/test": "^1.60.0",
