@@ -156,6 +156,9 @@ async function attachWatcherListener() {
       ? "Re-indexed 1 session"
       : `Re-indexed ${reindexed} sessions`;
     showWatcherChip(label);
+    // The watcher is actively indexing — show the spinner; it auto-hides once
+    // the ticks stop arriving (warm-up done / idle).
+    pulseBusy();
     // Refresh the stack so the just-touched session jumps to the top.
     loadInitialStack();
   });
@@ -795,6 +798,7 @@ async function pollUntilReady(attempt = 0) {
   // separate the "still warming up" UI from the "real problem" UI.
   const MAX_ATTEMPTS = 240; // 240 × 500 ms = 120 s, comfortable for cold start
   const RETRY_MS = 500;
+  if (attempt === 0) setBusy(true);
   try {
     const info = await invoke("collection_info");
     state.collectionPoints = info.points_count;
@@ -807,6 +811,7 @@ async function pollUntilReady(attempt = 0) {
     // up (e.g., initial stack auto-select fired before this poll
     // succeeded), kick its prediction now.
     if (state.selected) schedulePrediction(state.selected);
+    setBusy(false);
   } catch (err) {
     const msg = String(err);
     // Distinguish: still cold-starting vs. true failure (Qdrant down / model
@@ -832,6 +837,7 @@ async function pollUntilReady(attempt = 0) {
       return;
     }
     setStatus(`Memex couldn't bootstrap after 2 minutes — last error: ${msg}`);
+    setBusy(false);
   }
 }
 
@@ -2976,6 +2982,20 @@ async function onRefresh() {
 
 function setStatus(msg) {
   document.getElementById("status-text").textContent = msg;
+}
+
+// Topbar loading spinner. Shown while bootstrapping (connecting to Qdrant /
+// loading the embedder) and pulsed while the background watcher is actively
+// indexing; hidden when idle.
+let _busyTimer = null;
+function setBusy(on) {
+  const sp = document.getElementById("boot-spinner");
+  if (sp) sp.classList.toggle("hidden", !on);
+}
+function pulseBusy(ms = 2500) {
+  setBusy(true);
+  if (_busyTimer) clearTimeout(_busyTimer);
+  _busyTimer = setTimeout(() => setBusy(false), ms);
 }
 
 function setLatency(ms) {

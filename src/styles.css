@@ -1687,6 +1687,26 @@ textarea:focus {
   100% { background-position: -200% 0; }
 }
 
+/* --- Boot / indexing spinner -------------------------------------------- */
+/* Shows in the topbar while connecting to Qdrant or while the background
+   watcher is actively indexing; hidden when idle. */
+.spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgba(255, 255, 255, 0.18);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: memex-spin 0.7s linear infinite;
+  vertical-align: middle;
+  flex: none;
+}
+.spinner.hidden { display: none; }
+@keyframes memex-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .spinner { animation: none; border-top-color: rgba(255, 255, 255, 0.5); }
+}
+
 /* --- Recall banner ------------------------------------------------------ */
 
 .recall-banner {
