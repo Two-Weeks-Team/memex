@@ -1140,12 +1140,19 @@ mod tests {
     where
         F: FnOnce() -> R,
     {
+        // `cargo test` runs tests in parallel by default; serialize every
+        // `with_env` call through a process-wide lock so concurrent tests can't
+        // race on MEMEX_QUANT_MODE or clobber each other's save/restore
+        // (Gemini review on PR #32). Recover from a poisoned lock (a panicking
+        // test holding it) so one failure doesn't cascade into all the others.
+        static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _env_guard = ENV_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let key = "MEMEX_QUANT_MODE";
         let saved = std::env::var(key).ok();
         // SAFETY: edition 2024 made env::set_var/remove_var `unsafe` (they are
-        // unsound if another thread reads the environment concurrently). This
-        // test helper mutates a single var and restores it around `f`; the test
-        // harness isn't touching this var from other threads.
+        // unsound if another thread reads the environment concurrently). The
+        // ENV_LOCK above serializes all env mutation in these tests, and the
+        // helper restores the prior value around `f`.
         unsafe {
             match value {
                 Some(v) => std::env::set_var(key, v),

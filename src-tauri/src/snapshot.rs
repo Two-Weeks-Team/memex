@@ -15,10 +15,13 @@ use sha2::{Digest, Sha256};
 /// `GenericArray` — no longer implements `LowerHex`, so `format!("{:x}", …)`
 /// stopped compiling. Encode the bytes explicitly instead.
 fn to_hex(bytes: &[u8]) -> String {
-    use std::fmt::Write as _;
+    // Nibble lookup table — avoids invoking `core::fmt` per byte the way
+    // `write!("{:02x}")` would (Gemini review on PR #32).
+    const HEX: &[u8; 16] = b"0123456789abcdef";
     let mut s = String::with_capacity(bytes.len() * 2);
-    for b in bytes {
-        let _ = write!(s, "{b:02x}");
+    for &b in bytes {
+        s.push(HEX[(b >> 4) as usize] as char);
+        s.push(HEX[(b & 0x0f) as usize] as char);
     }
     s
 }
