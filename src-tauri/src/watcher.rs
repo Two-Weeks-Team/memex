@@ -111,14 +111,31 @@ pub use crate::loopcheck::{
 /// avoid noise, short enough to re-surface if a second loop kicks in.
 const LOOP_DEBOUNCE: Duration = Duration::from_secs(60 * 20);
 
-/// Hard cap on indexes per tick — fastembed's ONNX runtime pegs every CPU
-/// core when batching big embedding runs, which on a user's machine with
+/// Default hard cap on indexes per tick — fastembed's ONNX runtime pegs every
+/// CPU core when batching big embedding runs, which on a user's machine with
 /// 1 900+ legacy transcripts produces ~700% CPU and a screaming fan for
 /// hours. Cap so each tick does at most this many sessions and the worker
 /// goes idle between ticks. A full corpus warm-up will take N/cap ticks
 /// (e.g. 1 989 / 30 ≈ 67 ticks ≈ 67 min at period=60 s) but the machine
 /// stays usable the whole time.
+///
+/// Override with `MEMEX_WARMUP_BATCH` (sessions per tick). Lower it on
+/// RAM/CPU-constrained machines (e.g. an 8 GB M1 MacBook Air) so each warm-up
+/// burst is shorter and the UI stays responsive — at the cost of a longer
+/// overall warm-up. fastembed gives no way to cap the ONNX intra-op thread
+/// count (it hardcodes `available_parallelism()`), so shrinking the per-tick
+/// batch is the only in-process lever that keeps the machine usable today.
 const MAX_INDEX_PER_TICK: usize = 30;
+
+/// Resolve the per-tick warm-up cap: `MEMEX_WARMUP_BATCH` if set to a positive
+/// integer, else [`MAX_INDEX_PER_TICK`].
+fn max_index_per_tick() -> usize {
+    std::env::var("MEMEX_WARMUP_BATCH")
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok())
+        .filter(|&n| n > 0)
+        .unwrap_or(MAX_INDEX_PER_TICK)
+}
 
 /// First-tick boot delay — wait this long after app start before doing
 /// anything heavy, so the UI window has time to paint and the user isn't
@@ -321,13 +338,15 @@ async fn tick(
     }
 
     // Hard-cap batch size so a fresh-corpus warm-up doesn't peg the CPU
-    // for hours. Remaining files get picked up on subsequent ticks.
+    // for hours. Remaining files get picked up on subsequent ticks. The cap
+    // is env-tunable (MEMEX_WARMUP_BATCH) for constrained machines.
+    let max_per_tick = max_index_per_tick();
     let backlog = to_index.len();
-    if backlog > MAX_INDEX_PER_TICK {
-        to_index.truncate(MAX_INDEX_PER_TICK);
-        let remaining = backlog - MAX_INDEX_PER_TICK;
+    if backlog > max_per_tick {
+        to_index.truncate(max_per_tick);
+        let remaining = backlog - max_per_tick;
         eprintln!(
-            "[memex] warm-up: indexing {MAX_INDEX_PER_TICK}/{backlog} this tick · {remaining} left for next ticks"
+            "[memex] warm-up: indexing {max_per_tick}/{backlog} this tick · {remaining} left for next ticks"
         );
     }
 
