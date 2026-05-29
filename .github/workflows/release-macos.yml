@@ -118,20 +118,33 @@ jobs:
           CI: true
         run: npx tauri build --bundles dmg --target aarch64-apple-darwin -- --no-default-features
 
-      - name: Verify notarized artifacts
+      - name: Locate release DMG
         run: |
           set -euo pipefail
-          app_path="$(find src-tauri/target -path '*/release/bundle/macos/Memex.app' -print -quit)"
           dmg_path="$(find src-tauri/target -path '*/release/bundle/dmg/Memex_*.dmg' -print -quit)"
-          if [[ -z "$app_path" || -z "$dmg_path" ]]; then
-            echo "::error title=Missing bundle::Could not find Memex.app or Memex_*.dmg under src-tauri/target."
+          if [[ -z "$dmg_path" ]]; then
+            echo "::error title=Missing DMG::Could not find Memex_*.dmg under src-tauri/target."
             exit 1
           fi
-          codesign --verify --deep --strict --verbose=2 "$app_path"
-          spctl --assess --type execute --verbose=4 "$app_path"
-          xcrun stapler validate "$app_path"
-          xcrun stapler validate "$dmg_path"
           echo "DMG_PATH=$dmg_path" >> "$GITHUB_ENV"
+          echo "Located $dmg_path"
+
+      - name: Notarize and staple DMG
+        run: |
+          set -euo pipefail
+          xcrun notarytool submit "$DMG_PATH" \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" \
+            --wait
+          xcrun stapler staple "$DMG_PATH"
+
+      - name: Verify notarized DMG
+        run: |
+          set -euo pipefail
+          codesign --verify --verbose=2 "$DMG_PATH"
+          spctl --assess --type open --context context:primary-signature --verbose=4 "$DMG_PATH"
+          xcrun stapler validate "$DMG_PATH"
 
       - name: Upload DMG to GitHub Release
         env:
