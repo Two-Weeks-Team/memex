@@ -703,6 +703,8 @@ mod tests {
     /// ⇒ skip slot.
     #[test]
     fn t_lens_prefetch_includes_content_late() {
+        // Issue #15 — `indexer::LensWeights` is a re-export of
+        // `lens::LensWeights`; the 8-field shape includes `diversity` + `fusion`.
         let w = crate::indexer::LensWeights {
             content: 0.0,
             tool: 0.0,
@@ -710,14 +712,26 @@ mod tests {
             error: 0.0,
             code: 0.0,
             content_late: 1.0,
+            diversity: None,
+            fusion: crate::lens::FusionMode::Formula,
         };
         assert!(w.content_late > 0.0, "non-zero weight must activate slot");
     }
 
     #[test]
     fn t_lens_prefetch_skips_content_late_zero() {
-        let w = crate::indexer::LensWeights::default();
-        assert_eq!(w.content_late, 0.0, "default content_late must be 0");
+        // PR #12 REV-8 + CodeRabbit #9 — Default::default() now returns 0.25
+        // (T3.3 baseline). To exercise the "skip when 0" branch, construct
+        // a LensWeights with explicit content_late=0.0 instead of relying on
+        // the Default impl. The skip-on-zero rule itself is what we assert.
+        let mut w = crate::indexer::LensWeights::default();
+        w.content_late = 0.0;
+        assert_eq!(w.content_late, 0.0,
+            "explicit content_late=0.0 must reach the prefetch chain as 0.0");
+        // Sanity: confirm Default has been flipped to 0.25 (post-T3.3).
+        let d = crate::indexer::LensWeights::default();
+        assert!((d.content_late - 0.25).abs() < f32::EPSILON,
+            "post-T3.3 default content_late must be 0.25");
     }
 
     #[test]

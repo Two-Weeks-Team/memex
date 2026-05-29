@@ -63,6 +63,10 @@ pub struct TickStats {
     pub new: usize,
     pub errors: usize,
     pub notifications_fired: usize,
+    /// Cold-start memory primers composed and emitted this tick.
+    pub primers_fired: usize,
+    /// Loop-Breaker suggestions surfaced this tick.
+    pub loops_broken: usize,
     pub elapsed_ms: u128,
 }
 
@@ -83,14 +87,63 @@ const PREDICT_FREQ_THRESHOLD: f32 = 0.7;
 /// Debounce window per (session_id, predicted_tool) — 30 min.
 const PREDICT_DEBOUNCE: Duration = Duration::from_secs(60 * 30);
 
-/// Hard cap on indexes per tick — fastembed's ONNX runtime pegs every CPU
-/// core when batching big embedding runs, which on a user's machine with
+/// Cold-start primer minimum source-session threshold. Below this we stay
+/// silent — a one-source primer just echoes the new session itself back.
+const PRIMER_MIN_SOURCES: usize = 2;
+/// Cold-start primer debounce per session_id — fire at most once per
+/// session even if the watcher re-visits it on many ticks.
+const PRIMER_DEBOUNCE: Duration = Duration::from_secs(60 * 60 * 24);
+/// How many past sessions to mine for the cold-start primer.
+const PRIMER_LIMIT: usize = 8;
+
+/// **Loop Breaker** — active-session "stuck" detection thresholds.
+///
+/// The canonical definitions now live in the ungated `loopcheck` module so the
+/// headless CLI surfaces (`memex loop-check`, `memex codex-notify`) can reach
+/// them without pulling in Tauri. We re-export them here so existing callers
+/// — including PR #7's `tests/loop_breaker_integration.rs`, which imports them
+/// via `memex_lib::watcher::{…}` — keep compiling unchanged.
+pub use crate::loopcheck::{
+    error_count_in_window, is_stuck, LOOP_ERROR_THRESHOLD, LOOP_MIN_TURNS, LOOP_RECENT_WINDOW,
+};
+/// Per-session debounce so the watcher doesn't yell "you're stuck" every
+/// tick while the user is still working. 20 minutes — long enough to
+/// avoid noise, short enough to re-surface if a second loop kicks in.
+const LOOP_DEBOUNCE: Duration = Duration::from_secs(60 * 20);
+
+/// Default hard cap on indexes per tick — fastembed's ONNX runtime pegs every
+/// CPU core when batching big embedding runs, which on a user's machine with
 /// 1 900+ legacy transcripts produces ~700% CPU and a screaming fan for
 /// hours. Cap so each tick does at most this many sessions and the worker
 /// goes idle between ticks. A full corpus warm-up will take N/cap ticks
 /// (e.g. 1 989 / 30 ≈ 67 ticks ≈ 67 min at period=60 s) but the machine
 /// stays usable the whole time.
+///
+/// Override with `MEMEX_WARMUP_BATCH` (sessions per tick). Lower it on
+/// RAM/CPU-constrained machines (e.g. an 8 GB M1 MacBook Air) so each warm-up
+/// burst is shorter and the UI stays responsive — at the cost of a longer
+/// overall warm-up. fastembed gives no way to cap the ONNX intra-op thread
+/// count (it hardcodes `available_parallelism()`), so shrinking the per-tick
+/// batch is the only in-process lever that keeps the machine usable today.
 const MAX_INDEX_PER_TICK: usize = 30;
+
+/// Resolve the per-tick warm-up cap: `MEMEX_WARMUP_BATCH` if set to a positive
+/// integer, else [`MAX_INDEX_PER_TICK`].
+///
+/// Read once and cached in a `OnceLock` — the watcher calls this every tick,
+/// and reading `std::env::var` repeatedly is both wasteful and unsound if any
+/// thread were to mutate the environment concurrently (Gemini review on PR #31).
+/// The cap is a startup tunable, so resolving it once is the correct semantics.
+fn max_index_per_tick() -> usize {
+    static CAP: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *CAP.get_or_init(|| {
+        std::env::var("MEMEX_WARMUP_BATCH")
+            .ok()
+            .and_then(|s| s.parse::<usize>().ok())
+            .filter(|&n| n > 0)
+            .unwrap_or(MAX_INDEX_PER_TICK)
+    })
+}
 
 /// First-tick boot delay — wait this long after app start before doing
 /// anything heavy, so the UI window has time to paint and the user isn't
@@ -110,6 +163,14 @@ pub fn start_watcher(
     let debounce: Arc<AsyncMutex<HashMap<(String, String), SystemTime>>> =
         Arc::new(AsyncMutex::new(HashMap::new()));
     let predict_debounce: Arc<AsyncMutex<HashMap<(String, String), SystemTime>>> =
+        Arc::new(AsyncMutex::new(HashMap::new()));
+    // Companion cold-start primer: debounce per session_id (we don't want to
+    // re-fire the primer every tick while the user is mid-session).
+    let primer_debounce: Arc<AsyncMutex<HashMap<String, SystemTime>>> =
+        Arc::new(AsyncMutex::new(HashMap::new()));
+    // Loop Breaker: debounce per session_id with a short refractory so we
+    // don't repeat the suggestion every tick once it's already shown.
+    let loop_debounce: Arc<AsyncMutex<HashMap<String, SystemTime>>> =
         Arc::new(AsyncMutex::new(HashMap::new()));
 
     // Use Tauri's async runtime so the watcher works when spawned from
@@ -139,7 +200,18 @@ pub fn start_watcher(
             }
 
             let start = std::time::Instant::now();
-            let stats = match tick(&state, &app, &root, &mtimes, &debounce, &predict_debounce).await {
+            let stats = match tick(
+                &state,
+                &app,
+                &root,
+                &mtimes,
+                &debounce,
+                &predict_debounce,
+                &primer_debounce,
+                &loop_debounce,
+            )
+            .await
+            {
                 Ok(s) => s,
                 Err(e) => {
                     eprintln!("[memex] watcher tick failed: {e:#}");
@@ -147,14 +219,21 @@ pub fn start_watcher(
                 }
             };
 
-            if stats.reindexed > 0 || stats.new > 0 || stats.notifications_fired > 0 {
+            if stats.reindexed > 0
+                || stats.new > 0
+                || stats.notifications_fired > 0
+                || stats.primers_fired > 0
+                || stats.loops_broken > 0
+            {
                 eprintln!(
-                    "[memex] watcher tick · checked={} new={} reindexed={} errors={} notifications={} ({} ms)",
+                    "[memex] watcher tick · checked={} new={} reindexed={} errors={} notifications={} primers={} loops={} ({} ms)",
                     stats.checked,
                     stats.new,
                     stats.reindexed,
                     stats.errors,
                     stats.notifications_fired,
+                    stats.primers_fired,
+                    stats.loops_broken,
                     start.elapsed().as_millis()
                 );
                 let _ = app.emit("index-updated", &stats);
@@ -189,6 +268,7 @@ fn ensure_notification_permission(app: &AppHandle) {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn tick(
     state: &AppStateArc,
     app: &AppHandle,
@@ -196,6 +276,8 @@ async fn tick(
     mtimes: &Arc<AsyncMutex<HashMap<PathBuf, SystemTime>>>,
     debounce: &Arc<AsyncMutex<HashMap<(String, String), SystemTime>>>,
     predict_debounce: &Arc<AsyncMutex<HashMap<(String, String), SystemTime>>>,
+    primer_debounce: &Arc<AsyncMutex<HashMap<String, SystemTime>>>,
+    loop_debounce: &Arc<AsyncMutex<HashMap<String, SystemTime>>>,
 ) -> anyhow::Result<TickStats> {
     let mut stats = TickStats::default();
     let started = std::time::Instant::now();
@@ -264,13 +346,15 @@ async fn tick(
     }
 
     // Hard-cap batch size so a fresh-corpus warm-up doesn't peg the CPU
-    // for hours. Remaining files get picked up on subsequent ticks.
+    // for hours. Remaining files get picked up on subsequent ticks. The cap
+    // is env-tunable (MEMEX_WARMUP_BATCH) for constrained machines.
+    let max_per_tick = max_index_per_tick();
     let backlog = to_index.len();
-    if backlog > MAX_INDEX_PER_TICK {
-        to_index.truncate(MAX_INDEX_PER_TICK);
-        let remaining = backlog - MAX_INDEX_PER_TICK;
+    if backlog > max_per_tick {
+        to_index.truncate(max_per_tick);
+        let remaining = backlog - max_per_tick;
         eprintln!(
-            "[memex] warm-up: indexing {MAX_INDEX_PER_TICK}/{backlog} this tick · {remaining} left for next ticks"
+            "[memex] warm-up: indexing {max_per_tick}/{backlog} this tick · {remaining} left for next ticks"
         );
     }
 
@@ -280,8 +364,9 @@ async fn tick(
 
     let mut to_remember: Vec<(PathBuf, SystemTime)> = Vec::with_capacity(to_index.len());
     // Sessions we just (re)indexed AND whose mtime is "fresh" — candidates
-    // for recall notifications.
-    let mut hot: Vec<Session> = Vec::new();
+    // for recall notifications. The `bool` is `is_new`: brand-new file this
+    // tick (not just a re-modified one), used by the cold-start primer.
+    let mut hot: Vec<(Session, bool)> = Vec::new();
 
     let now = SystemTime::now();
     for (path, modified, is_new, kind) in to_index {
@@ -312,7 +397,7 @@ async fn tick(
                     .map(|d| d <= FRESH_ERROR_WINDOW)
                     .unwrap_or(false)
                 {
-                    hot.push(session);
+                    hot.push((session, is_new));
                 }
             }
             Err(e) => {
@@ -331,8 +416,9 @@ async fn tick(
     }
 
     // 5. Proactive recall + predict — for each hot session, check the
-    //    latest error and the predicted next-action.
-    for session in hot {
+    //    latest error and the predicted next-action. For brand-new
+    //    sessions, also fire the cold-start memory primer (Companion).
+    for (session, is_new) in hot {
         match maybe_fire_recall(&qdrant, &embedder, app, debounce, &session).await {
             Ok(true) => stats.notifications_fired += 1,
             Ok(false) => {}
@@ -346,6 +432,27 @@ async fn tick(
             Ok(false) => {}
             Err(e) => eprintln!(
                 "[memex] watcher predict failed for {}: {:#}",
+                session.session_id, e
+            ),
+        }
+        if is_new {
+            match maybe_fire_primer(&qdrant, &embedder, app, primer_debounce, &session).await {
+                Ok(true) => stats.primers_fired += 1,
+                Ok(false) => {}
+                Err(e) => eprintln!(
+                    "[memex] watcher primer failed for {}: {:#}",
+                    session.session_id, e
+                ),
+            }
+        }
+        // Loop Breaker is *not* gated on is_new — it watches every fresh
+        // mtime of every active session and only fires when the recent
+        // error count exceeds the threshold.
+        match maybe_fire_loop_breaker(&qdrant, &embedder, app, loop_debounce, &session).await {
+            Ok(true) => stats.loops_broken += 1,
+            Ok(false) => {}
+            Err(e) => eprintln!(
+                "[memex] watcher loop-breaker failed for {}: {:#}",
                 session.session_id, e
             ),
         }
@@ -535,6 +642,228 @@ async fn maybe_fire_predict(
     Ok(true)
 }
 
+/// **Cold-start primer** (Companion). Fires when the watcher sees a brand-
+/// new session jsonl appear — i.e., the user just opened Claude Code in a
+/// directory. We synthesize a memory primer for that directory, drop a
+/// macOS notification, and emit a `companion-primer-ready` Tauri event
+/// carrying the full primer JSON so the frontend Companion panel can
+/// render it and let the user copy the markdown straight to their
+/// clipboard / system prompt.
+///
+/// Conditions:
+/// 1. Session is brand-new this tick (`is_new == true`) — re-modifications
+///    of an existing session don't qualify as cold starts.
+/// 2. Primer surfaces ≥ `PRIMER_MIN_SOURCES` past sessions — below that
+///    we'd just echo the new session back at itself.
+/// 3. Per-session debounce so a single jsonl appearing across multiple
+///    polling cycles fires the primer only once.
+async fn maybe_fire_primer(
+    qdrant: &qdrant_client::Qdrant,
+    embedder: &indexer::Embedder,
+    app: &AppHandle,
+    debounce: &Arc<AsyncMutex<HashMap<String, SystemTime>>>,
+    session: &Session,
+) -> anyhow::Result<bool> {
+    // Need a cwd to prime against — older transcripts and Codex-style
+    // sessions occasionally lack project_path; bail rather than guess.
+    let Some(cwd) = session.project_path.clone() else {
+        return Ok(false);
+    };
+    if cwd.is_empty() {
+        return Ok(false);
+    }
+
+    // Debounce by session_id so the watcher doesn't re-fire the primer
+    // every tick for the same long-running session.
+    let key = session.session_id.clone();
+    {
+        let g = debounce.lock().await;
+        let now = SystemTime::now();
+        if let Some(prev) = g.get(&key) {
+            if now.duration_since(*prev).map(|d| d < PRIMER_DEBOUNCE).unwrap_or(false) {
+                return Ok(false);
+            }
+        }
+    }
+
+    // Compose, excluding the new session itself so it can't prime its own
+    // (still-empty) decisions back into the result.
+    let primer = crate::companion::compose_memory_primer_excluding(
+        qdrant,
+        Some(embedder),
+        std::path::Path::new(&cwd),
+        PRIMER_LIMIT,
+        std::slice::from_ref(&session.session_id),
+    )
+    .await?;
+
+    if primer.source_sessions.len() < PRIMER_MIN_SOURCES {
+        return Ok(false);
+    }
+
+    // Reserve the debounce slot only now that we know we're firing.
+    {
+        let mut g = debounce.lock().await;
+        g.insert(key, SystemTime::now());
+    }
+
+    let project = session.project_name.as_deref().unwrap_or("?");
+    let title = "Memex Companion · primer ready";
+    let body = format!(
+        "{} · loaded memory from {} past session(s) ({} decisions, {} pitfalls)",
+        project,
+        primer.source_sessions.len(),
+        primer.stats.decisions_extracted,
+        primer.stats.pitfalls_extracted,
+    );
+    notify_system(app, title, &body);
+
+    // The frontend Companion panel listens on this event and pops the
+    // markdown into view. Carries the full primer so no extra IPC roundtrip
+    // is needed when the user clicks the notification.
+    let _ = app.emit(
+        "companion-primer-ready",
+        json!({
+            "kind": "primer",
+            "session_id": session.session_id,
+            "project_name": project,
+            "primer": primer,
+        }),
+    );
+
+    Ok(true)
+}
+
+/// **Loop Breaker.** Watches the active session for "stuck" patterns —
+/// most concretely, ≥`LOOP_ERROR_THRESHOLD` `tool_result.is_error` events
+/// inside the most recent `LOOP_RECENT_WINDOW` turns. When that fires,
+/// runs `predict_next_actions` on the session, finds what past-you did
+/// to break out of a similar position, and emits a `loop-breaker-ready`
+/// Tauri event the frontend turns into a banner.
+///
+/// Differs from `maybe_fire_predict` (which is proactive — "past-you
+/// usually does X next") and `maybe_fire_recall` (single-error
+/// reactive). Loop Breaker is the pattern-of-errors detector — the
+/// "you've been stuck for 12 turns and burned 5 tool calls on the same
+/// thing" surface.
+async fn maybe_fire_loop_breaker(
+    qdrant: &qdrant_client::Qdrant,
+    embedder: &indexer::Embedder,
+    app: &AppHandle,
+    debounce: &Arc<AsyncMutex<HashMap<String, SystemTime>>>,
+    session: &Session,
+) -> anyhow::Result<bool> {
+    // Pure min-turns + error-count-in-window gate, shared verbatim with the
+    // headless `memex loop-check` CLI (loopcheck::is_stuck).
+    let recent_count = match is_stuck(session) {
+        Some(ctx) => ctx.recent_errors,
+        None => return Ok(false),
+    };
+
+    // Debounce: in-memory map (per-watcher-process) AND the on-disk
+    // touch-file used by the headless `memex loop-check` hook. Honoring
+    // both means the GUI banner + the Claude Code hook can't double-fire
+    // for the same session — whichever surface stamps first suppresses
+    // the other for the 20-min window (PR #8 follow-up #2).
+    //
+    // This is a CHEAP pre-check: skip the expensive `predict_next_actions`
+    // call if we already know a recent stamp exists. The actual atomic
+    // reservation happens after predict succeeds, just before emit
+    // (`try_reserve_fire`, see below) — fixes the watcher↔hook race
+    // codex flagged on PR #9.
+    let key = session.session_id.clone();
+    {
+        let g = debounce.lock().await;
+        let now = SystemTime::now();
+        if let Some(prev) = g.get(&key) {
+            if now.duration_since(*prev).map(|d| d < LOOP_DEBOUNCE).unwrap_or(false) {
+                return Ok(false);
+            }
+        }
+    }
+    if !crate::loopcheck::should_fire_for_session(&key) {
+        return Ok(false);
+    }
+
+    // Ask predict for what past-you would do at this conversational
+    // position. The pivot-walk inside predict_next_actions is exactly
+    // the "find a similar stuck moment and look at what unstuck you"
+    // primitive we want here.
+    let ctx = match indexer::predict_next_actions(
+        qdrant,
+        embedder,
+        &session.session_id,
+        4, // last_n_turns — wider context for stuck detection
+        4, // horizon
+        10, // neighbors
+    )
+    .await
+    {
+        Ok(c) => c,
+        Err(e) => {
+            // predict failing is non-fatal — Loop Breaker still has signal
+            // value as a plain "you're stuck" nudge, but we want at least
+            // ONE suggestion attached to make the banner actionable.
+            eprintln!("[memex] loop-breaker predict failed: {e:#}");
+            return Ok(false);
+        }
+    };
+    if ctx.predictions.is_empty() {
+        return Ok(false);
+    }
+
+    // ATOMIC reservation right before emit. Race-free against the
+    // headless `memex loop-check` hook running concurrently — both can
+    // pass the cheap pre-check above and the expensive predict call,
+    // but only one wins the `O_CREAT | O_EXCL` claim. The loser returns
+    // here without emitting (codex PR #9 C-1).
+    if !crate::loopcheck::try_reserve_fire(&key) {
+        return Ok(false);
+    }
+    {
+        let mut g = debounce.lock().await;
+        g.insert(key.clone(), SystemTime::now());
+    }
+
+    let top = &ctx.predictions[0];
+    let project = session.project_name.as_deref().unwrap_or("?");
+    let title = "Memex Loop Breaker · you've been stuck";
+    let body = format!(
+        "{} · {} errors in {} turns. Past-you ran `{}` next ({} · turn #{}).",
+        project,
+        recent_count,
+        LOOP_RECENT_WINDOW,
+        top.tool_name,
+        top.from_session_project,
+        top.from_turn_index,
+    );
+    notify_system(app, title, &body);
+
+    let _ = app.emit(
+        "loop-breaker-ready",
+        json!({
+            "kind": "loop_breaker",
+            "from_session_id": session.session_id,
+            "from_project": project,
+            "from_turn_index": session.turns.len().saturating_sub(1),
+            "recent_errors": recent_count,
+            "recent_window": LOOP_RECENT_WINDOW,
+            "suggestion": {
+                "tool_name": top.tool_name,
+                "example_input": top.example_input_summary,
+                "from_session_id": top.from_session_id,
+                "from_session_project": top.from_session_project,
+                "from_turn_index": top.from_turn_index,
+                "frequency": top.frequency,
+                "confidence": top.confidence,
+            },
+            "predictions": ctx.predictions,
+        }),
+    );
+
+    Ok(true)
+}
+
 /// Surface a system notification. We go exclusively through
 /// `tauri-plugin-notification`. The earlier osascript fallback worked but
 /// every notification fired through `osascript display notification` is
@@ -575,4 +904,76 @@ fn latest_error(session: &Session) -> Option<(usize, String)> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::parser::{Session, Turn, TurnRole, ToolResult, EventCounts};
+    use chrono::Utc;
+
+    fn turn_with_errors(error_count: usize) -> Turn {
+        let mut t = Turn {
+            uuid: "u".into(),
+            parent_uuid: None,
+            timestamp: Some(Utc::now()),
+            role: TurnRole::Assistant,
+            is_sidechain: false,
+            text: String::new(),
+            tool_calls: vec![],
+            tool_results: vec![],
+        };
+        for i in 0..error_count {
+            t.tool_results.push(ToolResult {
+                tool_use_id: format!("tu_{i}"),
+                content: "error".into(),
+                is_error: true,
+            });
+        }
+        t
+    }
+
+    fn sess(turns: Vec<Turn>) -> Session {
+        Session {
+            session_id: "s".into(),
+            source_path: std::path::PathBuf::from("/tmp/s.jsonl"),
+            project_path: None,
+            project_name: Some("test".into()),
+            git_branch: None,
+            claude_version: None,
+            ai_title: None,
+            start_time: None,
+            end_time: None,
+            turns,
+            event_counts: EventCounts::default(),
+        }
+    }
+
+    #[test]
+    fn error_count_in_window_only_counts_recent() {
+        // 3 errors in the FIRST turn (outside window), 2 errors in the LAST turn.
+        let mut turns = vec![turn_with_errors(3)];
+        for _ in 0..10 {
+            turns.push(turn_with_errors(0));
+        }
+        turns.push(turn_with_errors(2));
+        let s = sess(turns);
+        // window=5 captures only the trailing block — should see 2.
+        assert_eq!(error_count_in_window(&s, 5), 2);
+        // window=15 captures everything — should see 5.
+        assert_eq!(error_count_in_window(&s, 15), 5);
+    }
+
+    #[test]
+    fn error_count_in_window_zero_when_no_errors() {
+        let s = sess(vec![turn_with_errors(0); 6]);
+        assert_eq!(error_count_in_window(&s, 10), 0);
+    }
+
+    #[test]
+    fn error_count_in_window_handles_window_larger_than_session() {
+        let s = sess(vec![turn_with_errors(1), turn_with_errors(2)]);
+        // window 100 > n=2 → counts everything.
+        assert_eq!(error_count_in_window(&s, 100), 3);
+    }
 }

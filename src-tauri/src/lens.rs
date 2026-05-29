@@ -109,7 +109,10 @@ pub struct LensWeights {
     pub error: f32,
     #[serde(default = "default_weight")]
     pub code: f32,
-    #[serde(default = "default_zero")]
+    // REV-3 (PR #12 gemini medium) — serde default must match Default impl,
+    // otherwise a JSON request that omits `content_late` deserializes to 0.0
+    // (silently disabling the lane) instead of the post-T3.3 default of 0.25.
+    #[serde(default = "default_content_late")]
     pub content_late: f32,
     /// KA-02. `None` ⇒ no MMR. `Some(d)` with d ∈ [0,1] ⇒ wrap the **content**
     /// prefetch with NearestWithMmr(diversity=d). Per spec, default is 0.4
@@ -125,19 +128,29 @@ pub struct LensWeights {
 fn default_weight() -> f32 {
     1.0
 }
-fn default_zero() -> f32 {
-    0.0
+/// T3.3 + PR #12 REV-3 — serde default for `content_late` must agree with
+/// `LensWeights::default().content_late` (0.25), otherwise wire requests that
+/// omit the field silently disable the multivector rerank lane.
+/// (The old `default_zero` helper became unreachable after this rename.)
+fn default_content_late() -> f32 {
+    0.25
 }
 
 impl Default for LensWeights {
     fn default() -> Self {
+        // T3.3 (qdrant-improvement-goal.md) — content_late default is flipped
+        // from 0.0 to 0.25: a deliberate rerank-only nudge that activates the
+        // ColBERT multivector lane on every search without dominating the query
+        // plan. The 0.25 was picked to keep dense lenses (each at 1.0) as the
+        // primary signal while letting late-interaction tie-break on token-level
+        // precision. Reverting to 0.0 is the rollback if eval_ndcg regresses.
         Self {
             content: 1.0,
             tool: 1.0,
             path: 1.0,
             error: 1.0,
             code: 1.0,
-            content_late: 0.0,
+            content_late: 0.25,
             diversity: None,
             fusion: FusionMode::Formula,
         }
@@ -849,24 +862,9 @@ pub fn lens_result_to_searchhit(r: LensResult) -> SearchHit {
     }
 }
 
-/// Adapter `LensWeights` (this module) → `crate::indexer::LensWeights`
-/// (legacy struct) so callers in `indexer::lens_search` can keep the same
-/// signature. Lossless for the 6 dense weights; the new `diversity` /
-/// `fusion` fields default to `None` / `Formula`.
-impl From<crate::indexer::LensWeights> for LensWeights {
-    fn from(v: crate::indexer::LensWeights) -> Self {
-        Self {
-            content: v.content,
-            tool: v.tool,
-            path: v.path,
-            error: v.error,
-            code: v.code,
-            content_late: v.content_late,
-            diversity: None,
-            fusion: FusionMode::Formula,
-        }
-    }
-}
+// Issue #15 — the `From<crate::indexer::LensWeights> for LensWeights` adapter
+// was removed because the two types are now the same type (indexer re-exports
+// this one via `pub use`). Identity conversion is implicit; no adapter needed.
 
 // ---------------------------------------------------------------------------
 // Tests — TDD G2 gate (11 FormulaQuery + 3 MMR + 3 RRF + 4 BM25 = 21).
@@ -1038,14 +1036,16 @@ mod tests {
 
     #[test]
     fn formula_score_idx_ordering_matches_prefetch() {
-        // With default weights: dense=[content,tool,error,code] (content_late=0
-        // so skipped) and sparse=[path_sparse,tool_sparse].
+        // With default weights (post-T3.3 in qdrant-improvement-goal.md):
+        // content_late is now 0.25 (was 0.0), so it joins the dense list at
+        // the END (after content/tool/error/code per active_dense_specs order).
+        // Sparse lanes are unchanged: [path_sparse, tool_sparse].
         // Note: path is routed to sparse, so dense.path is absent.
         let w = LensWeights::default();
         let dense = active_dense_specs(&w);
         let sparse = active_sparse_specs(&w);
         let names: Vec<&str> = dense.iter().map(|d| d.name).collect();
-        assert_eq!(names, vec!["content", "tool", "error", "code"]);
+        assert_eq!(names, vec!["content", "tool", "error", "code", "content_late"]);
         assert_eq!(sparse.iter().map(|s| s.name).collect::<Vec<_>>(),
                    vec!["path_sparse", "tool_sparse"]);
         let f = build_formula(&w, &dense, &sparse).build();
@@ -1309,6 +1309,25 @@ mod tests {
         assert_eq!(payload_bool(&p, "missing"), None);
     }
 
+    /* PR #12 REV-3 (Gemini medium) — serde default for content_late must
+     * match LensWeights::default() so a JSON request that omits the field
+     * deserializes to 0.25, not 0.0 (the old silently-disable-the-lane bug). */
+
+    #[test]
+    fn serde_default_content_late_matches_struct_default() {
+        // Request with content_late OMITTED — should deserialize to 0.25
+        // (LensWeights::default().content_late), NOT 0.0 (old default_zero).
+        let json = r#"{"content":1.0,"tool":1.0,"path":1.0,"error":1.0,"code":1.0}"#;
+        let w: LensWeights = serde_json::from_str(json)
+            .expect("omitted content_late must deserialize via the new default_content_late()");
+        assert_eq!(w.content_late, 0.25,
+            "REV-3 invariant: serde default for content_late must match LensWeights::default()");
+        // Sanity: explicit value still wins over the default.
+        let json_explicit = r#"{"content":1.0,"tool":1.0,"path":1.0,"error":1.0,"code":1.0,"content_late":0.0}"#;
+        let w_explicit: LensWeights = serde_json::from_str(json_explicit).unwrap();
+        assert_eq!(w_explicit.content_late, 0.0);
+    }
+
     #[test]
     fn lens_result_to_searchhit_preserves_breakdown() {
         let mut per = HashMap::new();
@@ -1332,5 +1351,37 @@ mod tests {
         assert_eq!(h.session_id, "s1");
         assert_eq!(h.score, 1.42);
         assert_eq!(h.vector_scores, per);
+    }
+
+    // ----- Issue #15 closure assertions -----
+
+    #[test]
+    fn issue_15_partial_weights_json_picks_up_diversity_and_fusion() {
+        // Frontend (src/main.js) sends weights with `diversity` and `fusion`;
+        // before the collapse these were silently dropped at the
+        // `indexer::LensWeights` boundary. Verify they now flow through —
+        // and that the serde defaults for the omitted fields still fire
+        // (content_late = 0.25, tool/path/error/code = 1.0).
+        let json = r#"{"content":1.5,"diversity":0.4,"fusion":"rrf"}"#;
+        let w: LensWeights = serde_json::from_str(json)
+            .expect("partial weights JSON with diversity+fusion must deserialize");
+        assert!((w.content - 1.5).abs() < f32::EPSILON);
+        assert_eq!(w.diversity, Some(0.4));
+        assert!(matches!(w.fusion, FusionMode::Rrf));
+        assert!((w.tool - 1.0).abs() < f32::EPSILON);
+        assert!((w.content_late - 0.25).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn issue_15_indexer_re_export_is_identity_with_lens() {
+        // `indexer::LensWeights` is a `pub use` re-export of `lens::LensWeights`.
+        // Cross-module assignment must compile without conversion — if anyone
+        // re-introduces a parallel struct, this fails at compile time.
+        let from_lens: crate::lens::LensWeights = Default::default();
+        let _: crate::indexer::LensWeights = from_lens.clone();
+        let from_indexer: crate::indexer::LensWeights = Default::default();
+        let _: crate::lens::LensWeights = from_indexer;
+        // Same FusionMode enum as well
+        let _: crate::indexer::FusionMode = crate::lens::FusionMode::Formula;
     }
 }

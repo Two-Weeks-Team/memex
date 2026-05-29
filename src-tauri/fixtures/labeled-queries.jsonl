@@ -1,0 +1,31 @@
+// Issue #13 — labeled queries fixture for `benches/quant_sweep.rs`.
+//
+// Format: one JSON object per line, matching `eval_ndcg::LabeledQuery`:
+//   { "query": "<free-text>", "relevant_ids": ["<session-uuid>", ...] }
+//
+// Comment lines (`#` or `//`) and blank lines are skipped by the bench
+// loader. `relevant_ids` are listed in descending relevance order (most
+// relevant first); nDCG@10 counts each id found in the top-10 results,
+// discounted by rank.
+//
+// These rows are matched to the `examples/sample-corpus/` fixture
+// committed alongside the bench harness. Each query is a paraphrase or
+// related keyword for one (or more) of the 12 sessions — see
+// `examples/sample-corpus/README.md` for the full session map.
+//
+// To author new entries for your own corpus, run `memex scan ~/.claude/projects`
+// to list session_ids, pick queries that should match each, and add one
+// JSON line per query.
+
+{"query": "JWT authentication implementation", "relevant_ids": ["046df7e8-c8fb-53ef-9e82-9729b41c4ad3"]}
+{"query": "API rate limit bug fix", "relevant_ids": ["321dd4d0-ae8c-54f1-a500-12c6f927a0d2"]}
+{"query": "database schema migration", "relevant_ids": ["b2e0216f-1e98-5328-b0f0-a3a649cb8b32"]}
+{"query": "login form UI build", "relevant_ids": ["883eb8c3-c97b-582c-91a9-bc3f9be99aa2", "046df7e8-c8fb-53ef-9e82-9729b41c4ad3"]}
+{"query": "frontend build failure", "relevant_ids": ["e7bea3eb-9838-5eae-b0fc-46dbf7ee4cc7"]}
+{"query": "dark mode CSS styling", "relevant_ids": ["3b2cb08e-981e-5c18-8abb-5e07482b7d94"]}
+{"query": "ML data loader pipeline", "relevant_ids": ["bbc60d5f-2771-55a3-ab64-851285085ccb"]}
+{"query": "training NaN debug", "relevant_ids": ["e1072ed7-3405-54ab-aa90-83c288003cb4"]}
+{"query": "python dependency upgrade", "relevant_ids": ["ed807207-2757-5b83-87d1-e1d1cfb9f7c6"]}
+{"query": "Docker containerize service", "relevant_ids": ["ef2f2b35-bd44-539c-b891-c278163c32c3"]}
+{"query": "CI cache speedup", "relevant_ids": ["9ad3e88f-c852-559e-a2c5-6781ad94a43f"]}
+{"query": "Terraform infrastructure setup", "relevant_ids": ["eedd4028-35cf-5449-91e7-bd4830c18120"]}

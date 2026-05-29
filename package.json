@@ -1,13 +1,14 @@
 {
   "name": "memex",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "scripts": {
     "tauri": "tauri",
     "tauri:dist": "tauri build -- --no-default-features"
   },
   "devDependencies": {
+    "@playwright/test": "^1.60.0",
     "@tauri-apps/cli": "^2"
   }
 }

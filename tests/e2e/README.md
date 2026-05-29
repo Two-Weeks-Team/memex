@@ -30,7 +30,7 @@ below against their own corpus.
 ```bash
 # 1) Start Qdrant (one-time, persists across runs)
 docker run -d --name memex-qdrant -p 6333:6333 -p 6334:6334 \
-  qdrant/qdrant:v1.18.0
+  qdrant/qdrant:v1.18.1
 
 # 2) Index the real local corpus (Claude + Codex)
 ./src-tauri/target/release/memex scan --index

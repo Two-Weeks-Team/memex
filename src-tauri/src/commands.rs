@@ -280,6 +280,46 @@ pub async fn predict_next_actions(
     .map_err(stringify)
 }
 
+/// **Wrapped (GUI surface).** Compose a corpus-wide digest covering the
+/// last `window_days` days (0 = all-time). LLM-free, embedder-free —
+/// pure aggregation over Qdrant payload + JSONL re-parse for decisions.
+#[tauri::command]
+pub async fn compose_wrapped(
+    state: State<'_, AppStateArc>,
+    window_days: Option<u32>,
+    limit: Option<usize>,
+) -> Result<crate::wrapped::WrappedReport, String> {
+    let qdrant = state.qdrant().await.map_err(stringify)?;
+    crate::wrapped::compose_wrapped(
+        &qdrant,
+        window_days.unwrap_or(30),
+        limit.unwrap_or(32),
+    )
+    .await
+    .map_err(stringify)
+}
+
+/// **Cold Start Killer (GUI surface).** Compose a memory primer for the
+/// given cwd. The frontend Companion panel calls this on demand (or in
+/// response to a watcher event that flagged a freshly-opened session).
+#[tauri::command]
+pub async fn compose_memory_primer(
+    state: State<'_, AppStateArc>,
+    cwd: Option<String>,
+    limit: Option<usize>,
+) -> Result<crate::companion::MemoryPrimer, String> {
+    let cwd_path = match cwd.as_deref() {
+        Some(s) if !s.is_empty() => Some(std::path::PathBuf::from(s)),
+        _ => None,
+    };
+    let resolved = crate::companion::resolve_cwd_arg(cwd_path.as_deref()).map_err(stringify)?;
+    let qdrant = state.qdrant().await.map_err(stringify)?;
+    let embedder = state.embedder().await.map_err(stringify)?;
+    crate::companion::compose_memory_primer(&qdrant, &embedder, &resolved, limit.unwrap_or(8))
+        .await
+        .map_err(stringify)
+}
+
 #[tauri::command]
 pub async fn snapshot_export(path: PathBuf) -> Result<String, String> {
     let sb = crate::snapshot::SnapshotSandbox::from_env().map_err(stringify)?;
@@ -610,49 +650,10 @@ pub async fn prompt_history_stats(
 /// no Qdrant calls. Used by the Time Machine stack on app boot so the user
 /// always sees something even before they type a query, and even if Qdrant
 /// hasn't been indexed yet.
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct SessionSummary {
-    pub session_id: String,
-    pub project_name: String,
-    pub project_path: String,
-    pub git_branch: String,
-    pub ai_title: String,
-    pub start_iso: String,
-    pub end_iso: String,
-    pub user_turns: usize,
-    pub assistant_turns: usize,
-    pub tool_count: usize,
-    pub has_errors: bool,
-}
-
-impl From<parser::Session> for SessionSummary {
-    fn from(s: parser::Session) -> Self {
-        let tool_count: usize = s.turns.iter().map(|t| t.tool_calls.len()).sum();
-        let has_errors = s
-            .turns
-            .iter()
-            .any(|t| t.tool_results.iter().any(|r| r.is_error));
-        Self {
-            session_id: s.session_id,
-            project_name: s.project_name.unwrap_or_default(),
-            project_path: s.project_path.unwrap_or_default(),
-            git_branch: s.git_branch.unwrap_or_default(),
-            ai_title: s.ai_title.unwrap_or_default(),
-            start_iso: s
-                .start_time
-                .map(|t| t.to_rfc3339())
-                .unwrap_or_default(),
-            end_iso: s
-                .end_time
-                .map(|t| t.to_rfc3339())
-                .unwrap_or_default(),
-            user_turns: s.event_counts.user,
-            assistant_turns: s.event_counts.assistant,
-            tool_count,
-            has_errors,
-        }
-    }
-}
+// SessionSummary moved to the Tauri-free `summary` module so the headless
+// `web`/`mcp` builds can use it without the GUI. Re-exported here so existing
+// `commands::SessionSummary` paths keep working in the GUI build.
+pub use crate::summary::SessionSummary;
 
 /// List sessions across `~/.claude/projects/` (modern), `~/.codex/sessions`
 /// (P5 KH-01 multi-agent), AND `~/.claude/transcripts/` (legacy, pre-v2.1.114

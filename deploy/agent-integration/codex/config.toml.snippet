@@ -1,0 +1,15 @@
+# Memex · Codex integration. `memex install codex` merges this into ~/.codex/config.toml
+# between fenced markers. notify is single-valued in Codex — if you already have a
+# notify program, install refuses and warns rather than clobbering it.
+
+# >>> memex >>>
+[mcp_servers.memex]
+command = "memex"
+args = ["mcp"]
+# HTTP alternative (run the all-in-one container first):
+#   url = "http://localhost:8765/mcp"
+#   bearer_token_env_var = "MEMEX_API_TOKEN"
+
+# Loop Breaker: Codex delivers the turn-complete payload as argv[1] (NOT stdin).
+notify = ["memex", "codex-notify"]
+# <<< memex <<<

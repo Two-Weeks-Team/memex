@@ -1,0 +1,182 @@
+name: CI
+
+# Minimal, reproducible verification for Memex. Two jobs, no secrets, no
+# code-signing, no Apple notarization — everything here runs on a clean
+# GitHub-hosted runner.
+#
+# What this DOES verify:
+#   - The Rust workspace (the same binary that backs both the CLI and the
+#     Tauri GUI) compiles in release mode.
+#   - The full test suite passes. The lens/retrieval/schema integration
+#     tests talk to a live Qdrant; they honor MEMEX_SKIP_QDRANT_TESTS=1
+#     (the in-repo "CI fallback" documented in those test files), which is
+#     set on the test step below so the hermetic unit + parser/codex tests
+#     still run. The Qdrant-backed surfaces are evidenced separately in
+#     docs/e2e-evidence.md (228 tests pass locally with Qdrant up).
+#   - The JS side installs cleanly from the committed lockfile and the
+#     Tauri config is valid JSON.
+#
+# What this deliberately does NOT do, and why:
+#   - It does not run `npm run tauri:dist` (the full `.dmg`/bundle build).
+#     A signed, notarized macOS DMG needs an Apple Developer cert + secrets,
+#     and an unsigned bundle build is heavy (~10 min of WebKit/Rust linking)
+#     while proving little beyond what `cargo build --release` already proves:
+#     the Tauri app binary compiles. The release build below IS the Tauri
+#     compile smoke. See docs/BUILD.md for the full local bundle path.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Cancel superseded runs on the same ref to save runner minutes.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  rust:
+    name: Rust build + test (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      # Tauri 2 needs these system libraries to compile on Linux. They are
+      # the standard Tauri prerequisites; none are macOS/signing specific.
+      - name: Install Tauri Linux system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            librsvg2-dev \
+            libsoup-3.0-dev \
+            libjavascriptcoregtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            libxdo-dev \
+            libssl-dev \
+            build-essential curl wget file pkg-config
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry + target
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: cargo test (Qdrant-dependent integration tests skipped via MEMEX_SKIP_QDRANT_TESTS)
+        env:
+          # lens/retrieval/schema integration tests need a live Qdrant; this
+          # is their in-repo "CI fallback" skip switch. Unit + parser/codex
+          # tests still run. Full Qdrant integration → docs/e2e-evidence.md.
+          MEMEX_SKIP_QDRANT_TESTS: "1"
+        run: cargo test --manifest-path src-tauri/Cargo.toml --locked
+
+      - name: cargo build --release (Tauri app binary compile smoke)
+        run: cargo build --release --manifest-path src-tauri/Cargo.toml --locked
+
+  frontend:
+    name: Frontend install + config validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: npm ci (validates committed lockfile installs cleanly)
+        run: npm ci
+
+      - name: Validate tauri.conf.json is well-formed JSON
+        run: node -e "JSON.parse(require('fs').readFileSync('src-tauri/tauri.conf.json','utf8')); console.log('tauri.conf.json OK')"
+
+  # Compiles the exact path the server/Docker image uses
+  # (--no-default-features --features web) on a runner with NO Tauri/WebKit libs.
+  # This is the only CI job that catches a gui-only symbol leaking into the
+  # headless web/CLI path (a missing #[cfg(feature)] gate).
+  web-headless:
+    name: Rust web feature (headless, no Tauri)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install minimal build deps (no WebKit/GTK)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config libssl-dev build-essential curl
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry + target
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: web-feature
+
+      - name: cargo check --no-default-features --features web
+        run: >
+          cargo check --locked
+          --manifest-path src-tauri/Cargo.toml
+          --no-default-features --features web
+
+  # Lints the agent-integration artifacts: the hook shell scripts, the bash rc
+  # snippet, the committed JSON, and the hooks template schema. shellcheck + node
+  # are preinstalled on ubuntu-latest. zsh/fish/ps1 are deliberately NOT linted
+  # (not bash); the codex TOML snippet is a fenced fragment, not a standalone doc.
+  integration-files:
+    name: Agent-integration lint (shell + JSON)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: ShellCheck hook scripts
+        run: shellcheck deploy/agent-integration/hooks/*.sh
+
+      - name: ShellCheck bash rc snippet (SC2178 is a false positive here)
+        run: shellcheck --shell=bash --exclude=SC2178 deploy/agent-integration/shell/memex.bash
+
+      - name: Validate JSON files parse
+        run: |
+          for f in \
+            .mcp.json \
+            deploy/agent-integration/settings.local.json.template \
+            deploy/agent-integration/cursor/mcp.json.snippet
+          do
+            node -e "JSON.parse(require('fs').readFileSync(process.argv[1],'utf8')); console.log(process.argv[1] + ' OK')" "$f"
+          done
+
+      - name: Validate hook command schema
+        run: |
+          node -e '
+            const fs = require("fs");
+            const cfg = JSON.parse(fs.readFileSync("deploy/agent-integration/settings.local.json.template","utf8"));
+            const hooks = cfg.hooks;
+            if (!hooks || typeof hooks !== "object") throw new Error("missing .hooks");
+            const expected = ["SessionStart","UserPromptSubmit","PostToolUse","SessionEnd"];
+            for (const ev of expected) {
+              if (!Array.isArray(hooks[ev])) throw new Error("missing hook event: " + ev);
+            }
+            for (const [ev, groups] of Object.entries(hooks)) {
+              for (const g of groups) {
+                if (typeof g.matcher !== "string") throw new Error(ev + ": matcher must be a string");
+                if (!Array.isArray(g.hooks)) throw new Error(ev + ": .hooks must be an array");
+                for (const h of g.hooks) {
+                  if (h.type !== "command") throw new Error(ev + ": hook.type must be \"command\"");
+                  if (typeof h.command !== "string" || !h.command.trim()) throw new Error(ev + ": hook.command must be a non-empty string");
+                  if (!h.command.includes("__MEMEX_HOOKS_DIR__")) throw new Error(ev + ": command must reference __MEMEX_HOOKS_DIR__");
+                  if (h.timeout !== undefined && typeof h.timeout !== "number") throw new Error(ev + ": timeout must be a number");
+                }
+              }
+            }
+            console.log("hook schema OK (" + expected.length + " events validated)");
+          '

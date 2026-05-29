@@ -24,7 +24,7 @@ use qdrant_client::qdrant::{
     Modifier, MultiVectorComparator, MultiVectorConfigBuilder, PayloadIndexParams,
     QuantizationSearchParams, QuantizationSearchParamsBuilder, SearchParams, SearchParamsBuilder,
     SparseIndexConfig, SparseVectorConfig, SparseVectorParams, SparseVectorParamsBuilder,
-    StrictModeConfigBuilder, TurboQuantBitSize, TurboQuantization, TurboQuantizationBuilder,
+    StrictModeConfigBuilder, TurboQuantBitSize, TurboQuantizationBuilder,
     VectorParams, VectorParamsBuilder, VectorParamsMap, VectorsConfig, WalConfigDiff,
 };
 use qdrant_client::Payload;
@@ -175,17 +175,21 @@ pub fn build_v3_create_collection() -> CreateCollectionBuilder {
         ..Default::default()
     };
 
-    // TurboQuant bits2 + always_ram.
+    // Quantization mode (Issue #13).
     //
     // SPEC NOTE (P3, KC-01): `CreateCollectionBuilder.quantization_config`
     // accepts `Into<quantization_config::Quantization>` — the inner *oneof*
     // variant, not the wrapper `QuantizationConfig`. The server still stores
     // a `QuantizationConfig { quantization: Some(Turboquant(...)) }` on the
     // collection — verified in `it_quantization_present_in_collection_info`.
-    let turbo: TurboQuantization = TurboQuantizationBuilder::default()
-        .bits(TurboQuantBitSize::Bits2)
-        .always_ram(true)
-        .build();
+    //
+    // Issue #13 made this runtime-configurable via `MEMEX_QUANT_MODE`. The
+    // default (env unset / unrecognised) is **the same** TurboQuant bits-2 +
+    // always_ram production setting we had pre-#13 — no behaviour change for
+    // existing deployments. The new env var is used by `benches/quant_sweep.rs`
+    // and by anyone running `cargo bench --bench quant_sweep` to compare
+    // recall / latency / disk-size across configs on their own corpus.
+    let quantization_inner: Option<Quantization> = QuantMode::from_env().to_inner_quantization();
 
     // Strict mode — KC-06 (P5) adds `max_query_limit` on top of P3's
     // `max_resident_memory_percent`. Both are conservative: 85% memory cap
@@ -203,14 +207,19 @@ pub fn build_v3_create_collection() -> CreateCollectionBuilder {
         ..Default::default()
     };
 
-    CreateCollectionBuilder::new(COLLECTION_V3)
+    let mut builder = CreateCollectionBuilder::new(COLLECTION_V3)
         .vectors_config(vectors_cfg)
         .sparse_vectors_config(sparse_cfg)
         .hnsw_config(hnsw)
-        .quantization_config(Quantization::Turboquant(turbo))
         .strict_mode_config(strict_mode)
         .wal_config(wal)
-        .timeout(60)
+        .timeout(60);
+    // F32None (no quantization at all) is selected by omitting the field.
+    // Any other QuantMode wraps the inner oneof variant.
+    if let Some(q) = quantization_inner {
+        builder = builder.quantization_config(q);
+    }
+    builder
 }
 
 // ---------------------------------------------------------------------------
@@ -244,6 +253,11 @@ pub fn v3_payload_indexes() -> Vec<(&'static str, FieldType, Option<PayloadIndex
         ("project_path", FieldType::Keyword, None),
         ("git_branch", FieldType::Keyword, None),
         ("ai_title", FieldType::Text, None),
+        // Issue #14 — multi-value identifier tokens with their own Text index.
+        // Each Vec element is treated as an independent token by Qdrant's
+        // Text index, so the standard `word` tokenizer is correct here once
+        // we've split client-side.
+        ("ai_title_tokens", FieldType::Text, None),
         ("start_ts_dt", FieldType::Datetime, Some(datetime_default)),
         ("has_errors", FieldType::Bool, None),
         ("schema_version", FieldType::Integer, None),
@@ -251,6 +265,80 @@ pub fn v3_payload_indexes() -> Vec<(&'static str, FieldType, Option<PayloadIndex
         ("outcome", FieldType::Keyword, None),
         ("source_agent", FieldType::Keyword, None), // KH-01
     ]
+}
+
+// ---------------------------------------------------------------------------
+// Issue #13 — runtime-configurable quantization mode (MEMEX_QUANT_MODE env)
+// ---------------------------------------------------------------------------
+//
+// Used by `build_v3_create_collection()` above + the Criterion benchmark in
+// `benches/quant_sweep.rs`. The default (env unset / unrecognised) is the
+// same TurboQuant bits-2 setting we shipped pre-#13.
+//
+// Recognised values:
+//   - "f32" / "none"  → no quantization at all (f32 baseline)
+//   - "tq-bits1"      → TurboQuant 1-bit (more compression, lower recall)
+//   - "tq-bits2"      → TurboQuant 2-bit (default — current production)
+//
+// Scalar / Binary quantization variants are intentionally not included in
+// this first round — they would require additional builder plumbing and the
+// 3 modes above already span the interesting recall vs. disk-size space.
+// Adding them is a 30-line follow-up if a sweep needs more granularity.
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QuantMode {
+    F32None,
+    TqBits1,
+    TqBits2,
+}
+
+impl QuantMode {
+    /// Read the mode from `MEMEX_QUANT_MODE`. Unset / unrecognised → TqBits2
+    /// (the pre-#13 hardcoded production default).
+    pub fn from_env() -> Self {
+        match std::env::var("MEMEX_QUANT_MODE")
+            .ok()
+            .as_deref()
+            .map(str::trim)
+            .map(str::to_ascii_lowercase)
+            .as_deref()
+        {
+            Some("f32") | Some("none") => Self::F32None,
+            Some("tq-bits1") | Some("tq_bits1") | Some("turboquant_bits1") => Self::TqBits1,
+            // Default branch covers "tq-bits2", "tq_bits2", unset, unknown.
+            _ => Self::TqBits2,
+        }
+    }
+
+    /// The kebab-case name used in env values and reports.
+    pub fn as_name(self) -> &'static str {
+        match self {
+            Self::F32None => "f32",
+            Self::TqBits1 => "tq-bits1",
+            Self::TqBits2 => "tq-bits2",
+        }
+    }
+
+    /// Convert into the inner Qdrant `Quantization` oneof variant.
+    /// `None` means "no quantization at all" (f32 baseline) — handled at the
+    /// caller by omitting the builder field entirely.
+    pub fn to_inner_quantization(self) -> Option<Quantization> {
+        match self {
+            Self::F32None => None,
+            Self::TqBits1 => Some(Quantization::Turboquant(
+                TurboQuantizationBuilder::default()
+                    .bits(TurboQuantBitSize::Bits1)
+                    .always_ram(true)
+                    .build(),
+            )),
+            Self::TqBits2 => Some(Quantization::Turboquant(
+                TurboQuantizationBuilder::default()
+                    .bits(TurboQuantBitSize::Bits2)
+                    .always_ram(true)
+                    .build(),
+            )),
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -299,6 +387,97 @@ pub fn infer_source_agent(source_path: &str) -> &'static str {
 }
 
 // ---------------------------------------------------------------------------
+// Issue #14 — identifier-aware tokenization for `ai_title`
+// ---------------------------------------------------------------------------
+//
+// Qdrant 1.18 ships 4 builtin text tokenizers (`word` / `whitespace` /
+// `prefix` / `multilingual`); none of them split identifier-shaped titles
+// like `getUserData refactor` or `fix_dns_resolver bug` at the camel/snake
+// boundaries — so a search for `user` does not match a session titled
+// `getUserData refactor`.
+//
+// We solve this client-side: at index time we expand the title into a
+// `Vec<String>` of constituent tokens stored in a second payload field
+// `ai_title_tokens`, which carries its own `Text` index. Qdrant's text
+// index treats each array element as an independent token (see
+// https://qdrant.tech/documentation/concepts/payload/), so once split
+// client-side the `word` tokenizer is correct.
+//
+// Industry precedent for this pattern: Elasticsearch's
+// `word_delimiter_graph` token filter, GitHub Code Search, Sourcegraph
+// zoekt — all do the splitting at indexing time, not at query time.
+
+/// Split an `ai_title`-shaped string into its constituent identifier tokens.
+///
+/// Includes the original whitespace-separated words, the camelCase split,
+/// and the snake_case split. Tokens of length 1 and empty tokens are
+/// dropped (they only add noise to the text index).
+///
+/// Examples:
+/// - `"getUserData refactor"` → `["getUserData", "get", "User", "Data", "refactor"]`
+/// - `"fix_dns_resolver bug"` → `["fix_dns_resolver", "fix", "dns", "resolver", "bug"]`
+/// - `"PowerShot 4G"` → `["PowerShot", "Power", "Shot", "4G"]`
+pub fn identifier_tokens(s: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for word in s.split_whitespace() {
+        // Preserve the original token unchanged.
+        out.push(word.to_string());
+        // Snake/kebab split first; for words without `_`/`-` this returns
+        // a single piece equal to `word` itself.
+        for piece in word.split(|c: char| c == '_' || c == '-') {
+            if piece.is_empty() {
+                continue;
+            }
+            // Don't re-push the original `word` if it had no separator.
+            if piece != word {
+                out.push(piece.to_string());
+            }
+            // camelCase / PascalCase split applies to each snake piece.
+            extend_camel_split(&mut out, piece);
+        }
+    }
+    // Drop noise tokens (length 0 or 1).
+    out.retain(|t| t.chars().count() > 1);
+    // Deduplicate while preserving first-occurrence order.
+    let mut seen = std::collections::HashSet::new();
+    out.retain(|t| seen.insert(t.clone()));
+    out
+}
+
+/// Push the camelCase / PascalCase split of `word` into `out`.
+/// `getUserData` → push `get`, `User`, `Data`. ASCII fast path; non-ASCII
+/// characters break the boundary (each non-ASCII char starts a new token).
+///
+/// Does NOT push the original `word` itself — caller is responsible for
+/// deciding whether to preserve the original token alongside the split pieces.
+fn extend_camel_split(out: &mut Vec<String>, word: &str) {
+    let mut current = String::new();
+    let mut prev_is_lower = false;
+    let mut piece_count = 0;
+    let mut pieces: Vec<String> = Vec::new();
+    for ch in word.chars() {
+        let is_upper = ch.is_uppercase();
+        // Boundary: previous was lowercase and current is uppercase
+        //   (`getUser` → split between `get` and `User`).
+        if is_upper && prev_is_lower && !current.is_empty() {
+            pieces.push(std::mem::take(&mut current));
+            piece_count += 1;
+        }
+        current.push(ch);
+        prev_is_lower = ch.is_lowercase();
+    }
+    if !current.is_empty() {
+        pieces.push(current);
+        piece_count += 1;
+    }
+    // Only emit the split if it actually split — a single-piece "split" is
+    // equal to the original `word`, which the caller already pushed.
+    if piece_count > 1 {
+        out.extend(pieces);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // V3Payload — typed payload struct
 // ---------------------------------------------------------------------------
 
@@ -317,6 +496,12 @@ pub struct V3Payload {
     pub project_path: String,
     pub git_branch: String,
     pub ai_title: String,
+    /// Issue #14 — identifier-aware token expansion of `ai_title`, indexed
+    /// with its own `Text` payload index for camelCase / snake_case search.
+    /// Always emitted (empty `Vec` for blank titles); the upsert path fills
+    /// this via `identifier_tokens(&ai_title)`.
+    #[serde(default)]
+    pub ai_title_tokens: Vec<String>,
     pub claude_version: String,
     pub start_iso: String,
     pub end_iso: String,
@@ -364,6 +549,10 @@ impl V3Payload {
         has_errors: bool,
     ) -> Self {
         let source_agent = infer_source_agent(&source_path).to_string();
+        // Issue #14 — identifier-aware token expansion runs at index time.
+        // Empty for blank titles; never `None` so the field is always present
+        // on every v3 point and the text index has a uniform shape.
+        let ai_title_tokens = identifier_tokens(&ai_title);
         Self {
             start_ts_dt: start_iso.clone(),
             end_ts_dt: end_iso.clone(),
@@ -373,6 +562,7 @@ impl V3Payload {
             project_path,
             git_branch,
             ai_title,
+            ai_title_tokens,
             claude_version,
             start_iso,
             end_iso,
@@ -670,10 +860,18 @@ mod tests {
     }
 
     #[test]
-    fn t_payload_index_count_is_ten() {
-        // Sanity — the spec calls for exactly 10 payload indexes (was 6 in v2,
-        // grew to 7 with schema_version + 2 enrich keywords + 1 KH-01 + 1 datetime).
-        assert_eq!(v3_payload_indexes().len(), 10);
+    fn t_payload_index_count_is_eleven() {
+        // Sanity — was 10 pre-Issue#14. Issue #14 added `ai_title_tokens`
+        // (identifier-aware text index for camelCase/snake_case search).
+        let indexes = v3_payload_indexes();
+        assert_eq!(indexes.len(), 11);
+        // And specifically: the new ai_title_tokens index is Text-typed.
+        let (_, ftype, _) = idx("ai_title_tokens", &indexes);
+        assert_eq!(
+            *ftype,
+            FieldType::Text,
+            "ai_title_tokens must use the Text index for token matching",
+        );
     }
 
     // ----- §2 payload v3 shape -----
@@ -850,5 +1048,240 @@ mod tests {
         assert_eq!(p.schema_version, 3);
         // start_ts_dt is copied from start_iso during the lift.
         assert_eq!(p.start_ts_dt, p.start_iso);
+    }
+
+    // -----------------------------------------------------------------
+    // Issue #14 — identifier_tokens(): 6 unit tests + dual-field check
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn identifier_tokens_camel_case_split() {
+        let t = identifier_tokens("getUserData refactor");
+        // Originals + camel split parts, no length-1 noise, deduped.
+        assert!(t.contains(&"getUserData".to_string()));
+        assert!(t.contains(&"get".to_string()));
+        assert!(t.contains(&"User".to_string()));
+        assert!(t.contains(&"Data".to_string()));
+        assert!(t.contains(&"refactor".to_string()));
+    }
+
+    #[test]
+    fn identifier_tokens_snake_and_kebab_case_split() {
+        let snake = identifier_tokens("fix_dns_resolver bug");
+        assert!(snake.contains(&"fix_dns_resolver".to_string()));
+        assert!(snake.contains(&"fix".to_string()));
+        assert!(snake.contains(&"dns".to_string()));
+        assert!(snake.contains(&"resolver".to_string()));
+        assert!(snake.contains(&"bug".to_string()));
+
+        let kebab = identifier_tokens("low-power mode");
+        assert!(kebab.contains(&"low-power".to_string()));
+        assert!(kebab.contains(&"low".to_string()));
+        assert!(kebab.contains(&"power".to_string()));
+        assert!(kebab.contains(&"mode".to_string()));
+    }
+
+    #[test]
+    fn identifier_tokens_pascalcase_and_acronyms() {
+        // PascalCase + acronym-with-digit: `PowerShot` and `4G`.
+        let t = identifier_tokens("PowerShot 4G");
+        assert!(t.contains(&"PowerShot".to_string()));
+        assert!(t.contains(&"Power".to_string()));
+        assert!(t.contains(&"Shot".to_string()));
+        // `4G` length 2, no internal boundary → preserved as-is.
+        assert!(t.contains(&"4G".to_string()));
+    }
+
+    #[test]
+    fn identifier_tokens_mixed_case_and_underscores() {
+        // Combined camel + snake: split on both boundaries.
+        let t = identifier_tokens("getUser_fromCache");
+        assert!(t.contains(&"getUser_fromCache".to_string()));
+        // snake split
+        assert!(t.contains(&"getUser".to_string()));
+        assert!(t.contains(&"fromCache".to_string()));
+        // and the camel pieces (from the snake fragments OR the original)
+        assert!(t.contains(&"get".to_string()));
+        assert!(t.contains(&"User".to_string()));
+        // "from" appears via camel split of "fromCache"
+        assert!(t.contains(&"from".to_string()) || t.contains(&"Cache".to_string()));
+    }
+
+    #[test]
+    fn identifier_tokens_unicode_pass_through() {
+        // Non-ASCII titles: should be preserved as a token (no crash).
+        let t = identifier_tokens("디버깅 세션");
+        assert!(t.contains(&"디버깅".to_string()));
+        assert!(t.contains(&"세션".to_string()));
+        // No internal boundaries in Hangul, so no extra splits expected.
+    }
+
+    #[test]
+    fn identifier_tokens_empty_and_short_tokens_dropped() {
+        // Empty input → empty vec (no panic).
+        assert!(identifier_tokens("").is_empty());
+        // Single-character tokens dropped to avoid index noise.
+        let t = identifier_tokens("a b cd ef");
+        assert!(!t.contains(&"a".to_string()), "single-char tokens dropped");
+        assert!(!t.contains(&"b".to_string()), "single-char tokens dropped");
+        assert!(t.contains(&"cd".to_string()));
+        assert!(t.contains(&"ef".to_string()));
+    }
+
+    // -----------------------------------------------------------------
+    // Issue #13 — QuantMode::from_env unit tests
+    // -----------------------------------------------------------------
+
+    /// Helper: run a closure with `MEMEX_QUANT_MODE` set to `value` (or
+    /// unset if `None`), then restore the previous value. Avoids leaking
+    /// env state between tests; `cargo test` runs lib tests in the same
+    /// process so this matters.
+    fn with_env<F, R>(value: Option<&str>, f: F) -> R
+    where
+        F: FnOnce() -> R,
+    {
+        // `cargo test` runs tests in parallel by default; serialize every
+        // `with_env` call through a process-wide lock so concurrent tests can't
+        // race on MEMEX_QUANT_MODE or clobber each other's save/restore
+        // (Gemini review on PR #32). Recover from a poisoned lock (a panicking
+        // test holding it) so one failure doesn't cascade into all the others.
+        static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _env_guard = ENV_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let key = "MEMEX_QUANT_MODE";
+        let saved = std::env::var(key).ok();
+        // SAFETY: edition 2024 made env::set_var/remove_var `unsafe` (they are
+        // unsound if another thread reads the environment concurrently). The
+        // ENV_LOCK above serializes all env mutation in these tests, and the
+        // helper restores the prior value around `f`.
+        unsafe {
+            match value {
+                Some(v) => std::env::set_var(key, v),
+                None => std::env::remove_var(key),
+            }
+        }
+        let result = f();
+        unsafe {
+            match saved {
+                Some(v) => std::env::set_var(key, v),
+                None => std::env::remove_var(key),
+            }
+        }
+        result
+    }
+
+    #[test]
+    fn issue_13_quant_mode_from_env_default_is_tq_bits2() {
+        with_env(None, || {
+            assert_eq!(QuantMode::from_env(), QuantMode::TqBits2);
+        });
+    }
+
+    #[test]
+    fn issue_13_quant_mode_from_env_recognises_f32() {
+        with_env(Some("f32"), || {
+            assert_eq!(QuantMode::from_env(), QuantMode::F32None);
+        });
+        with_env(Some("none"), || {
+            assert_eq!(QuantMode::from_env(), QuantMode::F32None);
+        });
+        // Mixed case + whitespace tolerated.
+        with_env(Some("  F32  "), || {
+            assert_eq!(QuantMode::from_env(), QuantMode::F32None);
+        });
+    }
+
+    #[test]
+    fn issue_13_quant_mode_from_env_recognises_turboquant_variants() {
+        with_env(Some("tq-bits1"), || {
+            assert_eq!(QuantMode::from_env(), QuantMode::TqBits1);
+        });
+        with_env(Some("tq-bits2"), || {
+            assert_eq!(QuantMode::from_env(), QuantMode::TqBits2);
+        });
+        // Underscore alternative + uppercase tolerated.
+        with_env(Some("TQ_BITS1"), || {
+            assert_eq!(QuantMode::from_env(), QuantMode::TqBits1);
+        });
+    }
+
+    #[test]
+    fn issue_13_quant_mode_unknown_falls_back_to_tq_bits2() {
+        // Unrecognised values must not crash — they fall back to the
+        // pre-#13 production default (TqBits2) so accidentally setting
+        // `MEMEX_QUANT_MODE=garbage` does not change collection shape.
+        with_env(Some("garbage"), || {
+            assert_eq!(QuantMode::from_env(), QuantMode::TqBits2);
+        });
+        with_env(Some(""), || {
+            assert_eq!(QuantMode::from_env(), QuantMode::TqBits2);
+        });
+    }
+
+    #[test]
+    fn issue_13_quant_mode_to_inner_shapes() {
+        // F32None → None (no quantization field on the builder).
+        assert!(QuantMode::F32None.to_inner_quantization().is_none());
+        // TqBits1 and TqBits2 each produce a Turboquant variant.
+        match QuantMode::TqBits1.to_inner_quantization() {
+            Some(Quantization::Turboquant(_)) => {}
+            other => panic!("TqBits1 must produce Turboquant; got {other:?}"),
+        }
+        match QuantMode::TqBits2.to_inner_quantization() {
+            Some(Quantization::Turboquant(_)) => {}
+            other => panic!("TqBits2 must produce Turboquant; got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn issue_13_quant_mode_as_name_roundtrips() {
+        // Each mode's `as_name()` must round-trip back through `from_env`.
+        for mode in [QuantMode::F32None, QuantMode::TqBits1, QuantMode::TqBits2] {
+            let name = mode.as_name();
+            with_env(Some(name), || {
+                assert_eq!(
+                    QuantMode::from_env(),
+                    mode,
+                    "round-trip failed for {name}",
+                );
+            });
+        }
+    }
+
+    #[test]
+    fn issue_14_v3_payload_carries_ai_title_tokens() {
+        // V3Payload::from_session_fields must populate ai_title_tokens
+        // automatically — frontend doesn't have to pass it explicitly.
+        let p = V3Payload::from_session_fields(
+            "sid".into(),
+            "/sessions/sid.jsonl".into(),
+            "memex".into(),
+            "/repo/memex".into(),
+            "main".into(),
+            "getUserData refactor".into(),
+            "1.0".into(),
+            "2026-05-28T00:00:00Z".into(),
+            "2026-05-28T01:00:00Z".into(),
+            10,
+            10,
+            5,
+            false,
+        );
+        assert!(
+            p.ai_title_tokens.contains(&"getUserData".to_string()),
+            "original token preserved",
+        );
+        assert!(
+            p.ai_title_tokens.contains(&"User".to_string()),
+            "camelCase split applied",
+        );
+        // to_qdrant_payload must round-trip the new field (it just serdes
+        // self, so this is a sanity check that the field is part of the
+        // serialized form).
+        let pl = p.to_qdrant_payload();
+        let serialized = format!("{pl:?}");
+        assert!(
+            serialized.contains("ai_title_tokens"),
+            "ai_title_tokens must be in the qdrant payload"
+        );
     }
 }

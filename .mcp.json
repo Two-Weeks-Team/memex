@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "memex": {
+      "type": "stdio",
+      "command": "memex",
+      "args": ["mcp"],
+      "env": {
+        "MEMEX_PROJECT_DIR": "${CLAUDE_PROJECT_DIR:-${PWD}}"
+      }
+    }
+  }
+}

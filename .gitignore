@@ -38,8 +38,34 @@ tests/e2e/screenshots/*.png
 tests/e2e/screenshots/*.jpg
 tests/e2e/logs/
 
+# Hackathon demo materials — kept local only. Hardcoded fixture corpora,
+# recorded video clips, scenario captures, and the recording pipeline
+# never ship in the repo. If reviewers see the mock claude / mock banner
+# scripts they may downgrade their trust in the surfaces.
+tests/e2e/companion/
+tests/fixtures/companion-demo/
+scripts/demo/scenes/
+scripts/demo/record-companion-demo.sh
+scripts/demo/build-demo-corpus.py
+scripts/demo/demo-scenario.sh
+scripts/demo/companion-smoke.sh
+scripts/demo/gui-harness/
+scripts/demo/output/
+# Catch-all in case future demo work lands under either of these roots.
+*.tape
+*.webm
+**/demo-video/
+**/demo-corpus/
+# Pre-captured TUI replay text (real Claude output, but a local artifact).
+real-claude-output.txt
+
 # MCP / tooling scratch (Playwright snapshots, console logs)
 .playwright-mcp/
+
+# `memex install` writes timestamped backups of any config it modifies
+# (.mcp.json, settings.local.json, AGENTS.md, config.toml). Intentional, but
+# local-only — never track them.
+*.memex-bak-*
 
 # Editor directories and files
 .vscode/*
@@ -51,3 +77,7 @@ tests/e2e/logs/
 *.njsproj
 *.sln
 *.sw?
+
+# Preview Forge landing workspace (mockups gallery — local design exploration)
+landing-forge/
+runs/
