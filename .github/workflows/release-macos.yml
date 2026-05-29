@@ -116,7 +116,7 @@ jobs:
       - name: Build signed and notarized DMG
         env:
           CI: true
-        run: npm run tauri:release:macos
+        run: npx tauri build --bundles dmg --target aarch64-apple-darwin -- --no-default-features
 
       - name: Verify notarized artifacts
         run: |
