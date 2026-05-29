@@ -12,9 +12,57 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Context, Result};
 use chrono::{DateTime, Utc};
+use once_cell::sync::Lazy;
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use walkdir::WalkDir;
+
+/// Max chars for a title synthesized from the first user message.
+const SYNTH_TITLE_CHARS: usize = 60;
+
+/// A user "turn" beginning with one of these tags isn't real user input — it's
+/// harness/system noise injected into the conversation (background task
+/// events, system reminders, local command echoes). Skip such turns when
+/// picking a message to title the session from, otherwise the title becomes
+/// e.g. "<task-notification> <task-id>…".
+const NOISE_PREFIXES: &[&str] = &[
+    "<task-notification",
+    "<system-reminder",
+    "<local-command-caveat",
+    "<local-command-stdout",
+    "<bash-input",
+    "<bash-stdout",
+    "<bash-stderr",
+];
+
+/// True if a user message is harness-injected noise rather than real input.
+fn is_noise_turn(text: &str) -> bool {
+    let t = text.trim_start();
+    NOISE_PREFIXES.iter().any(|p| t.starts_with(p))
+}
+
+/// Build a fallback session title from a user message, for sessions where
+/// Claude never wrote an `ai-title` record. Prefers a slash-command's
+/// `<command-args>` (the actual instruction); otherwise strips ALL injected
+/// wrapper tags (`<command-…>`, `<task-id>`, `<output-file>`, …), then
+/// collapses whitespace and truncates to [`SYNTH_TITLE_CHARS`].
+fn synthesize_title(text: &str) -> String {
+    static ARGS: Lazy<Regex> =
+        Lazy::new(|| Regex::new(r"(?s)<command-args>(.*?)</command-args>").unwrap());
+    // Any XML-ish wrapper tag the harness injects (open or close form).
+    static TAGS: Lazy<Regex> = Lazy::new(|| Regex::new(r"</?[a-z][a-z0-9-]*[^>]*>").unwrap());
+    let base = match ARGS.captures(text).and_then(|c| c.get(1)) {
+        Some(m) if !m.as_str().trim().is_empty() => m.as_str().to_string(),
+        _ => TAGS.replace_all(text, " ").into_owned(),
+    };
+    base.split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .take(SYNTH_TITLE_CHARS)
+        .collect()
+}
 
 /// One parsed session = one top-level `.jsonl` file (subagent traces excluded).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -144,7 +192,15 @@ pub fn parse_session(path: &Path) -> Result<Session> {
         let event_type = obj.get("type").and_then(Value::as_str).unwrap_or("");
 
         if event_type == "ai-title" {
-            if let Some(t) = obj.get("title").and_then(Value::as_str) {
+            // Claude Code writes this field as `aiTitle` (camelCase). The old
+            // `title` lookup never matched, so every session fell back to
+            // "(untitled)" even when a perfectly good title was on disk.
+            // Accept the legacy `title` key too, just in case.
+            if let Some(t) = obj
+                .get("aiTitle")
+                .or_else(|| obj.get("title"))
+                .and_then(Value::as_str)
+            {
                 if session.ai_title.is_none() {
                     session.ai_title = Some(t.to_string());
                 }
@@ -184,6 +240,33 @@ pub fn parse_session(path: &Path) -> Result<Session> {
             }
             _ => {
                 session.event_counts.other += 1;
+            }
+        }
+    }
+
+    // Fallback: Claude doesn't write an `ai-title` record for every session
+    // (short or still-in-progress ones often lack one), so synthesize a title
+    // from the first *real* user message. Skip harness-injected noise turns
+    // (task notifications, system reminders, command echoes) — otherwise the
+    // title becomes "<task-notification> <task-id>…". If every user turn is
+    // noise, fall back to the first non-empty one so we still beat "(untitled)".
+    if session.ai_title.as_deref().map(str::trim).unwrap_or("").is_empty() {
+        let pick = session
+            .turns
+            .iter()
+            .find(|t| {
+                t.role == TurnRole::User && !t.text.trim().is_empty() && !is_noise_turn(&t.text)
+            })
+            .or_else(|| {
+                session
+                    .turns
+                    .iter()
+                    .find(|t| t.role == TurnRole::User && !t.text.trim().is_empty())
+            });
+        if let Some(turn) = pick {
+            let title = synthesize_title(&turn.text);
+            if !title.is_empty() {
+                session.ai_title = Some(title);
             }
         }
     }
@@ -655,16 +738,13 @@ pub fn summary_line(s: &Session) -> String {
         .map(|t| t.format("%Y-%m-%d %H:%M").to_string())
         .unwrap_or_else(|| "----".into());
     let tools: usize = s.turns.iter().map(|t| t.tool_calls.len()).sum();
+    // Use the char-safe `truncate` helper — byte slicing (`&t[..60]`) would
+    // panic on a non-UTF-8-boundary, which is easy to hit now that titles can
+    // be non-ASCII (e.g. Korean).
     let title = s
         .ai_title
         .as_deref()
-        .map(|t| {
-            if t.len() > 60 {
-                format!("{}…", &t[..60])
-            } else {
-                t.to_string()
-            }
-        })
+        .map(|t| truncate(t, 60))
         .unwrap_or_else(|| "(untitled)".into());
     format!(
         "{:<19} {:<24} u={:<3} a={:<3} tools={:<3} branch={:<10} {}",
@@ -685,5 +765,80 @@ fn truncate(s: &str, n: usize) -> String {
         let mut out: String = s.chars().take(n.saturating_sub(1)).collect();
         out.push('…');
         out
+    }
+}
+
+#[cfg(test)]
+mod title_tests {
+    use super::*;
+    use std::io::Write;
+
+    fn jsonl(lines: &[&str]) -> tempfile::NamedTempFile {
+        let mut f = tempfile::NamedTempFile::new().unwrap();
+        for l in lines {
+            writeln!(f, "{l}").unwrap();
+        }
+        f.flush().unwrap();
+        f
+    }
+
+    #[test]
+    fn ai_title_reads_camelcase_aititle_field() {
+        // Regression: the parser used to read `title`; Claude writes `aiTitle`,
+        // so every session fell back to "(untitled)".
+        let f = jsonl(&[
+            r#"{"type":"ai-title","aiTitle":"Plan SOTA v3.2 kickoff","sessionId":"s1"}"#,
+            r#"{"type":"user","uuid":"u1","message":{"role":"user","content":"hello"}}"#,
+        ]);
+        let s = parse_session(f.path()).unwrap();
+        assert_eq!(s.ai_title.as_deref(), Some("Plan SOTA v3.2 kickoff"));
+    }
+
+    #[test]
+    fn fallback_title_from_first_user_message_when_no_ai_title() {
+        let f = jsonl(&[
+            r#"{"type":"user","uuid":"u1","message":{"role":"user","content":"fix the auth bug in login.rs"}}"#,
+        ]);
+        let s = parse_session(f.path()).unwrap();
+        assert_eq!(s.ai_title.as_deref(), Some("fix the auth bug in login.rs"));
+    }
+
+    #[test]
+    fn fallback_skips_task_notification_noise_turns() {
+        // Regression for the "<task-notification> <task-id>…" title: the first
+        // user turn is harness noise, so the title must come from the next
+        // real user message.
+        let f = jsonl(&[
+            r#"{"type":"user","uuid":"u1","message":{"role":"user","content":"<task-notification> <task-id>bkm0e3i1e</task-id> <output-file>/tmp/x</output-file>"}}"#,
+            r#"{"type":"user","uuid":"u2","message":{"role":"user","content":"add a loading spinner to the session list"}}"#,
+        ]);
+        let s = parse_session(f.path()).unwrap();
+        assert_eq!(
+            s.ai_title.as_deref(),
+            Some("add a loading spinner to the session list")
+        );
+    }
+
+    #[test]
+    fn synthesize_title_strips_all_wrapper_tags() {
+        let t = "<task-notification> <task-id>abc</task-id> hello world";
+        assert_eq!(synthesize_title(t), "abc hello world");
+    }
+
+    #[test]
+    fn synthesize_title_prefers_command_args() {
+        let t = "<command-message>handon</command-message>\n<command-name>/handon</command-name>\n<command-args>load the latest handoff and continue</command-args>";
+        assert_eq!(synthesize_title(t), "load the latest handoff and continue");
+    }
+
+    #[test]
+    fn synthesize_title_strips_wrappers_when_no_args() {
+        assert_eq!(synthesize_title("<command-name>/clear</command-name>"), "/clear");
+    }
+
+    #[test]
+    fn synthesize_title_truncates_to_60_chars() {
+        let long = "word ".repeat(100);
+        assert!(synthesize_title(&long).chars().count() <= SYNTH_TITLE_CHARS);
     }
 }
