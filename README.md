@@ -48,6 +48,11 @@ memory you own: everything runs on your machine, and a one-click Qdrant snapshot
 makes your indexed corpus portable and permanent — independent of how any vendor
 rotates or prunes its own session storage over time.
 
+The name is a nod to Vannevar Bush's 1945 [memex](https://en.wikipedia.org/wiki/Memex)
+— a machine for moving through everything you've recorded by following associative
+trails rather than a search box. Eighty years on, this brings that idea to the trail
+you leave across your coding sessions.
+
 ## Not a chatbot
 
 Vector Space Day 2026 asked builders to *"Think Outside the Bot."* Memex takes
