@@ -93,17 +93,36 @@ pub struct Embedder {
     inner: Mutex<TextEmbedding>,
 }
 
+/// Optional cap on ONNX Runtime intra-op threads for embedding inference.
+///
+/// fastembed defaults to `available_parallelism()` (every core), which pegs CPU
+/// during indexing / watcher warm-up on small machines (e.g. an 8 GB M1 Air).
+/// Setting `MEMEX_EMBED_THREADS=N` (N >= 1) caps it via fastembed 5.15's
+/// `with_intra_threads`. Unset → unchanged (fastembed's all-core default), so
+/// this adds a small knob without throttling anyone by default. Affects
+/// parallelism only — embedding output is bit-identical, so toggling it needs
+/// no re-index.
+fn embed_intra_threads() -> Option<usize> {
+    std::env::var("MEMEX_EMBED_THREADS")
+        .ok()
+        .and_then(|v| v.trim().parse::<usize>().ok())
+        .filter(|&n| n >= 1)
+}
+
 impl Embedder {
     pub fn new() -> Result<Self> {
         let cache_dir = default_fastembed_cache_dir();
         // Best-effort — fastembed will surface a clearer error if creation fails.
         std::fs::create_dir_all(&cache_dir).ok();
-        let model = TextEmbedding::try_new(
-            InitOptions::new(EmbeddingModel::BGESmallENV15)
-                .with_show_download_progress(true)
-                .with_cache_dir(cache_dir.clone()),
-        )
-        .with_context(|| {
+        let mut opts = InitOptions::new(EmbeddingModel::BGESmallENV15)
+            .with_show_download_progress(true)
+            .with_cache_dir(cache_dir.clone());
+        // Opt-in only: leave fastembed's default (all cores) untouched unless the
+        // operator explicitly caps it via `MEMEX_EMBED_THREADS`.
+        if let Some(n) = embed_intra_threads() {
+            opts = opts.with_intra_threads(n);
+        }
+        let model = TextEmbedding::try_new(opts).with_context(|| {
             format!(
                 "loading BGE-small-en-v1.5 fastembed model (cache_dir={})",
                 cache_dir.display()
