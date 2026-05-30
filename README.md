@@ -280,7 +280,7 @@ Deeper reading:
 | Frontend | vanilla HTML/CSS/JS in a Tauri 2 webview; [3d-force-graph](https://github.com/vasturiano/3d-force-graph) (Three.js) for topology; CSS 3D for the Time Machine stack |
 | Backend | Rust 1.88, [Tauri 2](https://tauri.app), [qdrant-client 1.18](https://github.com/qdrant/rust-client), [fastembed 5](https://github.com/Anush008/fastembed-rs), [petgraph](https://github.com/petgraph/petgraph) (MST), tokio, [axum](https://github.com/tokio-rs/axum) (web variant) |
 | Storage | [Qdrant 1.18](https://qdrant.tech) — five named dense vectors per point (384-d cosine), payload-indexed |
-| Embedding | `fastembed-rs` running BGE-small-en-v1.5 client-side; ~130 MB ONNX model cached after first run, no Python, no network |
+| Embedding | `fastembed-rs` 5.15 running BGE-small-en-v1.5 client-side; ~130 MB ONNX model cached after first run, no Python, no network |
 | Bundle | `Memex_0.1.2_aarch64.dmg` (~19 MB), signed with a Developer ID and notarized; also on Homebrew (`brew install --cask two-weeks-team/tap/memex`) |
 
 ## Status & roadmap
@@ -310,6 +310,11 @@ every surface exercisable from both the CLI and the GUI.
 - Security: index-time secret redaction and a loopback-only Qdrant allowlist.
 - Tested: 290+ Rust unit tests, integration tests for the Loop Breaker pipeline,
   and Playwright E2E specs. All CI checks green.
+- Upstream contribution: the team added `with_intra_threads` (a configurable
+  ONNX intra-op thread count) to
+  [fastembed-rs](https://github.com/Anush008/fastembed-rs/pull/255) — merged and
+  shipped in 5.15. Memex uses it via `MEMEX_EMBED_THREADS` so embedding doesn't
+  peg every core and the desktop UI stays responsive.
 
 **Where it's going** — Memex starts as personal memory (one developer, one
 laptop). The natural next step is shared memory: team and organization corpora on
