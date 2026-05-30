@@ -1,115 +1,113 @@
-# Installing Memex on a clean machine
+# Installing Memex
 
-Memex ships as an **unsigned (ad-hoc signed) macOS app for Apple Silicon**.
-This page is the honest, clean-machine install path — including exactly what
-Gatekeeper will do and how to get past it safely, plus a **source-build
-fallback** for judges who would rather not run an unsigned binary at all.
+A step-by-step install guide. It is written so a **coding agent** (Claude Code,
+Codex, Cursor, …) can follow it end to end, but a human can run the same
+commands. Pick one install path (A, B, or C), then do the shared setup.
 
-> No code signing, no Apple notarization. This is a hackathon MVP. If you
-> prefer not to run unsigned binaries, jump to
-> [Option B — build from source](#option-b--build-from-source) — it never
-> downloads a binary.
+- **A — Homebrew** (macOS, Apple Silicon): the fastest path; installs the signed,
+  notarized app.
+- **B — DMG**: same signed app, downloaded directly.
+- **C — Build from source** (macOS): produces the CLI + GUI from source.
+- **Headless / non-macOS**: see [the Docker `web` variant](../deploy/web/README.md)
+  (Qdrant + web UI/API + MCP in one container, runs anywhere).
 
----
-
-## Prerequisites (runtime)
-
-- macOS 11+ on **Apple Silicon (arm64)** — see [docs/BUILD.md](BUILD.md) for
-  Intel/Linux notes.
-- A local **Qdrant** on `localhost:6334`. One command:
-  ```bash
-  bash scripts/start-qdrant.sh
-  ```
-  Memex self-heals if you start Qdrant *after* launching the app.
+Memex needs a local **Qdrant 1.18** on `localhost:6334`. It self-heals if Qdrant
+starts after the app, but start it first to avoid an empty first screen.
 
 ---
 
-## Option A — install the released DMG (unsigned)
+## A — Homebrew (recommended)
 
 ```bash
-# 1. Download Memex_0.1.0_aarch64.dmg from the release
+brew install --cask two-weeks-team/tap/memex
+# upgrade later:
+brew upgrade --cask memex
+```
+
+The cask installs `Memex.app` (signed with a Developer ID and notarized, so it
+opens without a Gatekeeper warning). Continue at [Shared setup](#shared-setup).
+
+## B — DMG (direct download)
+
+```bash
 open "https://github.com/Two-Weeks-Team/memex/releases/latest"
-
-# 2. Open the .dmg and drag Memex.app to /Applications
+# Download Memex_0.1.2_aarch64.dmg, open it, drag Memex.app to /Applications.
 ```
 
-### First launch: Gatekeeper will block it. Here's why, and the fix.
+The DMG is signed and notarized — a normal double-click works; no quarantine
+workaround is needed. Continue at [Shared setup](#shared-setup).
 
-Memex is **ad-hoc signed only** — verifiable on the app you downloaded:
+## C — Build from source (macOS, Apple Silicon)
 
-```console
-$ codesign -dv /Applications/Memex.app
-...
-CodeDirectory v=20400 ... flags=0x20002(adhoc,linker-signed)
-Signature=adhoc
-TeamIdentifier=not set
-```
-
-`Signature=adhoc` + `TeamIdentifier=not set` means there is no Apple
-Developer ID and no notarization ticket, so macOS quarantines it on download
-and refuses a plain double-click the first time. Two safe ways past it:
-
-**Fix 1 — right-click → Open (no Terminal, recommended):**
-1. In `/Applications`, **right-click** (or Control-click) **Memex.app**.
-2. Choose **Open**.
-3. In the dialog, click **Open** again.
-
-This records your consent for this specific app; afterwards it launches
-normally. (A plain double-click on first launch only offers "Move to Trash" —
-you must use right-click → Open.)
-
-**Fix 2 — clear the quarantine flag (Terminal):**
-```bash
-xattr -dr com.apple.quarantine /Applications/Memex.app
-```
-This removes only the `com.apple.quarantine` extended attribute that macOS
-adds to downloaded files — the flag that triggers the Gatekeeper prompt. It
-does not disable Gatekeeper system-wide and does not modify the app's code.
-After this, Memex opens with a normal double-click.
-
-> Why this is required (and tested): the bundle is ad-hoc signed (evidence
-> above). On macOS, a quarantined, non-notarized app cannot pass Gatekeeper
-> without explicit user consent — `xattr -dr com.apple.quarantine` or
-> right-click → Open are the two standard, documented ways to grant it.
-
-### After first launch: grant Full Disk Access
-
-Memex reads `~/.claude/projects` (and `~/.codex/sessions`) locally. On macOS
-Sequoia/Tahoe you must grant **Full Disk Access** to `Memex.app` in
-**System Settings → Privacy & Security → Full Disk Access**, then relaunch.
-Memex never sends sessions anywhere — all parsing/embedding/search is local.
-
----
-
-## Option B — build from source
-
-For judges who would rather not run an unsigned binary, building from source
-produces the **same binary, signed ad-hoc by your own machine**, and never
-downloads a prebuilt artifact.
+Prerequisites: [Rust](https://rustup.rs) 1.88+, [Node](https://nodejs.org) 22+,
+and [Qdrant](https://github.com/qdrant/qdrant) 1.18.
 
 ```bash
 gh repo clone Two-Weeks-Team/memex ~/memex && cd ~/memex
 npm install
-bash scripts/start-qdrant.sh
-cargo build --release --manifest-path src-tauri/Cargo.toml   # builds the CLI+GUI binary
+cargo build --release --manifest-path src-tauri/Cargo.toml   # CLI + GUI binary
 npm run tauri build                                          # produces a local Memex.app
 open src-tauri/target/release/bundle/macos/Memex.app
 ```
 
-You can skip the GUI entirely and verify everything from the CLI — see
-[docs/BUILD.md](BUILD.md) for the CLI smoke path and the build-only
-verification path. Full step-by-step (prereqs, indexing) is in the
-[README Quick start](../README.md#-quick-start).
+The same binary is the CLI; put it on PATH for the commands below:
+
+```bash
+export PATH="$PWD/src-tauri/target/release:$PATH"
+```
+
+See [BUILD.md](BUILD.md) for Intel/Linux notes and a CLI-only smoke path.
 
 ---
 
-## Verifying what you ran
+## Shared setup
+
+### 1. Start Qdrant
 
 ```bash
-codesign -dv /Applications/Memex.app          # → Signature=adhoc (expected)
-spctl -a -vvv -t exec /Applications/Memex.app  # Gatekeeper assessment
+bash scripts/start-qdrant.sh                 # starts qdrant/qdrant:v1.18.1 on :6334 (gRPC) / :6333 (REST)
+curl -fsS http://localhost:6333/readyz && echo OK
 ```
 
-A non-notarized app is expected to be *rejected* by `spctl` until you grant
-consent via right-click → Open or clear quarantine — that is the whole reason
-for the steps above.
+(If you installed the app via Homebrew/DMG and don't have the repo, run Qdrant
+with Docker: `docker run -d -p 6333:6333 -p 6334:6334 qdrant/qdrant:v1.18.1`.)
+
+### 2. Grant Full Disk Access (GUI app only)
+
+Memex reads `~/.claude/projects` and `~/.codex/sessions` locally. On recent
+macOS, grant **Full Disk Access** to `Memex.app` in **System Settings → Privacy
+& Security → Full Disk Access**, then relaunch. Nothing leaves your machine —
+all parsing, embedding, and search are local.
+
+### 3. Index your sessions
+
+```bash
+memex scan --index            # downloads the BGE-small model (~130 MB) on first run
+#   parsed N session(s), … total tool calls
+#   indexed M/N session(s) into 'memex_sessions_v3'
+```
+
+To try it on synthetic data first: `memex scan --path examples/sample-corpus --index`.
+
+### 4. (Optional) wire it into your coding agent
+
+```bash
+memex install all             # registers the MCP server + hooks for Claude Code / Codex / Cursor
+memex install uninstall       # reverse it anytime
+```
+
+Your agent can then call Memex's MCP tools mid-session (recall a similar error,
+predict the next action, load a project memory primer). See the
+[README](../README.md#mcp-server--agent-integration) for the tool list.
+
+---
+
+## Verify
+
+```bash
+codesign --verify --verbose=2 /Applications/Memex.app   # valid Developer ID signature
+spctl --assess --type execute --verbose /Applications/Memex.app   # → accepted (notarized)
+```
+
+For the full first-run flow (ports, build variants, expected output), see the
+[README Quick start](../README.md#quick-start).

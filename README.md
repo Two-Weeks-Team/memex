@@ -154,6 +154,25 @@ redaction and a loopback-only Qdrant URL allowlist are on by default. Details:
 
 ## Quick start
 
+The one-line install is Homebrew (see [Download](#download)). To set up the full
+local stack — Qdrant, indexing, agent wiring — do it yourself with the steps
+below, or hand the whole thing to your agent.
+
+**For humans** — paste this to your coding agent (Claude Code, Codex, Cursor, …):
+
+```
+Install and run Memex by following this guide:
+https://raw.githubusercontent.com/Two-Weeks-Team/memex/main/docs/INSTALL.md
+```
+
+**For coding agents** — fetch the guide and follow it:
+
+```bash
+curl -s https://raw.githubusercontent.com/Two-Weeks-Team/memex/main/docs/INSTALL.md
+```
+
+Prefer to do it by hand:
+
 You need [Rust](https://rustup.rs) 1.88+, [Node](https://nodejs.org) 22+,
 [Qdrant](https://github.com/qdrant/qdrant) 1.18 (Docker or binary), and macOS
 (Apple Silicon) for the GUI. Non-mac? The headless
