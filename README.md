@@ -85,13 +85,18 @@ corpus of **80 sessions across 28 projects**.
 
 ## Download
 
-**[Download Memex v0.1.0 for macOS (Apple Silicon)](https://github.com/Two-Weeks-Team/memex/releases/latest)** — `Memex_0.1.0_aarch64.dmg` (~16 MB).
+On macOS (Apple Silicon), install with Homebrew — the cask pulls the signed,
+notarized app:
 
-Memex is an unsigned MVP (ad-hoc signed, no notarization), so macOS Gatekeeper
-blocks a normal double-click the first time. Open the `.dmg`, drag **Memex.app**
-to `/Applications`, then right-click → Open — or run
-`xattr -dr com.apple.quarantine /Applications/Memex.app`. You only do this once.
-Full steps and a source-build fallback: [docs/INSTALL.md](docs/INSTALL.md).
+```sh
+brew install --cask two-weeks-team/tap/memex   # upgrade later: brew upgrade --cask memex
+```
+
+Or grab the DMG directly:
+**[Memex v0.1.2 for macOS (Apple Silicon)](https://github.com/Two-Weeks-Team/memex/releases/latest)**
+— `Memex_0.1.2_aarch64.dmg` (~19 MB), signed with a Developer ID and notarized,
+so it opens without a Gatekeeper warning. Drag **Memex.app** to `/Applications`.
+Clean-machine notes and a source build: [docs/INSTALL.md](docs/INSTALL.md).
 
 Memex needs a local Qdrant on `localhost:6334` (it self-heals if you start Qdrant
 after launch). Prefer to compile it yourself? See [Quick start](#quick-start).
@@ -276,7 +281,7 @@ Deeper reading:
 | Backend | Rust 1.88, [Tauri 2](https://tauri.app), [qdrant-client 1.18](https://github.com/qdrant/rust-client), [fastembed 5](https://github.com/Anush008/fastembed-rs), [petgraph](https://github.com/petgraph/petgraph) (MST), tokio, [axum](https://github.com/tokio-rs/axum) (web variant) |
 | Storage | [Qdrant 1.18](https://qdrant.tech) — five named dense vectors per point (384-d cosine), payload-indexed |
 | Embedding | `fastembed-rs` running BGE-small-en-v1.5 client-side; ~130 MB ONNX model cached after first run, no Python, no network |
-| Bundle | `Memex.app` ~47 MB · `Memex_0.1.0_aarch64.dmg` ~16 MB · unsigned MVP (ad-hoc) |
+| Bundle | `Memex_0.1.2_aarch64.dmg` (~19 MB), signed with a Developer ID and notarized; also on Homebrew (`brew install --cask two-weeks-team/tap/memex`) |
 
 ## Status & roadmap
 
@@ -317,7 +322,6 @@ index. Roadmap, not shipped.
 | --- | --- | --- |
 | ColBERT v2 inline citations | `fastembed-rs` doesn't expose the model yet | `ort` crate + ONNX Jina-ColBERT-v2 |
 | BM42 sparse on the `path` vector | same upstream gap | same path |
-| Code signing / notarization | local-only MVP | Apple Developer cert when shipping publicly |
 | Linux / Windows GUI packaging | macOS-first MVP | Tauri cross-build; the `web` variant already runs anywhere |
 
 ## Contributing
