@@ -5,7 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>memex — local memory for coding agents</title>
     <meta name="description" content="The local memory layer for Claude Code and Codex. Powered by Qdrant 1.18 with five named vectors, sparse IDF, and ColBERT MaxSim multivectors." />
-    <link rel="icon" type="image/png" href="assets/memex-logo.png" />
+    <link rel="icon" href="assets/favicon.ico" sizes="any" />
+    <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="assets/apple-touch-icon.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght,SOFT,WONK@0,9..144,400..900,0..100,0..1;1,9..144,400..900,0..100,0..1&family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&display=swap" rel="stylesheet" />
@@ -598,6 +600,7 @@
         letter-spacing: -0.02em;
         white-space: nowrap;
       }
+      .section-head h2 .ink-dim { color: var(--ink-dim); }
       .section-head .lede {
         margin: 0;
         font-family: var(--mono);
@@ -3398,6 +3401,302 @@
         background: var(--amber);
         color: var(--paper);
       }
+
+      /* === §07 Horizon — VISUAL vision coda. Borrows §02 Architecture's journey
+         language (connecting line + node dots), adds per-stage icons, a Qdrant
+         Cloud lockup, a have/roadmap ledger, and a creed. Qdrant brand red
+         (#dc382d) marks the cloud rung. Defends the hero badges, doesn't compete
+         with §03 Primitives. === */
+      .horizon-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        margin-left: 12px;
+        padding: 4px 10px;
+        border: 1px solid var(--line-2);
+        border-radius: 4px;
+        background: rgba(244, 236, 224, 0.02);
+        font-family: var(--mono);
+        font-size: 9.5px;
+        font-weight: 600;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--ink-faint);
+        vertical-align: middle;
+        white-space: nowrap;
+      }
+      .horizon-chip::before {
+        content: "";
+        width: 5px;
+        height: 5px;
+        border-radius: 50%;
+        background: var(--ink-faint);
+        flex: 0 0 auto;
+      }
+
+      /* Boundary journey — Local → Team → Org on a connecting line */
+      .hz-journey { position: relative; margin-top: clamp(30px, 5vh, 56px); }
+      .hz-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 0;
+        position: relative;
+        z-index: 2;
+      }
+      .hz-line {
+        /* Full content width so every stage — including Org — has line above its
+           content (right edge aligns with the ledger divider + creed box). Amber
+           through Local/Team, full Qdrant red across the Org third. */
+        position: absolute; top: 0; left: 0; right: 0; height: 2px; z-index: 1;
+        background: linear-gradient(90deg, var(--amber-dim), var(--amber) 38%, #dc382d 80%);
+        opacity: 0.6;
+      }
+      .hz-stage {
+        position: relative;
+        padding: 28px 14px 24px;
+        border-top: 2px solid transparent;
+        display: grid;
+        align-content: start;
+        justify-items: center;
+        text-align: center;
+        gap: 9px;
+      }
+      .hz-stage::before {
+        content: "";
+        position: absolute; top: -7px; left: 50%; margin-left: -6px;
+        width: 12px; height: 12px; border-radius: 50%;
+        background: var(--paper); border: 2px solid var(--amber-dim);
+      }
+      .hz-stage.is-now::before {
+        background: var(--amber); border-color: var(--amber);
+        box-shadow: 0 0 0 4px rgba(230, 192, 105, 0.16), 0 0 22px rgba(230, 192, 105, 0.5);
+      }
+      .hz-stage.is-cloud::before {
+        border-color: #dc382d; background: #dc382d;
+        box-shadow: 0 0 10px 1px rgba(220, 56, 45, 0.6);
+      }
+      /* Compact: icon+rung (left) share ONE ROW with name+who+boundary (right),
+         so each stage is ~half as tall and the section fits one viewport. */
+      .hz-top { display: flex; flex-direction: column; align-items: center; gap: 13px; }
+      .hz-id { display: grid; gap: 11px; flex: 0 0 auto; align-content: start; justify-items: center; text-align: center; }
+      .hz-meta { display: grid; gap: 7px; min-width: 0; justify-items: center; }
+      .hz-icon {
+        width: 48px; height: 48px; color: var(--amber);
+        display: flex; align-items: center; justify-content: center;
+      }
+      .hz-icon svg { width: 100%; height: 100%; }
+      .hz-stage.is-cloud .hz-icon { color: #e8736a; }
+      .hz-rung {
+        display: inline-flex; align-items: center; gap: 8px;
+        font-family: var(--mono); font-size: 11px; font-weight: 700;
+        letter-spacing: 0.18em; text-transform: uppercase; color: var(--amber);
+      }
+      .hz-stage.is-cloud .hz-rung { color: #e8736a; }
+      .hz-rung-tag {
+        font-size: 8.5px; font-weight: 600; letter-spacing: 0.1em;
+        padding: 2px 6px; border-radius: 3px;
+        border: 1px solid var(--line-2); color: var(--ink-faint); background: transparent;
+      }
+      .hz-stage.is-now .hz-rung-tag { border-color: transparent; color: var(--paper); background: var(--amber); }
+      .hz-stage.is-cloud .hz-rung-tag { border-color: rgba(220, 56, 45, 0.5); color: #e8736a; background: rgba(220, 56, 45, 0.08); }
+      .hz-name {
+        margin: 0; font-family: var(--display); font-style: italic;
+        font-weight: 580; font-size: clamp(19px, 1.7vw, 24px); line-height: 1.1; color: var(--ink);
+      }
+      .hz-who {
+        margin: 0; font-family: var(--mono); font-size: 11.5px;
+        letter-spacing: 0.04em; color: var(--ink-faint);
+      }
+      .hz-boundary {
+        display: inline-flex; align-items: center; gap: 7px; margin-top: 4px;
+        padding: 6px 11px; border: 1px solid var(--line-2); border-radius: 5px;
+        background: rgba(244, 236, 224, 0.02);
+        font-family: var(--mono); font-size: 11px; color: var(--ink-dim);
+        justify-self: center;
+      }
+      .hz-boundary svg { width: 12px; height: 12px; flex: 0 0 auto; color: var(--ink-faint); }
+      .hz-stage.is-cloud .hz-boundary { border-color: rgba(220, 56, 45, 0.42); background: rgba(220, 56, 45, 0.05); }
+      .hz-stage.is-cloud .hz-boundary svg { color: #e8736a; }
+      .hz-feats {
+        list-style: none; margin: 6px 0 0; padding: 0;
+        font-family: var(--mono); font-size: 11.5px; line-height: 1.5; color: var(--ink-dim);
+        display: grid; gap: 3px; justify-items: center;
+      }
+      .hz-feats li { display: flex; gap: 8px; justify-content: center; }
+      .hz-feats li::before { content: "·"; color: var(--amber); flex: 0 0 auto; }
+      .hz-stage.is-cloud .hz-feats li::before { color: #e8736a; }
+
+      /* Qdrant Cloud lockup */
+      .hz-qdrant {
+        display: inline-flex; align-items: center; gap: 9px; margin-top: 12px;
+        padding: 8px 13px; border: 1px solid rgba(220, 56, 45, 0.45); border-radius: 6px;
+        background: rgba(220, 56, 45, 0.06);
+        font-family: var(--mono); font-size: 12.5px; letter-spacing: 0.02em;
+        color: var(--ink); text-decoration: none; justify-self: center;
+        transition: border-color 200ms var(--ease), background 200ms var(--ease);
+      }
+      .hz-qdrant:hover { border-color: #dc382d; background: rgba(220, 56, 45, 0.13); }
+      .hz-qdrant svg { width: 18px; height: 18px; flex: 0 0 auto; }
+      .hz-qdrant strong { color: #e8736a; font-weight: 600; }
+
+      /* "Powered by Qdrant Cloud" — a RIBBON badge (fishtail ends via clip-path),
+         absolutely overlaid on the Enterprise card's top-right so it NEVER shifts
+         the centred layout. Horizontal wordmark = always legible. */
+      /* "Qdrant Cloud" corner ribbon (per provided reference): hangs from the
+         timeline, pointed bottom (::after triangle), and a darker fold tab on the
+         left (body ::before/::after) for the 3D wrap. */
+      .hz-ribbon {
+        position: absolute; top: -7px; right: 16px; z-index: 4;
+        text-decoration: none;
+        filter: drop-shadow(0 6px 11px rgba(0, 0, 0, 0.45));
+        transition: transform 200ms var(--ease);
+      }
+      .hz-ribbon:hover { transform: translateY(-1px); }
+      .hz-ribbon::after {
+        content: ""; position: absolute; top: 100%; left: 0;
+        width: 0; height: 0;
+        border-left: 61px solid transparent;
+        border-right: 61px solid transparent;
+        border-top: 11px solid #b93128;
+      }
+      .hz-ribbon-body {
+        position: relative; display: block; text-align: center;
+        width: 122px; box-sizing: border-box;
+        background: linear-gradient(180deg, #ec5446 0%, #d23a30 100%);
+        color: #fdf2ee; font-family: var(--mono); font-size: 12px; font-weight: 600;
+        line-height: 1; letter-spacing: 0.03em; white-space: nowrap;
+        padding: 12px 8px 11px;
+      }
+      .hz-ribbon-body::before, .hz-ribbon-body::after { content: ""; position: absolute; }
+      .hz-ribbon-body::before { height: 7px; width: 7px; left: -7px; top: 0; background: #d23a30; }
+      .hz-ribbon-body::after  { height: 7px; width: 9px; left: -9px; top: 0; border-radius: 8px 8px 0 0; background: #9f2519; }
+
+      @media (max-width: 900px) {
+        .hz-grid { grid-template-columns: 1fr; }
+        .hz-line {
+          top: 0; bottom: 0; left: 0; right: auto; width: 2px; height: auto;
+          background: linear-gradient(180deg, var(--amber-dim), var(--amber) 42%, #dc382d 100%);
+        }
+        /* Vertical line on mobile → draw top→bottom (override the desktop
+           horizontal clip so the reveal isn't a 2px-wide horizontal pop-in). */
+        .hz-ready #horizon .hz-line { clip-path: inset(0 0 100% 0); }
+        .hz-stage { padding: 22px 0 22px 24px; border-top: none; justify-items: start; text-align: left; }
+        .hz-stage::before { top: 0; left: -7px; margin-left: 0; }
+        .hz-top { flex-direction: row; align-items: flex-start; gap: 16px; }
+        .hz-meta, .hz-feats { justify-items: start; }
+        .hz-feats li { justify-content: flex-start; }
+        .hz-boundary, .hz-qdrant { justify-self: start; }
+        .hz-ribbon { top: -6px; right: 10px; }
+        .hz-ribbon-body { width: 108px; font-size: 10.5px; padding: 10px 6px 9px; }
+        .hz-ribbon::after { border-left-width: 54px; border-right-width: 54px; border-top-width: 10px; }
+      }
+
+      /* Have / roadmap ledger */
+      .hz-ledger {
+        margin-top: clamp(40px, 5.5vh, 64px); padding-top: clamp(32px, 4vh, 48px);
+        border-top: 1px solid var(--line);
+        display: grid; grid-template-columns: 1.15fr 1fr; gap: clamp(28px, 4vw, 64px);
+      }
+      .hz-col-head {
+        display: flex; align-items: center; gap: 9px; margin: 0 0 16px;
+        font-family: var(--mono); font-size: 11px; font-weight: 700;
+        letter-spacing: 0.16em; text-transform: uppercase;
+      }
+      .hz-col-have .hz-col-head { color: var(--amber); }
+      .hz-col-todo .hz-col-head { color: var(--ink-faint); }
+      .hz-col-head svg { width: 15px; height: 15px; flex: 0 0 auto; }
+      .hz-col ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 11px; }
+      .hz-col li {
+        display: flex; gap: 10px; align-items: baseline;
+        font-family: var(--mono); font-size: clamp(12px, 0.92vw, 13.5px);
+        line-height: 1.5; color: var(--ink-dim);
+      }
+      .hz-col li::before { flex: 0 0 auto; font-size: 0.95em; }
+      .hz-col-have li::before { content: "✓"; color: var(--amber); }
+      .hz-col-todo li::before { content: "○"; color: var(--ink-faint); }
+      /* The frontier line — code → every LLM app. Emphasised above the operational
+         roadmap items: amber diamond, brighter text, a faint amber highlight row. */
+      .hz-col-todo li.hz-frontier::before { content: "◆"; color: var(--amber); font-size: 0.82em; }
+      .hz-frontier {
+        color: var(--ink); font-weight: 600;
+        margin: 0 -11px 3px; padding: 8px 11px;
+        background: rgba(230, 192, 105, 0.06);
+        border: 1px solid rgba(230, 192, 105, 0.16);
+        border-radius: 7px;
+      }
+      .hz-frontier-apps {
+        display: block; margin-top: 4px;
+        color: var(--ink-faint); font-weight: 400; font-size: 0.9em; letter-spacing: 0.02em;
+      }
+      .hz-col code { color: var(--ink); background: rgba(244, 236, 224, 0.05); padding: 0 4px; border-radius: 2px; }
+      .hz-col-have code { color: var(--amber); }
+
+      /* Creed */
+      .hz-creed {
+        display: flex; align-items: flex-start; gap: 12px;
+        margin: clamp(36px, 5vh, 56px) 0 0; padding: 18px 22px;
+        border: 1px solid var(--line-2); border-radius: 8px;
+        background: rgba(244, 236, 224, 0.015);
+        font-family: var(--mono); font-size: clamp(13px, 1vw, 15px); line-height: 1.62;
+        color: var(--ink-dim); max-width: none;
+      }
+      .hz-creed svg { width: 20px; height: 20px; flex: 0 0 auto; color: var(--amber); margin-top: 1px; }
+      .hz-creed em { color: var(--ink); font-style: italic; }
+      .hz-creed strong { color: var(--ink); font-weight: 600; }
+
+      /* Horizon is a coda — tighten its vertical rhythm (scoped to #horizon) so the
+         whole section lands in ~one viewport instead of overflowing. */
+      #horizon.section { padding-top: clamp(52px, 6.5vh, 92px); padding-bottom: clamp(52px, 6.5vh, 92px); }
+      #horizon .section-head { margin-bottom: clamp(24px, 3.2vh, 38px); }
+      #horizon .hz-journey { margin-top: clamp(22px, 3vh, 38px); }
+      #horizon .hz-ledger { margin-top: clamp(28px, 3.4vh, 42px); padding-top: clamp(22px, 2.6vh, 32px); }
+      #horizon .hz-creed { margin-top: clamp(24px, 3vh, 36px); }
+
+      /* === Horizon reveal (P1/P2) — one-shot "the boundary grows" on scroll-in.
+         The hidden states apply ONLY under .hz-ready, which JS adds at load
+         and ONLY when motion is allowed — so no-JS and prefers-reduced-motion
+         users get the full static section (never hidden). #horizon.hz-in is
+         toggled by an IntersectionObserver the first time the section appears. === */
+      .hz-ready #horizon .hz-line { clip-path: inset(0 100% 0 0); transition: clip-path 1.3s cubic-bezier(0.4, 0, 0.2, 1); }
+      .hz-ready #horizon.hz-in .hz-line { clip-path: inset(0 0 0 0); }
+
+      .hz-ready #horizon .hz-stage::before { opacity: 0; transform: scale(0.5); }
+      .hz-ready #horizon.hz-in .hz-stage::before { opacity: 1; transform: scale(1); transition: opacity 0.4s ease, transform 0.45s cubic-bezier(0.34, 1.56, 0.64, 1); }
+      .hz-ready #horizon.hz-in .hz-grid > :nth-child(1)::before { transition-delay: 0.22s; }
+      .hz-ready #horizon.hz-in .hz-grid > :nth-child(2)::before { transition-delay: 0.65s; }
+      .hz-ready #horizon.hz-in .hz-grid > :nth-child(3)::before { transition-delay: 1.05s; }
+      /* P2 — the Qdrant (cloud) node keeps a gentle red pulse once it ignites */
+      .hz-ready #horizon.hz-in .hz-stage.is-cloud::before { animation: hz-cloud-pulse 1.8s ease-out 1.2s infinite; }
+      @keyframes hz-cloud-pulse {
+        0%   { box-shadow: 0 0 11px 2px rgba(220, 56, 45, 0.75), 0 0 0 0 rgba(220, 56, 45, 0.7); }
+        70%  { box-shadow: 0 0 13px 2px rgba(220, 56, 45, 0.55), 0 0 0 18px rgba(220, 56, 45, 0); }
+        100% { box-shadow: 0 0 10px 1px rgba(220, 56, 45, 0.55), 0 0 0 0 rgba(220, 56, 45, 0); }
+      }
+      /* keep the static (reduced-motion) node visibly glowing too */
+      @media (prefers-reduced-motion: reduce) {
+        .hz-stage.is-cloud::before { box-shadow: 0 0 12px 2px rgba(220, 56, 45, 0.6); }
+      }
+
+      .hz-ready #horizon .hz-top,
+      .hz-ready #horizon .hz-feats,
+      .hz-ready #horizon .hz-qdrant { opacity: 0; transform: translateY(10px); }
+      .hz-ready #horizon.hz-in .hz-top,
+      .hz-ready #horizon.hz-in .hz-feats,
+      .hz-ready #horizon.hz-in .hz-qdrant {
+        opacity: 1; transform: none;
+        transition: opacity 0.55s ease, transform 0.55s cubic-bezier(0.22, 1, 0.36, 1);
+      }
+      .hz-ready #horizon.hz-in .hz-grid > :nth-child(1) .hz-top   { transition-delay: 0.20s; }
+      .hz-ready #horizon.hz-in .hz-grid > :nth-child(1) .hz-feats { transition-delay: 0.30s; }
+      .hz-ready #horizon.hz-in .hz-grid > :nth-child(2) .hz-top   { transition-delay: 0.52s; }
+      .hz-ready #horizon.hz-in .hz-grid > :nth-child(2) .hz-feats { transition-delay: 0.62s; }
+      .hz-ready #horizon.hz-in .hz-grid > :nth-child(3) .hz-top    { transition-delay: 0.84s; }
+      .hz-ready #horizon.hz-in .hz-grid > :nth-child(3) .hz-feats  { transition-delay: 0.94s; }
+      .hz-ready #horizon.hz-in .hz-grid > :nth-child(3) .hz-qdrant { transition-delay: 1.04s; }
+
+      @media (max-width: 900px) {
+        .hz-ledger { grid-template-columns: 1fr; gap: 28px; }
+      }
     </style>
   </head>
   <body>
@@ -4042,9 +4341,145 @@
       </div>
     </section>
 
+    <section id="horizon" class="section" aria-labelledby="horizon-h">
+      <div class="section-head">
+        <p class="section-mark"><span class="mark-rule"></span><span class="mark-num">§ 07 ·</span> Reach</p>
+        <h2 id="horizon-h">Past-us. <span class="ink-dim">Not just past-you.</span></h2>
+        <p class="lede">
+          One reader becomes a reading room. The boundary grows from your laptop to a tenant your company
+          owns — the privacy promise moves with it, never away from it.
+          <span class="horizon-chip">Roadmap · not shipped</span>
+        </p>
+      </div>
+
+      <div class="hz-journey">
+        <div class="hz-line" aria-hidden="true"></div>
+        <div class="hz-grid">
+
+          <article class="hz-stage is-now">
+            <div class="hz-top">
+              <div class="hz-id">
+                <span class="hz-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="3" y="4" width="18" height="12" rx="1.5"/><path d="M1.5 20h21"/>
+                  </svg>
+                </span>
+                <span class="hz-rung">Local <span class="hz-rung-tag">today</span></span>
+              </div>
+              <div class="hz-meta">
+                <h3 class="hz-name">One reader</h3>
+                <p class="hz-who">one developer</p>
+                <span class="hz-boundary">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4.5" y="10.5" width="15" height="9" rx="2"/><path d="M8 10.5V7a4 4 0 0 1 8 0v3.5"/></svg>
+                  your disk
+                </span>
+              </div>
+            </div>
+            <ul class="hz-feats">
+              <li>8 surfaces · 5 primitives</li>
+              <li>no telemetry · no LLM</li>
+              <li>free &amp; OSS, forever</li>
+            </ul>
+          </article>
+
+          <article class="hz-stage">
+            <div class="hz-top">
+              <div class="hz-id">
+                <span class="hz-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="6" cy="7" r="2.4"/><circle cx="18" cy="7" r="2.4"/><circle cx="12" cy="18" r="2.4"/>
+                    <path d="M8.3 7h7.4M7.7 8.9 10.5 16M16.3 8.9 13.5 16"/>
+                  </svg>
+                </span>
+                <span class="hz-rung">Team <span class="hz-rung-tag">next</span></span>
+              </div>
+              <div class="hz-meta">
+                <h3 class="hz-name">A reading room</h3>
+                <p class="hz-who">a shared-repo team</p>
+                <span class="hz-boundary">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4.5" y="10.5" width="15" height="9" rx="2"/><path d="M8 10.5V7a4 4 0 0 1 8 0v3.5"/></svg>
+                  one collection you own
+                </span>
+              </div>
+            </div>
+            <ul class="hz-feats">
+              <li>shared recall + Loop Breaker</li>
+              <li>opt-in, per project</li>
+              <li>embeddings only — never raw transcripts</li>
+            </ul>
+          </article>
+
+          <article class="hz-stage is-cloud">
+            <a class="hz-ribbon" href="https://qdrant.tech/cloud/" target="_blank" rel="noreferrer" aria-label="Powered by Qdrant Cloud">
+              <span class="hz-ribbon-body">Qdrant&nbsp;Cloud</span>
+            </a>
+            <div class="hz-top">
+              <div class="hz-id">
+                <span class="hz-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M5 21V9l7-4 7 4v12"/><path d="M9.5 21v-4h5v4"/>
+                    <path d="M9 9.6h.01M15 9.6h.01M9 13h.01M15 13h.01"/>
+                  </svg>
+                </span>
+                <span class="hz-rung">Enterprise <span class="hz-rung-tag">later</span></span>
+              </div>
+              <div class="hz-meta">
+                <h3 class="hz-name">Governed memory</h3>
+                <p class="hz-who">governance + onboarding</p>
+                <span class="hz-boundary">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4.5" y="10.5" width="15" height="9" rx="2"/><path d="M8 10.5V7a4 4 0 0 1 8 0v3.5"/></svg>
+                  your tenant / VPC
+                </span>
+              </div>
+            </div>
+            <ul class="hz-feats">
+              <li>SSO · roles scoped to the boundary</li>
+              <li>retention · signed-snapshot legal hold</li>
+              <li>provenance of the work — not the people</li>
+            </ul>
+          </article>
+
+        </div>
+      </div>
+
+      <div class="hz-ledger">
+        <div class="hz-col hz-col-have">
+          <p class="hz-col-head">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+            In the repo today
+          </p>
+          <ul>
+            <li><code>is_tenant=true</code> on <code>project_name</code> — Qdrant multitenancy</li>
+            <li><code>memex serve</code> — headless Qdrant + API + MCP, one container</li>
+            <li><code>redact.rs</code> — secrets scrubbed before any vector is written</li>
+            <li>SHA-256 snapshot envelope — verify it, lift it, walk away</li>
+          </ul>
+        </div>
+        <div class="hz-col hz-col-todo">
+          <p class="hz-col-head">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="8.5" stroke-dasharray="3 3.4"/></svg>
+            The work ahead
+          </p>
+          <ul>
+            <li class="hz-frontier"><span class="hz-frontier-text">beyond code — any LLM app, not just coding agents<span class="hz-frontier-apps">ChatGPT · Claude · Gemini sessions, one memory</span></span></li>
+            <li>sign-on · SCIM · roles scoped to the tenant</li>
+            <li>append-only record of what was indexed</li>
+            <li>retention windows · per-tenant enforcement</li>
+          </ul>
+        </div>
+      </div>
+
+      <p class="hz-creed">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 5 6v6c0 4.5 3 7.6 7 9 4-1.4 7-4.5 7-9V6l-7-3Z"/><path d="m9 12 2 2 4-4"/></svg>
+        <span>There is no Memex server in the data path — your cluster, your keys. This is shared memory
+        <em>for</em> a team, never surveillance <em>of</em> one. <strong>We&rsquo;d rather ship nothing here
+        than ship the version that watches people.</strong></span>
+      </p>
+    </section>
+
     <section id="lineage" class="lineage" aria-labelledby="lineage-h">
       <div class="lineage-head">
-        <p class="lineage-mark"><span class="mark-rule"></span><span class="mark-num">§ 07 ·</span> Lineage</p>
+        <p class="lineage-mark"><span class="mark-rule"></span><span class="mark-num">§ 08 ·</span> Lineage</p>
         <h2 id="lineage-h">As we may think — <span class="ink-dim">and at last, as we may remember.</span></h2>
         <p class="lede">
           Memex is the name of a desk, and the desk is older than the desktop. This is its 2026 reissue.
@@ -4141,6 +4576,7 @@
             <li><a href="https://github.com/Two-Weeks-Team/memex#install" target="_blank" rel="noreferrer"><code>memex install all</code></a></li>
             <li><a href="https://github.com/Two-Weeks-Team/memex" target="_blank" rel="noreferrer">README</a></li>
             <li><a href="#run">Run it locally</a></li>
+            <li><a href="#horizon">Where it goes</a></li>
           </ul>
         </div>
         <div class="footer-col">
@@ -4193,17 +4629,42 @@
         footerGlowEl.classList.add("is-glowing");
       }
 
+      // §07 Horizon — one-shot "boundary grows" reveal. Gate on motion + IO so
+      // that reduced-motion / no-IO users keep the full static section (the
+      // .hz-ready class — which arms the hidden states — is only added here).
+      (function () {
+        const hz = document.getElementById("horizon");
+        if (!hz) return;
+        const reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        if (reduce || !("IntersectionObserver" in window)) return; // stay static + visible
+        document.documentElement.classList.add("hz-ready");
+        const obs = new IntersectionObserver((entries) => {
+          entries.forEach((e) => {
+            // Replay on every entry: arm the reveal when the section enters view,
+            // reset when it leaves (off-screen, so the un-draw is never seen).
+            // Keyed on isIntersecting (not a ratio threshold) + a bottom rootMargin
+            // so it fires reliably even when the section is taller than the
+            // viewport on mobile (a ratio threshold could never be reached there).
+            if (e.isIntersecting) hz.classList.add("hz-in");
+            else hz.classList.remove("hz-in");
+          });
+        }, { threshold: 0, rootMargin: "0px 0px -20% 0px" });
+        obs.observe(hz);
+      })();
+
       // === Spine navigator — data-driven, IntersectionObserver-tracked ===
       // To add a new section: add a row here AND give the <section> a matching id.
       const SPINE_SECTIONS = [
-        { id: "top",           label: "Hero" },
+        { id: "top",           label: "Premise" },
         { id: "why",           label: "Why" },
         { id: "architecture",  label: "Architecture" },
         { id: "primitives",    label: "Primitives" },
         { id: "surfaces",      label: "Surfaces" },
         { id: "agents",        label: "Agents" },
         { id: "run",           label: "Run" },
+        { id: "horizon",       label: "Reach" },
         { id: "lineage",       label: "Lineage" },
+        { id: "footer",        label: "References" },
       ];
 
       const spineList = document.querySelector("[data-spine-list]");
@@ -4254,8 +4715,21 @@
           }
           // pick the first section (in document order) currently in view
           const orderedIds = SPINE_SECTIONS.map((s) => s.id);
-          const activeId = orderedIds.find((id) => visible.has(id))
-                       || orderedIds[0];
+          let activeId = orderedIds.find((id) => visible.has(id));
+          if (!activeId) {
+            // Nothing in the band (above the first section, or below the last —
+            // e.g. scrolled into the footer). Activate the last section whose top
+            // sits above the viewport's middle, so the footer keeps Lineage active
+            // instead of snapping back to the first.
+            // getBoundingClientRect().top is already viewport-relative, so the
+            // window.scrollY terms cancel — compare directly against the midline.
+            const mid = window.innerHeight / 2;
+            activeId = orderedIds[0];
+            for (const id of orderedIds) {
+              const el = document.getElementById(id);
+              if (el && el.getBoundingClientRect().top <= mid) activeId = id;
+            }
+          }
           spineLinks.forEach((a, id) => {
             const on = id === activeId;
             a.classList.toggle("is-active", on);
