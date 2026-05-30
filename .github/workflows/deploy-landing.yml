@@ -1,0 +1,58 @@
+name: Deploy landing → gh-pages
+
+# Publishes ONLY the landing files (index.html + assets/) from main onto the
+# curated gh-pages branch.
+#
+# gh-pages is hand-assembled, NOT a mirror of main: it carries forge/, forms/,
+# qdrant-features/, docs/, CNAME (memex.quest) and .nojekyll that do NOT exist
+# on main. So this job is deliberately SCOPED — it only overlays index.html and
+# assets/, and never deletes anything else. The "checkout from main" step is
+# additive/update-only, so all curated content survives every deploy.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - index.html
+      - assets/**
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+# Never run two deploys at once; queue them so a push is never interrupted.
+concurrency:
+  group: deploy-landing-gh-pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (all branches, full history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Overlay index.html + assets/ onto gh-pages
+        run: |
+          set -euo pipefail
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git switch gh-pages
+
+          # `git checkout <ref> -- <path>` writes ONLY the paths present in that
+          # ref's tree and never deletes files that exist solely on gh-pages.
+          # That makes this purely additive: forge/, forms/, qdrant-features/,
+          # docs/, CNAME and .nojekyll are left exactly as curated.
+          git checkout origin/main -- index.html assets
+
+          git add index.html assets
+          if git diff --cached --quiet; then
+            echo "Landing already in sync with main — nothing to deploy."
+            exit 0
+          fi
+
+          git commit -m "deploy(landing): sync index.html + assets from ${GITHUB_SHA:0:7}"
+          git push origin gh-pages
