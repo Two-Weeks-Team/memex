@@ -277,12 +277,7 @@ Each session is one Qdrant point with **five named dense vectors** (`content`,
 `tool`, `path`, `error`, `code`), all 384-d BGE-small; the v3 schema also carries
 a ColBERT-style multivector rerank lane (on by default) and two sparse slots. The payload holds
 only metadata — Replay re-parses the JSONL on demand, so Qdrant stays lean.
-
-Deeper reading:
-[docs/architecture.md](docs/architecture.md) (data flow + schema) ·
-[docs/qdrant-features.md](docs/qdrant-features.md) (v3 schema tour) ·
-[docs/wired-but-dormant.md](docs/wired-but-dormant.md) (honest capability status) ·
-[docs/benchmarks.md](docs/benchmarks.md) (quantization sweep + measured numbers).
+Design deep-dives are listed under [Documentation](#documentation).
 
 ## Tech stack
 
@@ -293,6 +288,15 @@ Deeper reading:
 | Storage | [Qdrant 1.18](https://qdrant.tech) — five named dense vectors per point (384-d cosine), payload-indexed |
 | Embedding | `fastembed-rs` 5.15 running BGE-small-en-v1.5 client-side; ~130 MB ONNX model cached after first run, no Python, no network |
 | Bundle | `Memex_0.1.2_aarch64.dmg` (~19 MB), signed with a Developer ID and notarized; also on Homebrew (`brew install --cask two-weeks-team/tap/memex`) |
+
+## Documentation
+
+| Topic | Read |
+| --- | --- |
+| Architecture & schema | [architecture.md](docs/architecture.md) (data flow + schema) · [qdrant-features.md](docs/qdrant-features.md) (v3 schema tour) · [wired-but-dormant.md](docs/wired-but-dormant.md) (honest capability status) |
+| Agent integration | [agent-integration.md](docs/agent-integration.md) (hooks + MCP) · [deploy/web/README.md](deploy/web/README.md) (headless server variant) |
+| Evidence | [e2e-evidence.md](docs/e2e-evidence.md) (runs end-to-end) · [benchmarks.md](docs/benchmarks.md) (quantization sweep + measured numbers) · [examples/sample-corpus/README.md](examples/sample-corpus/README.md) (expected query hits) |
+| Install & build | [INSTALL.md](docs/INSTALL.md) (clean-machine install) · [BUILD.md](docs/BUILD.md) (source build) |
 
 ## Status & roadmap
 
