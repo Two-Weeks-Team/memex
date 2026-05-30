@@ -204,6 +204,17 @@ claude mcp add --transport http memex-web http://localhost:8765/mcp
 
 More on the server variant: [deploy/web/README.md](deploy/web/README.md).
 
+**Give your coding agent the context.** Once Memex is running (any of the above):
+
+```bash
+memex install all                       # register the MCP server + hooks for Claude Code / Codex / Cursor
+memex memory --cwd "$(pwd)" | pbcopy    # or hand it the primer yourself: decisions, pitfalls, stack
+```
+
+The agent can then call memex's [12 MCP tools](#mcp-server--agent-integration)
+mid-session — recall a similar error, predict the next action, or load a project
+memory primer at turn zero so it starts with what past-you already decided.
+
 <details>
 <summary>Full step-by-step (Qdrant ports, Full Disk Access, build variants)</summary>
 
