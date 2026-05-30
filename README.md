@@ -363,8 +363,8 @@ every surface exercisable from both the CLI and the GUI.
 - Upstream contribution: the team added `with_intra_threads` (a configurable
   ONNX intra-op thread count) to
   [fastembed-rs](https://github.com/Anush008/fastembed-rs/pull/255) — merged and
-  shipped in 5.15. Memex uses it via `MEMEX_EMBED_THREADS` so embedding doesn't
-  peg every core and the desktop UI stays responsive.
+  shipped in 5.15. Memex exposes it as the opt-in `MEMEX_EMBED_THREADS` env var,
+  so embedding can be capped instead of pegging every core on small machines.
 
 **Where it's going** — Memex starts as personal memory (one developer, one
 laptop). The natural next step is shared memory: team and organization corpora on
