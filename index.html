@@ -600,6 +600,7 @@
         letter-spacing: -0.02em;
         white-space: nowrap;
       }
+      .section-head h2 .ink-dim { color: var(--ink-dim); }
       .section-head .lede {
         margin: 0;
         font-family: var(--mono);
@@ -3576,6 +3577,9 @@
           top: 0; bottom: 0; left: 0; right: auto; width: 2px; height: auto;
           background: linear-gradient(180deg, var(--amber-dim), var(--amber) 42%, #dc382d 100%);
         }
+        /* Vertical line on mobile → draw top→bottom (override the desktop
+           horizontal clip so the reveal isn't a 2px-wide horizontal pop-in). */
+        .hz-ready #horizon .hz-line { clip-path: inset(0 0 100% 0); }
         .hz-stage { padding: 22px 0 22px 24px; border-top: none; justify-items: start; text-align: left; }
         .hz-stage::before { top: 0; left: -7px; margin-left: 0; }
         .hz-top { flex-direction: row; align-items: flex-start; gap: 16px; }
@@ -4636,16 +4640,15 @@
         document.documentElement.classList.add("hz-ready");
         const obs = new IntersectionObserver((entries) => {
           entries.forEach((e) => {
-            // Replay on every entry: arm the reveal once ~a quarter is visible,
-            // and reset only when fully out of view (off-screen, so the un-draw
-            // is never seen) — so re-entering the section plays the motion again.
-            if (e.isIntersecting && e.intersectionRatio >= 0.25) {
-              hz.classList.add("hz-in");
-            } else if (e.intersectionRatio === 0) {
-              hz.classList.remove("hz-in");
-            }
+            // Replay on every entry: arm the reveal when the section enters view,
+            // reset when it leaves (off-screen, so the un-draw is never seen).
+            // Keyed on isIntersecting (not a ratio threshold) + a bottom rootMargin
+            // so it fires reliably even when the section is taller than the
+            // viewport on mobile (a ratio threshold could never be reached there).
+            if (e.isIntersecting) hz.classList.add("hz-in");
+            else hz.classList.remove("hz-in");
           });
-        }, { threshold: [0, 0.25] });
+        }, { threshold: 0, rootMargin: "0px 0px -20% 0px" });
         obs.observe(hz);
       })();
 
@@ -4718,11 +4721,13 @@
             // e.g. scrolled into the footer). Activate the last section whose top
             // sits above the viewport's middle, so the footer keeps Lineage active
             // instead of snapping back to the first.
-            const mid = window.scrollY + window.innerHeight / 2;
+            // getBoundingClientRect().top is already viewport-relative, so the
+            // window.scrollY terms cancel — compare directly against the midline.
+            const mid = window.innerHeight / 2;
             activeId = orderedIds[0];
             for (const id of orderedIds) {
               const el = document.getElementById(id);
-              if (el && el.getBoundingClientRect().top + window.scrollY <= mid) activeId = id;
+              if (el && el.getBoundingClientRect().top <= mid) activeId = id;
             }
           }
           spineLinks.forEach((a, id) => {
