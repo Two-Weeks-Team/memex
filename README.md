@@ -388,7 +388,7 @@ extensions), and ColBERT v2 via `ort`. For bugs or design feedback,
 
 ## License
 
-[Apache 2.0](LICENSE) © 2026 Sangguen Chang.
+[Apache 2.0](LICENSE) © 2026 Two-Weeks-Team.
 
 Built on the work of [Qdrant](https://github.com/qdrant/qdrant),
 [Tauri](https://github.com/tauri-apps/tauri),

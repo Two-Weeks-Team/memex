@@ -3979,9 +3979,9 @@
         </div>
         <dl class="arch-detail-aside" data-arch-aside>
           <div class="arch-detail-row"><dt>Format</dt><dd>JSONL (one event per line)</dd></div>
-          <div class="arch-detail-row"><dt>Watcher</dt><dd><code>notify</code> + content-hash dedup</dd></div>
+          <div class="arch-detail-row"><dt>Watcher</dt><dd><code>~60 s poll</code> + content-hash dedup</dd></div>
           <div class="arch-detail-row"><dt>Privacy</dt><dd>secrets redacted before embed</dd></div>
-          <div class="arch-detail-row"><dt>Tests</dt><dd>27 unit · Cold Start Killer</dd></div>
+          <div class="arch-detail-row"><dt>Tests</dt><dd>31 unit · Cold Start Killer</dd></div>
         </dl>
       </div>
     </section>
@@ -4307,15 +4307,15 @@
           <h3>Native Tauri app.</h3>
           <p>
             macOS menu-bar resident. Watches <code>~/.claude/projects</code> and
-            <code>~/.codex/sessions</code>, indexes on save, and surfaces proactive recall as a quiet
-            notification. <code>.dmg</code> shipped on the
-            <a href="https://github.com/Two-Weeks-Team/memex/releases/latest" target="_blank" rel="noopener">v0.1.0 release</a>
-            for users who want to skip the build.
+            <code>~/.codex/sessions</code>, indexes new sessions, and surfaces proactive recall as a quiet
+            notification. Signed &amp; notarized <code>.dmg</code> on the
+            <a href="https://github.com/Two-Weeks-Team/memex/releases/latest" target="_blank" rel="noopener">latest release</a>,
+            or <code>brew install --cask two-weeks-team/tap/memex</code>.
           </p>
           <ul>
             <li>One Rust binary · no Electron</li>
             <li>OS notifications · Loop Breaker banner</li>
-            <li>Auto-indexes on file save (<code>notify</code> watcher)</li>
+            <li>Auto-indexes new sessions (~60 s poll · content-hash dedup)</li>
             <li>Apple Silicon native · macOS 11+</li>
           </ul>
         </div>
@@ -4351,7 +4351,7 @@
             <li>Bundles Qdrant 1.18.1 · v3 schema</li>
             <li><code>stdio</code> + <code>HTTP :8765/mcp</code> transports</li>
             <li>Prometheus <code>/metrics</code> · 8 metric families</li>
-            <li>283 lib + 5 integration tests green</li>
+            <li>294 unit + integration + E2E tests green</li>
           </ul>
         </div>
       </div>
@@ -4589,7 +4589,7 @@
         <div class="footer-col">
           <h4>Start</h4>
           <ul>
-            <li><a href="https://github.com/Two-Weeks-Team/memex#install" target="_blank" rel="noreferrer"><code>memex install all</code></a></li>
+            <li><a href="https://github.com/Two-Weeks-Team/memex#quick-start" target="_blank" rel="noreferrer"><code>memex install all</code></a></li>
             <li><a href="https://github.com/Two-Weeks-Team/memex" target="_blank" rel="noreferrer">README</a></li>
             <li><a href="#run">Run it locally</a></li>
             <li><a href="#horizon">Where it goes</a></li>
@@ -4608,13 +4608,13 @@
           <ul>
             <li><a href="https://github.com/Two-Weeks-Team/memex/blob/main/docs/benchmarks.md" target="_blank" rel="noreferrer">benchmarks.md</a></li>
             <li><a href="https://github.com/Two-Weeks-Team/memex/blob/main/docs/wired-but-dormant.md" target="_blank" rel="noreferrer">wired-but-dormant.md</a></li>
-            <li><a href="https://github.com/Two-Weeks-Team/memex/blob/main/CHANGELOG.md" target="_blank" rel="noreferrer">CHANGELOG</a></li>
+            <li><a href="https://github.com/Two-Weeks-Team/memex/releases" target="_blank" rel="noreferrer">releases</a></li>
           </ul>
         </div>
         <div class="footer-col">
           <h4>Source</h4>
           <ul>
-            <li><a href="https://github.com/Two-Weeks-Team/memex" target="_blank" rel="noreferrer">github · MIT</a></li>
+            <li><a href="https://github.com/Two-Weeks-Team/memex" target="_blank" rel="noreferrer">github · Apache-2.0</a></li>
             <li><a href="https://github.com/Two-Weeks-Team/memex/issues" target="_blank" rel="noreferrer">file an issue</a></li>
             <li><a href="https://qdrant.tech" target="_blank" rel="noreferrer">qdrant.tech</a></li>
           </ul>
@@ -4962,7 +4962,7 @@
           body: 'Memex never asks where your history is — it watches the standard locations. <strong>Claude Code</strong> writes one JSONL per session into <code>~/.claude/projects/&lt;cwd&gt;/&lt;uuid&gt;.jsonl</code>. <strong>Codex CLI</strong> writes one rollout per session into <code>~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl</code>. The files are append-only and re-readable, so the corpus is replay-friendly by construction.',
           aside: [
             ["Format", "JSONL (one event per line)"],
-            ["Watcher", "<code>notify</code> + content-hash dedup"],
+            ["Watcher", "<code>~60 s poll</code> + content-hash dedup"],
             ["Privacy", "secrets redacted before embed"],
             ["Tests", "31 unit · Cold Start Killer"]
           ]
@@ -5613,7 +5613,7 @@
           no: "05", name: "Proactive recall", primitive: "error-vector + has_errors",
           mock: true,
           title: "The banner that knows.",
-          body: 'A 12 s poller watches <code>~/.claude/projects</code> for fresh <code>tool_result.is_error</code>. When one matches a past session above 0.65 similarity, a notification slides in — no LLM, just a Qdrant <code>query()</code>.',
+          body: 'A ~60 s poller watches <code>~/.claude/projects</code> for fresh <code>tool_result.is_error</code>. When one matches a past session above 0.65 similarity, a notification slides in — no LLM, just a Qdrant <code>query()</code>.',
           mockMd:
             '<span class="amber">⚡  I&rsquo;ve seen this error before:</span>\n' +
             '   <span class="dim">project-redesign · 2026-05-15 · sim 0.93</span>\n' +
