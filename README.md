@@ -189,6 +189,16 @@ npm run tauri build           # builds Memex.app
 open src-tauri/target/release/bundle/macos/Memex.app
 ```
 
+**Any platform — headless Docker** (Qdrant + web UI/API + MCP in one image, no macOS needed):
+
+```bash
+docker build -t memex-allinone -f deploy/web/Dockerfile .
+docker run --rm -p 8765:8765 memex-allinone          # the sample corpus auto-indexes on boot
+claude mcp add --transport http memex-web http://localhost:8765/mcp
+```
+
+More on the server variant: [deploy/web/README.md](deploy/web/README.md).
+
 <details>
 <summary>Full step-by-step (Qdrant ports, Full Disk Access, build variants)</summary>
 
@@ -196,7 +206,8 @@ open src-tauri/target/release/bundle/macos/Memex.app
   `6333` (REST + dashboard). Health: `curl -fsS http://localhost:6333/readyz`.
   Stop with `bash scripts/start-qdrant.sh --stop` (data is preserved).
 - **Full Disk Access** — grant it to `Memex.app` in System Settings → Privacy &
-  Security so it can read `~/.claude/projects`. Nothing leaves your machine.
+  Security so it can read `~/.claude/projects` and `~/.codex/sessions`. Nothing
+  leaves your machine.
 - **First index** prints, e.g., `parsed 80 session(s), 17,752 total tool calls`
   then `indexed 79/80 session(s) into 'memex_sessions_v3'`. The status bar reads
   `Connected — 79 sessions indexed`.
