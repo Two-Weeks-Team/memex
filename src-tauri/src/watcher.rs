@@ -122,9 +122,11 @@ const LOOP_DEBOUNCE: Duration = Duration::from_secs(60 * 20);
 /// Override with `MEMEX_WARMUP_BATCH` (sessions per tick). Lower it on
 /// RAM/CPU-constrained machines (e.g. an 8 GB M1 MacBook Air) so each warm-up
 /// burst is shorter and the UI stays responsive — at the cost of a longer
-/// overall warm-up. fastembed gives no way to cap the ONNX intra-op thread
-/// count (it hardcodes `available_parallelism()`), so shrinking the per-tick
-/// batch is the only in-process lever that keeps the machine usable today.
+/// overall warm-up. This shrinks each warm-up *burst*; to also cap the ONNX
+/// intra-op thread count *within* a burst, set `MEMEX_EMBED_THREADS` (fastembed
+/// 5.15+, wired in `indexer::embed_intra_threads`). The two knobs compose:
+/// `MEMEX_WARMUP_BATCH` bounds sessions-per-tick, `MEMEX_EMBED_THREADS` bounds
+/// threads-per-embed.
 const MAX_INDEX_PER_TICK: usize = 30;
 
 /// Resolve the per-tick warm-up cap: `MEMEX_WARMUP_BATCH` if set to a positive
