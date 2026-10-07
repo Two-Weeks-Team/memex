@@ -6,6 +6,9 @@
 
 **Local memory for coding agents.**
 
+**Status: Actively maintained.** Latest release: [v0.1.2](https://github.com/Two-Weeks-Team/memex/releases/tag/v0.1.2).
+Roadmap: team-shared recall and enterprise SSO (planned).
+
 Your Claude Code and Codex sessions, searchable by similarity, replayable
 turn-by-turn, and mined for what past-you already figured out — powered by local
 Qdrant, with no chatbot and no LLM at runtime.
@@ -32,8 +35,10 @@ Qdrant, with no chatbot and no LLM at runtime.
 
 ---
 
-Built for [Qdrant Vector Space Day 2026](https://qdrant.tech) — *"Think Outside the Bot."*
-All code was authored during the hackathon build period (May 2026).
+Born at [Qdrant Vector Space Day 2026](https://qdrant.tech) — *"Think Outside the Bot."*
+The team earned awards at three hackathons in 2026, including one first-place
+finish and an award at a Google-hosted event. Memex continues to evolve beyond
+its original May 2026 submission.
 
 ## Why Memex
 
@@ -335,9 +340,10 @@ Design deep-dives are listed under [Documentation](#documentation).
 
 ## Status & roadmap
 
-A hackathon MVP built for Vector Space Day 2026. Verified end-to-end on the
-author's `~/.claude/projects` (**79 sessions indexed, 17,752 tool calls**), with
-every surface exercisable from both the CLI and the GUI.
+Actively maintained, with **v0.1.2** as the latest release and further fixes on
+`main`. The original end-to-end validation covered the author's
+`~/.claude/projects` (**79 sessions indexed, 17,752 tool calls**), with every
+surface exercisable from both the CLI and the GUI.
 
 **Think Outside the Bot — alignment**
 
@@ -348,7 +354,7 @@ every surface exercisable from both the CLI and the GUI.
   explicitly encouraged direction in the prompt.
 - Single-machine, zero-telemetry, zero-network after build.
 
-**What ships in this MVP**
+**Current capabilities**
 
 - Seven surfaces: Time Machine, Topology, Mix & Match, Proactive recall, Predict,
   Replay, Lens — plus Snapshot export/import.
@@ -363,15 +369,19 @@ every surface exercisable from both the CLI and the GUI.
 - Upstream contribution: the team added `with_intra_threads` (a configurable
   ONNX intra-op thread count) to
   [fastembed-rs](https://github.com/Anush008/fastembed-rs/pull/255) — merged and
-  shipped in 5.15. Memex exposes it as the opt-in `MEMEX_EMBED_THREADS` env var,
-  so embedding can be capped instead of pegging every core on small machines.
+  shipped in 5.15. Source builds now default to half the available cores,
+  capped at four threads (minimum one), leaving CPU headroom during indexing
+  and watcher warm-up. `MEMEX_EMBED_THREADS=N` overrides the cap;
+  `MEMEX_EMBED_THREADS=0` restores fastembed's all-core default. Invalid values
+  use the default cap. The released v0.1.2 predates this control; it will ship
+  in the next release.
 
 **Where it's going** — Memex starts as personal memory (one developer, one
-laptop). The natural next step is shared memory: team and organization corpora on
-[Qdrant Cloud](https://qdrant.tech), with the same surfaces over a multi-user
-index. Roadmap, not shipped.
+laptop). Next are **team-shared recall** over team and organization corpora on
+[Qdrant Cloud](https://qdrant.tech), and **enterprise SSO** for organization
+access. These are roadmap items, not shipped features.
 
-**Deferred to post-MVP**
+**Further roadmap**
 
 | Item | Why | Path forward |
 | --- | --- | --- |
@@ -381,9 +391,9 @@ index. Roadmap, not shipped.
 
 ## Contributing
 
-A personal hackathon project, but PRs that don't break the demo are welcome —
-especially Linux/Windows packaging, more session formats (Codex/Cursor parser
-extensions), and ColBERT v2 via `ort`. For bugs or design feedback,
+Focused fixes, regression tests, and documentation improvements are welcome.
+Other contribution areas include Linux/Windows packaging, more session formats
+(Codex/Cursor parser extensions), and ColBERT v2 via `ort`. For bugs or design feedback,
 [open an issue](https://github.com/Two-Weeks-Team/memex/issues/new).
 
 ## License
