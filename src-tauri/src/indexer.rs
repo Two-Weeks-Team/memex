@@ -93,20 +93,26 @@ pub struct Embedder {
     inner: Mutex<TextEmbedding>,
 }
 
-/// Optional cap on ONNX Runtime intra-op threads for embedding inference.
+/// Cap ONNX Runtime intra-op threads to leave room for interactive work.
 ///
 /// fastembed defaults to `available_parallelism()` (every core), which pegs CPU
 /// during indexing / watcher warm-up on small machines (e.g. an 8 GB M1 Air).
-/// Setting `MEMEX_EMBED_THREADS=N` (N >= 1) caps it via fastembed 5.15's
-/// `with_intra_threads`. Unset → unchanged (fastembed's all-core default), so
-/// this adds a small knob without throttling anyone by default. Affects
-/// parallelism only — embedding output is bit-identical, so toggling it needs
-/// no re-index.
+/// Use half the available cores, capped at four threads (at least one).
+/// `EmbedPool` shares this model's Mutex, so queued jobs do not multiply the
+/// intra-op thread count. `MEMEX_EMBED_THREADS=N` overrides the cap; zero keeps
+/// fastembed's all-core default. Invalid values use the conservative default.
+/// This changes parallelism, not the model or index schema; no re-index needed.
 fn embed_intra_threads() -> Option<usize> {
-    std::env::var("MEMEX_EMBED_THREADS")
-        .ok()
-        .and_then(|v| v.trim().parse::<usize>().ok())
-        .filter(|&n| n >= 1)
+    let cores = std::thread::available_parallelism().map_or(1, usize::from);
+    resolve_embed_intra_threads(std::env::var("MEMEX_EMBED_THREADS").ok().as_deref(), cores)
+}
+
+fn resolve_embed_intra_threads(value: Option<&str>, cores: usize) -> Option<usize> {
+    match value.and_then(|v| v.trim().parse::<usize>().ok()) {
+        Some(0) => None,
+        Some(n) => Some(n),
+        None => Some((cores / 2).clamp(1, 4)),
+    }
 }
 
 impl Embedder {
@@ -117,8 +123,6 @@ impl Embedder {
         let mut opts = InitOptions::new(EmbeddingModel::BGESmallENV15)
             .with_show_download_progress(true)
             .with_cache_dir(cache_dir.clone());
-        // Opt-in only: leave fastembed's default (all cores) untouched unless the
-        // operator explicitly caps it via `MEMEX_EMBED_THREADS`.
         if let Some(n) = embed_intra_threads() {
             opts = opts.with_intra_threads(n);
         }
@@ -2060,6 +2064,31 @@ pub async fn snapshot_import(src: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn embed_threads_default_leaves_cpu_headroom() {
+        for (cores, expected) in [(1, 1), (2, 1), (3, 1), (4, 2), (6, 3), (8, 4), (16, 4)] {
+            assert_eq!(resolve_embed_intra_threads(None, cores), Some(expected));
+        }
+    }
+
+    #[test]
+    fn embed_threads_explicit_override_takes_precedence() {
+        for cores in [1, 2, 8, 16] {
+            for (value, expected) in [("1", 1), ("2", 2), (" 8 ", 8), ("32", 32)] {
+                assert_eq!(resolve_embed_intra_threads(Some(value), cores), Some(expected));
+            }
+            assert_eq!(resolve_embed_intra_threads(Some("0"), cores), None);
+            assert_eq!(resolve_embed_intra_threads(Some(" 0 "), cores), None);
+        }
+    }
+
+    #[test]
+    fn embed_threads_invalid_override_uses_default() {
+        for value in ["", " ", "-1", "1.5", "all", "999999999999999999999999999999"] {
+            assert_eq!(resolve_embed_intra_threads(Some(value), 4), Some(2));
+        }
+    }
 
     #[test]
     fn validate_qdrant_url_allows_loopback() {
